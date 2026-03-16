@@ -29,6 +29,8 @@ from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
 import xgboost as xgb
 from scipy import stats as scipy_stats
+import base64
+import io
 
 # ── Sunucu tarafı veri deposu ─────────────────────────────────────────────────
 _SERVER_STORE: dict[str, pd.DataFrame] = {}
@@ -800,7 +802,6 @@ def show_csv_filename(filename):
     prevent_initial_call=True,
 )
 def load_csv(n_clicks, contents, filename, sep):
-    import base64, io
     if not contents or not filename:
         return dash.no_update, dbc.Alert(
             "Önce bir CSV dosyası seçin.", color="warning",
@@ -1466,6 +1467,18 @@ _PLOT_LAYOUT = dict(
 )
 
 _AXIS_STYLE = dict(gridcolor="#232d3f", linecolor="#232d3f", zerolinecolor="#232d3f")
+
+# ── DataTable ortak stil sabiti ────────────────────────────────────────────────
+_TABLE_STYLE = dict(
+    style_table={"overflowX": "auto"},
+    style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
+                  "fontWeight": "700", "fontSize": "0.72rem",
+                  "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
+    style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
+                "fontSize": "0.82rem", "border": "1px solid #232d3f"},
+    style_cell={"padding": "0.4rem 0.65rem"},
+    style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
+)
 
 
 # ── Callback: Target & IV Sekmesi ─────────────────────────────────────────────
@@ -2711,17 +2724,6 @@ def populate_stat_dropdowns(config, key):
 
 # ── Render: Chi-Square ───────────────────────────────────────────────────────
 def _render_chi_square(df_active: pd.DataFrame, var1: str, var2: str, max_cats: int) -> html.Div:
-    _TABLE_STYLE = dict(
-        style_table={"overflowX": "auto"},
-        style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
-                      "fontWeight": "700", "fontSize": "0.72rem",
-                      "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
-        style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
-                    "fontSize": "0.82rem", "border": "1px solid #232d3f"},
-        style_cell={"padding": "0.4rem 0.65rem"},
-        style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
-    )
-
     def _cap_categories(series: pd.Series, n: int) -> pd.Series:
         top = series.value_counts().nlargest(n).index
         return series.where(series.isin(top), other="Diğer")
@@ -2889,17 +2891,6 @@ def _render_anova(df_active: pd.DataFrame, var_col: str, target: str) -> html.Di
             html.Div(f"{len(col_data):,}", className="metric-value"),
         ], className="metric-card"), width=4),
     ], className="mb-3")
-
-    _TABLE_STYLE = dict(
-        style_table={"overflowX": "auto"},
-        style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
-                      "fontWeight": "700", "fontSize": "0.72rem",
-                      "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
-        style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
-                    "fontSize": "0.82rem", "border": "1px solid #232d3f"},
-        style_cell={"padding": "0.4rem 0.65rem"},
-        style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
-    )
 
     # Box plot — örnekle (görselleştirme için 50k yeterli)
     VIZ_MAX = 50_000
