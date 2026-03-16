@@ -30,6 +30,7 @@ PACKAGES = [
     ("xgboost",                 "xgboost>=2.0"),
     ("pyodbc",                  "pyodbc"),
     ("ydata_profiling",         "ydata-profiling"),
+    ("shap",                    "shap"),
 ]
 
 # ── Prefix dosyasını oku ──────────────────────────────────────────────────────

@@ -41,9 +41,33 @@ import xgboost as xgb
 from scipy import stats as scipy_stats
 import base64
 import io
+import shap
+import matplotlib
+matplotlib.use("Agg")          # GUI olmayan backend — Dash ile çakışmaz
+import matplotlib.pyplot as plt
 
 # ── Sunucu tarafı veri deposu ─────────────────────────────────────────────────
 _SERVER_STORE: dict[str, pd.DataFrame] = {}
+
+# ── Tab açıklama kutusu yardımcısı ────────────────────────────────────────────
+def _tab_info(title: str, subtitle: str, body: str, color: str = "#4F8EF7") -> html.Div:
+    """Her tab'ın üstünde gösterilen açıklama kartı."""
+    return html.Div([
+        html.Div([
+            html.Span(title, style={"color": "#E8EAF0", "fontWeight": "700",
+                                    "fontSize": "0.82rem"}),
+            html.Span(f"  ·  {subtitle}",
+                      style={"color": "#7e8fa4", "fontSize": "0.78rem"}),
+        ], style={"marginBottom": "0.3rem"}),
+        html.Div(body, style={"color": "#7e8fa4", "fontSize": "0.76rem",
+                               "lineHeight": "1.55"}),
+    ], style={
+        "backgroundColor": "#111827",
+        "borderLeft": f"3px solid {color}",
+        "borderRadius": "4px",
+        "padding": "0.6rem 1rem",
+        "marginBottom": "1.1rem",
+    })
 
 # ── WoE Dataset Builder ───────────────────────────────────────────────────────
 def _build_woe_dataset(df: pd.DataFrame, target: str, cols: list) -> tuple:
@@ -271,8 +295,14 @@ def build_main():
             dbc.Tab(dcc.Loading(html.Div(id="data-preview"),   type="dot", color="#4F8EF7", delay_show=200), label="Önizleme",  tab_id="tab-preview",   className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-profiling"), type="dot", color="#4F8EF7", delay_show=200), label="Profiling", tab_id="tab-profiling", className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-target-iv"),  type="dot", color="#4F8EF7", delay_show=300), label="Target & IV",  tab_id="tab-target-iv",  className="tab-content-area"),
+            dbc.Tab(dcc.Loading(html.Div(id="tab-outlier"),   type="dot", color="#4F8EF7", delay_show=300), label="Outlier Analizi", tab_id="tab-outlier",   className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-deep-dive"), type="dot", color="#4F8EF7", delay_show=300), label="Değişken Analizi", tab_id="tab-deep-dive", className="tab-content-area"),
             dbc.Tab(html.Div([
+                _tab_info("İstatistiksel Testler", "Korelasyon · Chi-Square · ANOVA · KS · VIF",
+                          "Beş farklı istatistiksel test arasından seçim yapın. Her test için "
+                          "amaç, yöntem ve çıktı yorumu test seçimi altında açıklanır. "
+                          "Segmentasyon aktifse tüm testler yalnızca aktif segment üzerinde çalışır.",
+                          "#a78bfa"),
                 # ── Test Seçici ─────────────────────────────────────────────
                 dbc.Row([
                     dbc.Col([
@@ -531,8 +561,12 @@ def build_main():
 
             ]), label="İstatistiksel Testler", tab_id="tab-correlation", className="tab-content-area"),
             dbc.Tab(html.Div([
-                html.Div("Tüm değişkenler için IV, Eksik%, PSI, Korelasyon ve VIF bilgilerini tek tabloda gösterir.",
-                         className="form-hint", style={"marginBottom": "0.75rem"}),
+                _tab_info("Değişken Özeti", "IV · Eksik% · PSI · Korelasyon · VIF",
+                          "Tüm değişkenleri tek tabloda karşılaştırır. IV ayırıcı gücü, "
+                          "eksik oranı, PSI dağılım stabilitesi, max korelasyon ve VIF çoklu "
+                          "doğrusallık bilgilerini yan yana görerek değişken eleme kararlarını "
+                          "tek bakışta verebilirsiniz.",
+                          "#10b981"),
                 dbc.Row([
                     dbc.Col(
                         dbc.Checklist(
@@ -553,6 +587,12 @@ def build_main():
                 dcc.Loading(html.Div(id="div-var-summary"), type="dot", color="#4F8EF7", delay_show=300),
             ]), label="Değişken Özeti", tab_id="tab-var-summary", className="tab-content-area"),
             dbc.Tab(html.Div([
+                _tab_info("Playground", "Grafik Oluşturucu · Hızlı Model · SHAP",
+                          "İki bölümden oluşur: Grafik Oluşturucu ile serbest keşif yapabilir, "
+                          "Hızlı Model ile LR / LightGBM / XGBoost / Random Forest modellerini "
+                          "hızlıca eğitip AUC, Gini, KS metriklerini ve SHAP beeswarm grafiğini "
+                          "görebilirsiniz. WoE encode ve ham encode sonuçlar yan yana karşılaştırılır.",
+                          "#f59e0b"),
                 # ── Grafik Oluşturucu ─────────────────────────────────────────
                 html.P("Grafik Oluşturucu", className="section-title"),
                 dbc.Row([
@@ -642,15 +682,28 @@ def build_main():
                 dbc.Row([
                     # Sol — kaynak liste
                     dbc.Col([
-                        dbc.Label("Mevcut Değişkenler", className="form-label"),
-                        html.Div("Seç → ile model listesine taşı.",
-                                 className="form-hint"),
+                        html.Div([
+                            dbc.Label("Mevcut Değişkenler", className="form-label",
+                                      style={"marginBottom": "0"}),
+                            html.Span(id="pg-source-count",
+                                      className="form-hint",
+                                      style={"marginLeft": "0.5rem"}),
+                        ], style={"display": "flex", "alignItems": "baseline",
+                                  "marginBottom": "0.2rem"}),
+                        dbc.Input(
+                            id="pg-source-search",
+                            placeholder="Filtrele…",
+                            debounce=False, size="sm",
+                            style={"backgroundColor": "#0e1117", "color": "#c8cdd8",
+                                   "border": "1px solid #2d3a4f", "borderRadius": "4px",
+                                   "marginBottom": "0.35rem", "fontSize": "0.78rem"},
+                        ),
                         html.Div(id="pg-source-container",
-                                 style={"maxHeight": "280px", "overflowY": "auto",
+                                 style={"maxHeight": "260px", "overflowY": "auto",
                                         "backgroundColor": "#0e1117",
                                         "border": "1px solid #2d3a4f",
                                         "borderRadius": "6px",
-                                        "padding": "0.5rem 0.75rem",
+                                        "padding": "0.4rem 0.6rem",
                                         "minHeight": "60px"}),
                     ], width=5),
                     # Orta — ok butonları
@@ -665,20 +718,26 @@ def build_main():
                                        color="secondary", size="sm",
                                        outline=True,
                                        style={"width": "40px"}),
-                        ], style={"textAlign": "center", "paddingTop": "2.5rem"}),
+                        ], style={"textAlign": "center", "paddingTop": "2rem"}),
                     ], width=1,
                        className="d-flex align-items-center justify-content-center"),
                     # Sağ — model listesi
                     dbc.Col([
-                        dbc.Label("Model Listesi", className="form-label"),
-                        html.Div("Model kurulacak değişkenler.",
-                                 className="form-hint"),
+                        html.Div([
+                            dbc.Label("Model Listesi", className="form-label",
+                                      style={"marginBottom": "0"}),
+                            html.Span(id="pg-model-count",
+                                      className="form-hint",
+                                      style={"marginLeft": "0.5rem"}),
+                        ], style={"display": "flex", "alignItems": "baseline",
+                                  "marginBottom": "0.2rem"}),
+                        html.Div(style={"height": "2rem"}),  # arama kutusu yüksekliği kadar boşluk
                         html.Div(id="pg-model-container",
-                                 style={"maxHeight": "280px", "overflowY": "auto",
+                                 style={"maxHeight": "260px", "overflowY": "auto",
                                         "backgroundColor": "#0e1117",
                                         "border": "1px solid #2d3a4f",
                                         "borderRadius": "6px",
-                                        "padding": "0.5rem 0.75rem",
+                                        "padding": "0.4rem 0.6rem",
                                         "minHeight": "60px"}),
                     ], width=5),
                 ], className="mb-3"),
@@ -720,7 +779,7 @@ def build_main():
                     ], width=3),
                 ], className="mb-2"),
 
-                # Model parametreleri — satır 2: model tipi + LR-C + kur
+                # Model parametreleri — satır 2: model tipi + LR-C + eşik + kur
                 dbc.Row([
                     dbc.Col([
                         dbc.Label("Model", className="form-label"),
@@ -741,6 +800,26 @@ def build_main():
                         dbc.Input(id="pg-c-value", type="number",
                                   value=1.0, min=0.001, step=0.1,
                                   style={"maxWidth": "110px"}),
+                    ], width=2),
+                    dbc.Col([
+                        dbc.Label("Karar Eşiği", className="form-label"),
+                        html.Div("Sınıflandırma kesim noktası", className="form-hint"),
+                        dbc.Select(id="pg-threshold-method", className="dark-select",
+                                   options=[
+                                       {"label": "Sabit  (0.50)",  "value": "fixed"},
+                                       {"label": "F1 Maks.",       "value": "f1"},
+                                       {"label": "KS Noktası",     "value": "ks"},
+                                       {"label": "Özel",           "value": "custom"},
+                                   ],
+                                   value="fixed",
+                                   style={"maxWidth": "180px"}),
+                    ], width=3),
+                    dbc.Col([
+                        dbc.Label("Özel Eşik", className="form-label"),
+                        html.Div("'Özel' seçiliyse geçerlidir", className="form-hint"),
+                        dbc.Input(id="pg-threshold-val", type="number",
+                                  value=0.50, min=0.01, max=0.99, step=0.01,
+                                  style={"maxWidth": "100px"}),
                     ], width=2),
                     dbc.Col([
                         html.Div("\u00a0", className="form-label"),
@@ -1165,6 +1244,11 @@ def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
 
     preview_tsv = preview.to_csv(sep="\t", index=False)
     return html.Div([
+        _tab_info("Önizleme", "Ham Veri & Uzman Eleme",
+                  "Yüklenen verinin ilk satırlarını gösterir. Uzman bilgisiyle belirli değişkenleri "
+                  "analiz kapsamından çıkarabilirsiniz; bu seçim tüm sekmelere yansır ve orijinal "
+                  "veriyi değiştirmez.",
+                  "#4F8EF7"),
         html.P("Veri Önizleme", className="section-title"),
         html.Div(
             dcc.Clipboard(target_id="preview-tsv", title="Kopyala",
@@ -1321,6 +1405,11 @@ def update_profiling(config, seg_val, key, seg_col_input):
     ])
 
     return html.Div([
+        _tab_info("Profiling", "Kolon Kalite Analizi",
+                  "Her değişken için eksik oran, kardinalite, veri tipi ve ön eleme sonucunu gösterir. "
+                  "Kırmızı satırlar eksik > %50, sarı eksik %5–50, yeşil tam dolu. Eksik veya sabit "
+                  "değişkenler otomatik olarak ön elemeden geçer.",
+                  "#a78bfa"),
         html.P("Veri Profiling", className="section-title"),
         summary_row,
         profile_table,
@@ -1660,6 +1749,11 @@ def update_target_iv(config, seg_val, key, seg_col_input):
     ])
 
     return html.Div([
+        _tab_info("Target & IV", "Bad Rate · Zaman Trendi · Information Value",
+                  "Target değişkeninin genel dağılımını, zaman içindeki seyrini ve her değişkenin "
+                  "IV (Information Value) sıralamasını gösterir. IV < 0.02 anlamsız, 0.02–0.10 zayıf, "
+                  "0.10–0.30 orta, > 0.30 güçlü ayırıcı güç.",
+                  "#10b981"),
         html.P("Target Dağılımı", className="section-title"),
         stats_row,
         time_chart,
@@ -1681,6 +1775,338 @@ def update_target_iv(config, seg_val, key, seg_col_input):
             html.Span("0.30–0.50 Güçlü  · ", style={"color": "#10b981", "fontSize": "0.73rem"}),
             html.Span("> 0.50 Şüpheli", style={"color": "#ef4444", "fontSize": "0.73rem"}),
         ], style={"marginTop": "0.75rem"}),
+    ])
+
+
+# ── Callback: Outlier Analizi Sekmesi — Layout ────────────────────────────────
+@app.callback(
+    Output("tab-outlier", "children"),
+    Input("store-config", "data"),
+    State("store-key", "data"),
+)
+def render_outlier_tab(config, key):
+    df = _get_df(key)
+    if df is None or not config or not config.get("target_col"):
+        return html.Div("Önce veri yükleyin ve yapılandırın.", className="alert-info-custom")
+
+    cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
+                             config.get("segment_col")] if c}
+    num_cols = [c for c in df.select_dtypes(include="number").columns if c not in cfg_cols]
+    if not num_cols:
+        return html.Div("Sayısal değişken bulunamadı.", className="alert-info-custom")
+
+    col_opts = [{"label": c, "value": c} for c in num_cols]
+
+    layout = html.Div([
+        _tab_info("Outlier Analizi", "IQR · Z-Score",
+                  "Sayısal değişkenlerde aykırı değerleri IQR veya Z-score yöntemiyle tespit eder. "
+                  "IQR 1.5× tipik sınır, 3.0× yalnızca aşırı aykırı değerler içindir. "
+                  "Z-score > 3σ standart tercih. Hangi müşterinin kaç farklı değişkende aykırı "
+                  "çıktığını 'Müşteri Bazında Outlier Detayı' tablosundan görebilirsiniz.",
+                  "#f59e0b"),
+        # ── Kontroller — Satır 1 ──────────────────────────────────────────────
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Müşteri No Kolonu", className="form-label"),
+                html.Div("Zorunlu — müşteri bazında analiz", className="form-hint"),
+                dbc.Select(id="out-id-col", className="dark-select",
+                           options=[{"label": c, "value": c} for c in df.columns],
+                           value=df.columns[0]),
+            ], width=4),
+            dbc.Col([
+                dbc.Label("Yöntem", className="form-label"),
+                html.Div("\u00a0", className="form-hint"),
+                dbc.Select(id="out-method", className="dark-select",
+                           options=[
+                               {"label": "IQR (Çeyrekler Açıklığı)", "value": "iqr"},
+                               {"label": "Z-Score (Standart Sapma)", "value": "zscore"},
+                           ], value="iqr"),
+            ], width=3),
+            dbc.Col([
+                dbc.Label("IQR Çarpanı", className="form-label"),
+                html.Div("\u00a0", className="form-hint"),
+                dbc.Select(id="out-iqr-k", className="dark-select",
+                           options=[
+                               {"label": "1.5  (normal)",  "value": "1.5"},
+                               {"label": "3.0  (aşırı)",   "value": "3.0"},
+                           ], value="1.5"),
+            ], width=2, id="out-iqr-col"),
+            dbc.Col([
+                dbc.Label("Z-Score Eşiği", className="form-label"),
+                html.Div("\u00a0", className="form-hint"),
+                dbc.Select(id="out-z-k", className="dark-select",
+                           options=[
+                               {"label": "2.0  (±2σ)", "value": "2.0"},
+                               {"label": "2.5  (±2.5σ)", "value": "2.5"},
+                               {"label": "3.0  (±3σ)", "value": "3.0"},
+                           ], value="3.0"),
+            ], width=2, id="out-z-col", style={"display": "none"}),
+        ], className="mb-2"),
+        # ── Kontroller — Satır 2 ──────────────────────────────────────────────
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Görselleştir", className="form-label"),
+                dbc.Select(id="out-var-sel", className="dark-select",
+                           options=col_opts, value=num_cols[0]),
+            ], width=4),
+            dbc.Col(
+                dbc.Button("Tara", id="btn-outlier-run", color="primary", size="sm",
+                           style={"width": "80px"}),
+                width=2,
+                className="d-flex align-items-center",
+                style={"paddingTop": "1.55rem"},
+            ),
+        ], className="mb-3"),
+
+        # ── Çıktı alanı ───────────────────────────────────────────────────────
+        html.Div(id="outlier-output"),
+    ])
+    return layout
+
+
+@app.callback(
+    Output("out-iqr-col", "style"),
+    Output("out-z-col",   "style"),
+    Input("out-method",   "value"),
+)
+def toggle_outlier_params(method):
+    show, hide = {}, {"display": "none"}
+    return (show, hide) if method == "iqr" else (hide, show)
+
+
+@app.callback(
+    Output("outlier-output", "children"),
+    Input("btn-outlier-run", "n_clicks"),
+    State("out-id-col",   "value"),
+    State("out-method",   "value"),
+    State("out-iqr-k",    "value"),
+    State("out-z-k",      "value"),
+    State("out-var-sel",  "value"),
+    State("store-key",    "data"),
+    State("store-config", "data"),
+    State("dd-segment-val", "value"),
+    State("dd-segment-col", "value"),
+    prevent_initial_call=True,
+)
+def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
+                         key, config, seg_val, seg_col_input):
+    df_orig = _get_df(key)
+    if df_orig is None or not config:
+        return html.Div("Veri yok.", className="alert-info-custom")
+
+    seg_col = config.get("segment_col") or (seg_col_input or None)
+    df = apply_segment_filter(df_orig, seg_col, seg_val).copy()
+
+    cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
+                             config.get("segment_col")] if c}
+    num_cols = [c for c in df.select_dtypes(include="number").columns if c not in cfg_cols]
+
+    k = float(iqr_k if method == "iqr" else z_k)
+
+    # ── Her değişken için outlier maskesi hesapla ──────────────────────────────
+    def _outlier_mask(series):
+        s = series.dropna()
+        if method == "iqr":
+            q1, q3 = s.quantile(0.25), s.quantile(0.75)
+            iqr = q3 - q1
+            lo, hi = q1 - k * iqr, q3 + k * iqr
+        else:
+            mu, sigma = s.mean(), s.std()
+            lo, hi = mu - k * sigma, mu + k * sigma
+        mask = (series < lo) | (series > hi)
+        return mask, lo, hi
+
+    summary_rows = []
+    # outlier_flags: her satır için kaç değişkende outlier olduğu
+    outlier_count = pd.Series(0, index=df.index)
+
+    for col in num_cols:
+        mask, lo, hi = _outlier_mask(df[col])
+        n_out = int(mask.sum())
+        n_tot = int(df[col].notna().sum())
+        pct   = round(n_out / n_tot * 100, 2) if n_tot > 0 else 0.0
+        summary_rows.append({
+            "Değişken":    col,
+            "N Outlier":   n_out,
+            "% Outlier":   pct,
+            "Alt Sınır":   round(lo, 4),
+            "Üst Sınır":   round(hi, 4),
+            "Min":         round(float(df[col].min()), 4),
+            "Max":         round(float(df[col].max()), 4),
+        })
+        outlier_count += mask.fillna(False).astype(int)
+
+    summary_df = pd.DataFrame(summary_rows).sort_values("% Outlier", ascending=False)
+
+    # ── Müşteri outlier sayısı tablosu ────────────────────────────────────────
+    if not id_col or id_col not in df.columns:
+        id_col = df.columns[0]
+
+    cust_df = pd.DataFrame({
+        id_col:                    df[id_col].values,
+        "Outlier Değişken Sayısı": outlier_count.values,
+    })
+    tgt = config.get("target_col")
+    if tgt and tgt in df.columns:
+        cust_df["Target"] = df[tgt].values
+    cust_df = (cust_df[cust_df["Outlier Değişken Sayısı"] > 0]
+               .sort_values("Outlier Değişken Sayısı", ascending=False)
+               .drop_duplicates(subset=[id_col]))
+
+    # Dağılım: kaç müşteri kaç değişkende outlier
+    _vc = outlier_count.value_counts().reset_index()
+    _vc.columns = ["Outlier Değişken Sayısı", "Müşteri Sayısı"]
+    dist_df = _vc[_vc["Outlier Değişken Sayısı"] > 0].sort_values("Outlier Değişken Sayısı")
+
+    # ── Özet tablo renk koşulları ──────────────────────────────────────────────
+    pct_hi = float(summary_df["% Outlier"].quantile(0.75)) if len(summary_df) else 5.0
+    pct_mi = float(summary_df["% Outlier"].quantile(0.5))  if len(summary_df) else 2.0
+    sum_cond = [
+        {"if": {"filter_query": f"{{% Outlier}} >= {pct_hi:.2f}", "column_id": "% Outlier"},
+         "color": "#ef4444", "fontWeight": "700"},
+        {"if": {"filter_query": f"{{% Outlier}} >= {pct_mi:.2f} && {{% Outlier}} < {pct_hi:.2f}",
+                "column_id": "% Outlier"},
+         "color": "#f59e0b"},
+        {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+    ]
+    cust_cond = [
+        {"if": {"filter_query": "{Outlier Değişken Sayısı} >= 5", "column_id": "Outlier Değişken Sayısı"},
+         "color": "#ef4444", "fontWeight": "700"},
+        {"if": {"filter_query": "{Outlier Değişken Sayısı} >= 2 && {Outlier Değişken Sayısı} < 5",
+                "column_id": "Outlier Değişken Sayısı"},
+         "color": "#f59e0b"},
+        {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+    ]
+
+    method_lbl = f"IQR × {k}" if method == "iqr" else f"Z-score > {k}"
+    n_any = int((outlier_count > 0).sum())
+    pct_any = round(n_any / len(df) * 100, 1) if len(df) else 0
+
+    # ── Seçili değişken grafikleri ─────────────────────────────────────────────
+    charts = html.Div()
+    if vis_var and vis_var in df.columns:
+        mask_v, lo_v, hi_v = _outlier_mask(df[vis_var])
+        s = df[vis_var].dropna()
+
+        # Box plot
+        fig_box = go.Figure()
+        fig_box.add_trace(go.Box(
+            y=df[vis_var], name=vis_var,
+            marker=dict(color="#4F8EF7", outliercolor="#ef4444",
+                        line=dict(outliercolor="#ef4444", outlierwidth=2)),
+            line=dict(color="#4F8EF7"),
+            fillcolor="rgba(79,142,247,0.15)",
+            boxmean=True,
+        ))
+        fig_box.add_hline(y=lo_v, line=dict(color="#f59e0b", dash="dash", width=1))
+        fig_box.add_hline(y=hi_v, line=dict(color="#f59e0b", dash="dash", width=1))
+        fig_box.update_layout(
+            **_PLOT_LAYOUT,
+            title=dict(text=f"{vis_var} — Box Plot  ({method_lbl})",
+                       font=dict(color="#E8EAF0", size=13)),
+            yaxis=dict(**_AXIS_STYLE),
+            height=340, showlegend=False,
+        )
+
+        # Histogram — outlier bölgeler shaded
+        fig_hist = go.Figure()
+        bins_arr = np.histogram_bin_edges(s, bins="auto")
+        fig_hist.add_trace(go.Histogram(
+            x=df[vis_var], nbinsx=min(60, len(bins_arr)),
+            marker=dict(color="#4F8EF7", opacity=0.7),
+            name="Dağılım",
+        ))
+        # Outlier bölgesi — sol ve sağ shaded rect
+        y_max_est = len(df) * 0.25  # yaklaşık üst sınır (layout sonra otomatik ayarlar)
+        for x0, x1, label in [
+            (float(s.min()), lo_v, f"< {lo_v:.3g}"),
+            (hi_v, float(s.max()), f"> {hi_v:.3g}"),
+        ]:
+            if x0 < x1:
+                fig_hist.add_vrect(
+                    x0=x0, x1=x1,
+                    fillcolor="rgba(239,68,68,0.12)",
+                    line=dict(color="#ef4444", width=1, dash="dot"),
+                    annotation_text=label,
+                    annotation_position="top left",
+                    annotation=dict(font=dict(color="#ef4444", size=9)),
+                )
+        fig_hist.add_vline(x=lo_v, line=dict(color="#f59e0b", dash="dash", width=1))
+        fig_hist.add_vline(x=hi_v, line=dict(color="#f59e0b", dash="dash", width=1))
+        fig_hist.update_layout(
+            **_PLOT_LAYOUT,
+            title=dict(text=f"{vis_var} — Dağılım  ·  Outlier: {int(mask_v.sum())} ({round(mask_v.mean()*100,1)}%)",
+                       font=dict(color="#E8EAF0", size=13)),
+            xaxis=dict(**_AXIS_STYLE),
+            yaxis=dict(**_AXIS_STYLE),
+            height=340, showlegend=False,
+            bargap=0.05,
+        )
+
+        charts = dbc.Row([
+            dbc.Col(dcc.Graph(figure=fig_box,  config={"displayModeBar": False}), width=5),
+            dbc.Col(dcc.Graph(figure=fig_hist, config={"displayModeBar": False}), width=7),
+        ], className="mb-3")
+
+    return html.Div([
+        # Özet banner
+        html.Div([
+            html.Span(f"Yöntem: {method_lbl}", style={"color": "#a8b2c2", "fontSize": "0.78rem"}),
+            html.Span("  ·  ", style={"color": "#4a5568"}),
+            html.Span(f"Taranan değişken: {len(num_cols)}",
+                      style={"color": "#a8b2c2", "fontSize": "0.78rem"}),
+            html.Span("  ·  ", style={"color": "#4a5568"}),
+            html.Span(f"En az 1 outlier olan satır: {n_any:,} ({pct_any}%)",
+                      style={"color": "#f59e0b", "fontSize": "0.78rem", "fontWeight": "600"}),
+        ], className="mb-3"),
+
+        # Grafikler
+        charts,
+
+        # Değişken özet tablosu
+        dbc.Row([
+            dbc.Col([
+                html.P("Değişken Bazında Outlier Özeti", className="section-title"),
+                dash_table.DataTable(
+                    data=summary_df.to_dict("records"),
+                    columns=[{"name": c, "id": c} for c in summary_df.columns],
+                    sort_action="native", page_size=15,
+                    style_data_conditional=sum_cond,
+                    style_filter={"backgroundColor": "#0e1117", "color": "#c8cdd8",
+                                  "border": "1px solid #2d3a4f", "fontSize": "0.78rem"},
+                    **{k2: v2 for k2, v2 in _TABLE_STYLE.items()
+                       if k2 != "style_data_conditional"},
+                ),
+            ], width=8),
+            dbc.Col([
+                html.P("Outlier Dağılımı (Kaç Değişkende?)", className="section-title"),
+                dash_table.DataTable(
+                    data=dist_df.to_dict("records"),
+                    columns=[{"name": c, "id": c} for c in dist_df.columns],
+                    sort_action="native",
+                    style_data_conditional=[
+                        {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+                    ],
+                    **{k2: v2 for k2, v2 in _TABLE_STYLE.items()
+                       if k2 != "style_data_conditional"},
+                ),
+            ], width=4),
+        ], className="mb-3"),
+
+        # Müşteri detay tablosu
+        html.P(f"Müşteri Bazında Outlier Detayı  ·  {id_col}", className="section-title"),
+        html.Div(f"{len(cust_df):,} müşteri en az 1 değişkende outlier.",
+                 className="form-hint", style={"marginBottom": "0.4rem"}),
+        dash_table.DataTable(
+            data=cust_df.head(1000).to_dict("records"),
+            columns=[{"name": c, "id": c} for c in cust_df.columns],
+            sort_action="native", page_size=20, filter_action="native",
+            style_data_conditional=cust_cond,
+            style_filter={"backgroundColor": "#0e1117", "color": "#c8cdd8",
+                          "border": "1px solid #2d3a4f", "fontSize": "0.78rem"},
+            **{k2: v2 for k2, v2 in _TABLE_STYLE.items()
+               if k2 != "style_data_conditional"},
+        ),
     ])
 
 
@@ -1732,6 +2158,11 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
         ], width=3)
 
     return html.Div([
+        _tab_info("Değişken Analizi", "WoE · PSI · Bivariate Deep Dive",
+                  "Seçilen değişken için Weight of Evidence (WoE) eğrisi, bin bazında bad rate, "
+                  "PSI (Population Stability Index) ve hedefle ilişkiyi derinlemesine inceler. "
+                  "PSI < 0.10 stabil, 0.10–0.25 dikkat, > 0.25 dağılım kayması var.",
+                  "#4F8EF7"),
         html.Div([
             dbc.Row([
                 dbc.Col([
@@ -3997,15 +4428,17 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, key, seg_
 # ── Playground: Kaynak listeyi doldur ─────────────────────────────────────────
 @app.callback(
     Output("pg-source-container", "children"),
-    Input("store-config",       "data"),
+    Output("pg-source-count",     "children"),
+    Input("store-config",         "data"),
     Input("store-expert-exclude", "data"),
-    Input("store-pg-model-vars", "data"),
+    Input("store-pg-model-vars",  "data"),
+    Input("pg-source-search",     "value"),
     State("store-key", "data"),
 )
-def render_pg_source(config, expert_excluded, model_vars, key):
+def render_pg_source(config, expert_excluded, model_vars, search, key):
     df = _get_df(key)
     if df is None or not config or not config.get("target_col"):
-        return html.Div("Önce veri yükleyin.", className="form-hint")
+        return html.Div("Önce veri yükleyin.", className="form-hint"), ""
     excluded = set(expert_excluded or [])
     in_model = set(model_vars or [])
     screen_result = _SERVER_STORE.get(f"{key}_screen")
@@ -4017,32 +4450,42 @@ def render_pg_source(config, expert_excluded, model_vars, key):
                             config.get("segment_col")] if c}
         base = [c for c in df.columns
                 if c not in cfg and c not in excluded and c not in in_model]
+    total = len(base)
+    if search:
+        q = search.strip().lower()
+        base = [c for c in base if q in c.lower()]
+    count_txt = f"{len(base)}/{total}" if search else f"{total} değişken"
     if not base:
-        return html.Div("Tüm değişkenler model listesinde.", className="form-hint")
+        msg = "Eşleşme yok." if search else "Tüm değişkenler model listesinde."
+        return html.Div(msg, className="form-hint"), count_txt
     return dbc.Checklist(
         id="chk-pg-source",
         options=[{"label": c, "value": c} for c in base],
         value=[],
-        inline=True,
+        inline=False,
         className="expert-checklist",
-    )
+        style={"fontSize": "0.8rem", "lineHeight": "1.7"},
+    ), count_txt
 
 
 # ── Playground: Model listesini doldur ────────────────────────────────────────
 @app.callback(
     Output("pg-model-container", "children"),
+    Output("pg-model-count",     "children"),
     Input("store-pg-model-vars", "data"),
 )
 def render_pg_model_list(model_vars):
     if not model_vars:
-        return html.Div("Model listesi boş.", className="form-hint")
+        return html.Div("Model listesi boş.", className="form-hint"), ""
+    count_txt = f"{len(model_vars)} değişken"
     return dbc.Checklist(
         id="chk-pg-model",
         options=[{"label": c, "value": c} for c in model_vars],
         value=[],
-        inline=True,
+        inline=False,
         className="expert-checklist",
-    )
+        style={"fontSize": "0.8rem", "lineHeight": "1.7"},
+    ), count_txt
 
 
 # ── Playground: Değişken ekle ──────────────────────────────────────────────────
@@ -4083,9 +4526,11 @@ def pg_remove_vars(_, selected, current):
     State("store-pg-model-vars", "data"),
     State("chk-use-woe",         "value"),
     State("pg-test-size",        "value"),
-    State("pg-c-value",          "value"),
-    State("pg-model-type",       "value"),
-    State("pg-target-col",       "value"),
+    State("pg-c-value",            "value"),
+    State("pg-model-type",         "value"),
+    State("pg-threshold-method",   "value"),
+    State("pg-threshold-val",      "value"),
+    State("pg-target-col",         "value"),
     State("pg-split-method",     "value"),
     State("pg-split-date",       "value"),
     State("store-key",           "data"),
@@ -4095,6 +4540,7 @@ def pg_remove_vars(_, selected, current):
     prevent_initial_call=True,
 )
 def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
+                   threshold_method, threshold_val,
                    target_sel, split_method, split_date,
                    key, config, seg_val, seg_col_input):
     if not model_vars or not key or not config:
@@ -4200,8 +4646,31 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         except Exception as e:
             return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom")
 
-        def _metrics(y_true, y_prob_arr):
-            y_pred_arr = (y_prob_arr >= 0.5).astype(int)
+        tr_prob = mdl.predict_proba(X_tr_s)[:, 1]
+        te_prob = mdl.predict_proba(X_te_s)[:, 1]
+
+        # ── Eşik belirleme ────────────────────────────────────────────────────
+        thr_method = threshold_method or "fixed"
+        if thr_method == "f1":
+            _thrs = np.linspace(0.01, 0.99, 99)
+            _f1s  = [f1_score(y_te, (te_prob >= t).astype(int), zero_division=0)
+                     for t in _thrs]
+            opt_thr = float(_thrs[int(np.argmax(_f1s))])
+            thr_label = f"F1 Maks. eşiği: {opt_thr:.2f}"
+        elif thr_method == "ks":
+            _fpr, _tpr, _thrs_roc = roc_curve(y_te, te_prob)
+            opt_thr = float(_thrs_roc[int(np.argmax(_tpr - _fpr))])
+            opt_thr = min(max(opt_thr, 0.01), 0.99)
+            thr_label = f"KS noktası eşiği: {opt_thr:.2f}"
+        elif thr_method == "custom":
+            opt_thr = float(threshold_val or 0.5)
+            thr_label = f"Özel eşik: {opt_thr:.2f}"
+        else:
+            opt_thr   = 0.5
+            thr_label = "Eşik: 0.50 (sabit)"
+
+        def _metrics(y_true, y_prob_arr, thr=opt_thr):
+            y_pred_arr = (y_prob_arr >= thr).astype(int)
             auc_  = roc_auc_score(y_true, y_prob_arr)
             gini_ = 2 * auc_ - 1
             fpr_, tpr_, _ = roc_curve(y_true, y_prob_arr)
@@ -4214,8 +4683,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                         prec=prec_, rec=rec_, cm=cm__,
                         fpr=fpr_, tpr=tpr_, n=len(y_true))
 
-        tr_prob = mdl.predict_proba(X_tr_s)[:, 1]
-        te_prob = mdl.predict_proba(X_te_s)[:, 1]
         tr_m = _metrics(y_tr, tr_prob)
         te_m = _metrics(y_te, te_prob)
 
@@ -4290,7 +4757,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         ))
         fig_cm.update_layout(
             **_PLOT_LAYOUT,
-            title=dict(text="Confusion Matrix — Test (thr=0.5)",
+            title=dict(text=f"Confusion Matrix — Test ({thr_label})",
                        font=dict(color="#E8EAF0", size=13)),
             height=260, xaxis=dict(side="top"),
         )
@@ -4365,8 +4832,79 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 **{k: v for k, v in _tbl_style.items() if k != "style_data_conditional"},
             )
 
+        # ── SHAP Beeswarm — shap.summary_plot → PNG embed ────────────────────
+        shap_section = None
+        if is_tree:
+            try:
+                _shap_n   = len(X_te)
+                _X_shap   = X_te.values
+                explainer = shap.TreeExplainer(mdl)
+                shap_vals = explainer.shap_values(_X_shap)
+                if isinstance(shap_vals, list):
+                    shap_arr = shap_vals[1] if len(shap_vals) == 2 else shap_vals[0]
+                else:
+                    shap_arr = shap_vals
+
+                feat_names_shap = [disp_names.get(c, c) for c in X.columns]
+                top_n = min(20, shap_arr.shape[1])
+
+                _BG = "#0e1117"
+                _FG = "#c8cdd8"
+
+                plt.close("all")
+                shap.summary_plot(
+                    shap_arr, _X_shap,
+                    feature_names=feat_names_shap,
+                    max_display=top_n,
+                    show=False,
+                    plot_size=(9, max(4, top_n * 0.38)),
+                )
+                fig_mpl = plt.gcf()
+                fig_mpl.patch.set_facecolor(_BG)
+                ax_mpl  = fig_mpl.axes[0]
+                ax_mpl.set_facecolor(_BG)
+                ax_mpl.tick_params(colors=_FG, labelsize=9)
+                ax_mpl.xaxis.label.set_color(_FG)
+                ax_mpl.spines["bottom"].set_color("#2d3a4f")
+                ax_mpl.spines["top"].set_visible(False)
+                ax_mpl.spines["right"].set_visible(False)
+                ax_mpl.spines["left"].set_visible(False)
+                ax_mpl.axvline(0, color="#4a5568", linewidth=0.8, zorder=0)
+                # colorbar dark
+                for cax in fig_mpl.axes[1:]:
+                    cax.set_facecolor(_BG)
+                    cax.tick_params(colors=_FG, labelsize=8)
+                    cax.yaxis.label.set_color(_FG)
+
+                buf = io.BytesIO()
+                fig_mpl.savefig(buf, format="png", bbox_inches="tight",
+                                facecolor=_BG, dpi=130)
+                plt.close("all")
+                buf.seek(0)
+                img_b64 = base64.b64encode(buf.read()).decode()
+
+                shap_section = html.Div([
+                    html.Hr(style={"borderColor": "#1f2a3c", "margin": "0.8rem 0"}),
+                    html.P(
+                        f"SHAP Beeswarm  ·  n={_shap_n}  ·  top {top_n} değişken",
+                        className="section-title",
+                        style={"marginBottom": "0.5rem"},
+                    ),
+                    html.Img(
+                        src=f"data:image/png;base64,{img_b64}",
+                        style={"width": "100%", "maxWidth": "820px",
+                               "display": "block", "margin": "0 auto"},
+                    ),
+                ])
+            except Exception as _shap_err:
+                shap_section = html.Div(
+                    f"SHAP hesaplanamadı: {_shap_err}",
+                    className="alert-info-custom",
+                    style={"marginTop": "0.5rem"},
+                )
+
         return html.Div([
-            html.Div(split_info,
+            html.Div(f"{split_info}   ·   {thr_label}",
                      style={"color": "#7e8fa4", "fontSize": "0.72rem",
                             "marginBottom": "0.6rem", "fontStyle": "italic"}),
             metric_panel,
@@ -4379,6 +4917,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 ], width=4),
                 dbc.Col(dcc.Graph(figure=fig_cm, config={"displayModeBar": False}), width=3),
             ]),
+            shap_section or html.Div(),
         ])
 
     # ── Ham model ─────────────────────────────────────────────────────────────

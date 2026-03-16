@@ -11,14 +11,21 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 | **Önizleme** | Ham veri tablosu, uzman değişken eleme |
 | **Profiling** | Kolon bazında eksik %, kardinalite, tip analizi |
 | **Target & IV** | Bad rate dağılımı, IV hesabı, zaman serisi |
+| **Outlier Analizi** | IQR / Z-score aykırı değer tespiti, müşteri bazında outlier sayısı |
 | **Değişken Analizi** | WoE/PSI/bivariate deep dive |
 | **İstatistiksel Testler** | Korelasyon, Chi-Square, ANOVA, KS, VIF |
 | **Değişken Özeti** | IV · Eksik% · PSI · Korelasyon · VIF tek tabloda |
-| **Playground** | Grafik oluşturucu + hızlı model (LR / LightGBM / XGBoost / RF) |
+| **Playground** | Grafik oluşturucu + hızlı model (LR / LightGBM / XGBoost / RF) + SHAP |
 
 ### Veri Kaynakları
 - **MS SQL Server** — Windows Authentication, `config.toml` üzerinden bağlantı
 - **CSV** — Sürükle-bırak yükleme, ayırıcı seçimi (`,` `;` `\t` `|`)
+
+### Outlier Analizi
+- **IQR** — 1.5× (normal sınır) veya 3.0× (aşırı aykırı) çarpanı
+- **Z-Score** — ±2σ / ±2.5σ / ±3σ eşiği
+- Değişken bazında özet tablo: N Outlier, % Outlier, alt/üst sınır, min/max
+- **Müşteri bazında detay** — seçilen kimlik kolonu üzerinden her müşterinin kaç farklı değişkende aykırı olduğu
 
 ### İstatistiksel Testler
 - **Korelasyon** — Pearson r matrisi, çift scatter, VIF
@@ -29,6 +36,9 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 
 ### Hızlı Model
 Logistic Regression · LightGBM · XGBoost · Random Forest — train/test ayrımı (rastgele veya tarihe göre), AUC · Gini · KS · F1 · Precision · Recall, ROC eğrisi, Confusion Matrix, katsayı/importance tablosu.
+
+- **Eşik optimizasyonu** — Sabit 0.50 / F1 Maks. / KS Noktası / Özel
+- **SHAP Beeswarm** — Tree modeller için tüm test verisi üzerinde shap.summary_plot ile özellik katkı grafiği
 
 ---
 
@@ -72,7 +82,19 @@ lightgbm>=4.0
 xgboost>=2.0
 pyodbc
 ydata-profiling
+shap
+matplotlib
 ```
+
+### Kurumsal Ortamda Pip Proxy
+
+`pip_prefix.txt` dosyasına kurumun gerektirdiği pip ön komutunu yapıştır:
+
+```
+pip install --index-url https://... --trusted-host ...
+```
+
+Uygulama başlarken `setup_deps.py` eksik paketleri bu prefix ile otomatik yükler.
 
 ### SQL Server Bağlantısı
 
@@ -93,7 +115,9 @@ Windows Authentication kullanılır, kullanıcı adı/şifre gerekmez.
 
 ```
 EDA-LAB/
-├── app.py                  # Ana uygulama (~4200 satır)
+├── app.py                  # Ana uygulama (~5000 satır)
+├── setup_deps.py           # Otomatik bağımlılık yükleyici
+├── pip_prefix.txt          # Kurumsal pip prefix (opsiyonel)
 ├── config.toml             # DB bağlantı ayarları
 ├── assets/
 │   └── custom.css          # Dark tema stilleri
@@ -116,3 +140,21 @@ EDA-LAB/
 - 5M+ satır için optimize edilmiştir (server-side cache, aggregate-first istatistik)
 - Segment filtresi tüm sekmelere anlık yansır; `df_original`'e dokunmaz
 - WoE encode başarısız olan değişkenler ham değerle modele girer, sessizce atlanmaz — bildirim gösterilir
+- SHAP hesabı tüm test seti üzerinde çalışır; büyük veri setlerinde birkaç saniye sürebilir
+
+---
+
+## Değişiklik Geçmişi
+
+### v1.1
+- **Outlier Analizi sekmesi** eklendi (IQR / Z-score, müşteri bazında detay tablosu)
+- **SHAP Beeswarm** — shap.summary_plot ile tam test verisi üzerinde görselleştirme
+- **Eşik optimizasyonu** — F1 Maks. / KS Noktası / Özel eşik seçeneği
+- **CSV yükleme** — sidebar'a SQL yanına eklendi
+- **LightGBM · XGBoost · Random Forest** Hızlı Model'e eklendi
+- **Playground değişken seçici** — arama filtresi + dikey liste (100+ değişken için ölçeklenebilir)
+- **Tab açıklama kartları** — her sekmenin üstünde amaç/yorum bilgisi
+- Dark tema metin renkleri güçlendirildi
+
+### v1.0
+- İlk sürüm — Önizleme, Profiling, Target & IV, Değişken Analizi, İstatistiksel Testler, Değişken Özeti, Playground
