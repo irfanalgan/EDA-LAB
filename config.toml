@@ -1,0 +1,4 @@
+[database]
+server   = "IRPHAN"
+database = "Master"
+driver   = "ODBC Driver 17 for SQL Server"

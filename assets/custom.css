@@ -1,0 +1,584 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   EDA Laboratuvarı — Global Stylesheet
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Genel ─────────────────────────────────────────────────────────────── */
+body {
+    background-color: #0E1117 !important;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    color: #c8cdd8;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── Navbar ────────────────────────────────────────────────────────────── */
+.navbar-logo-text {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #4F8EF7 !important;
+    letter-spacing: 0.04em;
+}
+.navbar-brand-title {
+    font-size: 1.15rem;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    color: #E8EAF0 !important;
+}
+.navbar-subtitle {
+    font-size: 0.7rem;
+    color: #7e8fa4;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+#sidebar {
+    background-color: #161C27;
+    border-right: 1px solid #232d3f;
+    min-height: calc(100vh - 56px);
+    padding: 1.5rem 1rem;
+    transition: max-width 0.3s ease-in-out, opacity 0.25s ease-in-out;
+}
+.sidebar-section-title {
+    font-size: 0.67rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #4F8EF7;
+    margin-bottom: 0.8rem;
+    margin-top: 0.1rem;
+}
+.sidebar-divider {
+    border-color: #232d3f;
+    margin: 1.25rem 0;
+}
+.form-hint {
+    font-size: 0.72rem;
+    color: #7e8fa4;
+    margin-top: -0.2rem;
+    margin-bottom: 0.35rem;
+    font-style: italic;
+}
+
+/* ── Sidebar Toggle ────────────────────────────────────────────────────── */
+.sidebar-toggle {
+    position: absolute;
+    top: 1.25rem;
+    right: -14px;
+    z-index: 100;
+    width: 22px;
+    height: 48px;
+    background-color: #232d3f;
+    border: 1px solid #2d3a4f;
+    border-radius: 0 6px 6px 0;
+    color: #a8b2c2;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+.sidebar-toggle:hover {
+    background-color: #2d3a4f;
+    color: #4F8EF7;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
+.main-tabs {
+    border-bottom: 1px solid #232d3f !important;
+    margin-bottom: 1.5rem;
+}
+.main-tabs .nav-link {
+    color: #7e8fa4 !important;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border: none !important;
+    border-bottom: 2px solid transparent !important;
+    padding: 0.5rem 1rem;
+    border-radius: 0 !important;
+    transition: color 0.18s ease;
+}
+.main-tabs .nav-link:hover {
+    color: #c8cdd8 !important;
+    background: transparent !important;
+}
+.main-tabs .nav-link.active {
+    color: #4F8EF7 !important;
+    background: transparent !important;
+    border-bottom: 2px solid #4F8EF7 !important;
+}
+.tab-content-area {
+    padding-top: 0.5rem;
+}
+
+/* ── Ana Alan ──────────────────────────────────────────────────────────── */
+#main-content {
+    background-color: #0E1117;
+    padding: 1.5rem 1.75rem;
+}
+.section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #8899b0;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid #232d3f;
+    padding-bottom: 0.5rem;
+}
+
+/* ── Input & Form ──────────────────────────────────────────────────────── */
+.form-control {
+    background-color: #1a2035 !important;
+    border-color: #2d3a4f !important;
+    color: #E8EAF0 !important;
+    font-size: 0.85rem;
+    border-radius: 6px !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.form-control:focus {
+    border-color: #4F8EF7 !important;
+    box-shadow: 0 0 0 2px rgba(79, 142, 247, 0.15) !important;
+    background-color: #1a2035 !important;
+}
+.form-label {
+    font-size: 0.78rem;
+    color: #b0bac9;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+}
+
+/* ── dbc.Select (native <select>) ──────────────────────────────────────── */
+.dark-select {
+    background-color: #1a2035 !important;
+    border-color: #2d3a4f !important;
+    color: #E8EAF0 !important;
+    font-size: 0.83rem !important;
+    border-radius: 6px !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    height: 36px !important;
+}
+.dark-select:focus {
+    border-color: #4F8EF7 !important;
+    box-shadow: 0 0 0 2px rgba(79, 142, 247, 0.15) !important;
+    background-color: #1a2035 !important;
+}
+.dark-select option {
+    background-color: #1a2035;
+    color: #E8EAF0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   dcc.Dropdown — dark-dd
+   Dash'ın react-select'i; class isimleri versiyona göre değiştiğinden
+   üç farklı pattern'in tamamını hedefliyoruz:
+     1. Select__xxx  (BEM, react-select v5 + classNamePrefix="Select")
+     2. [class*="-xxx"]  (emotion hash, css-abc123-menu)
+     3. [role="..."]  (ARIA, portal edilse bile çalışır)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Genel container ────────────────────────────────────────────────────── */
+.dark-dd,
+.dark-dd .dash-dropdown {
+    font-size: 0.83rem;
+}
+
+/* ── Kontrol kutusu (kapalı durum) ─────────────────────────────────────── */
+.dark-dd .Select__control,
+.dark-dd .Select-control,
+.dark-dd [class*="-control"],
+.dark-dd [class*="__control"] {
+    background-color: #1a2035 !important;
+    border: 1px solid #2d3a4f !important;
+    border-radius: 6px !important;
+    min-height: 36px !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
+}
+.dark-dd .Select__control:hover,
+.dark-dd .Select-control:hover,
+.dark-dd [class*="-control"]:hover,
+.dark-dd [class*="__control"]:hover,
+.dark-dd [class*="__control--is-focused"],
+.dark-dd [class*="-control"]:focus-within,
+.dark-dd .Select.is-focused .Select-control {
+    border-color: #4F8EF7 !important;
+    box-shadow: 0 0 0 2px rgba(79,142,247,0.15) !important;
+}
+
+/* ── Seçili değer & placeholder ─────────────────────────────────────────── */
+.dark-dd .Select__single-value,
+.dark-dd .Select-value-label,
+.dark-dd [class*="__single-value"],
+.dark-dd [class*="-singleValue"] {
+    color: #E8EAF0 !important;
+    font-size: 0.83rem !important;
+}
+.dark-dd .Select__placeholder,
+.dark-dd .Select-placeholder,
+.dark-dd [class*="__placeholder"],
+.dark-dd [class*="-placeholder"] {
+    color: #4a5568 !important;
+    font-size: 0.83rem !important;
+}
+
+/* ── Value container & indicators ──────────────────────────────────────── */
+.dark-dd .Select__value-container,
+.dark-dd [class*="__value-container"] {
+    background-color: transparent !important;
+    padding: 2px 8px !important;
+}
+.dark-dd .Select__indicators,
+.dark-dd [class*="__indicators"] {
+    background-color: transparent !important;
+}
+.dark-dd .Select__indicator,
+.dark-dd [class*="__indicator"] {
+    color: #556070 !important;
+    padding: 6px !important;
+    background-color: transparent !important;
+    transition: color 0.15s ease !important;
+}
+.dark-dd .Select__indicator:hover,
+.dark-dd [class*="__indicator"]:hover {
+    color: #8892a4 !important;
+}
+.dark-dd .Select__indicator-separator,
+.dark-dd [class*="__indicator-separator"] {
+    background-color: #2d3a4f !important;
+}
+
+/* ── Arama input'u ──────────────────────────────────────────────────────── */
+.dark-dd .Select__input-container,
+.dark-dd [class*="__input-container"],
+.dark-dd [class*="-Input"],
+.dark-dd .Select-input {
+    color: #E8EAF0 !important;
+    background-color: transparent !important;
+}
+.dark-dd .Select__input-container input,
+.dark-dd [class*="__input-container"] input,
+.dark-dd [class*="-Input"] input,
+.dark-dd .Select-input input,
+.dark-dd input {
+    color: #E8EAF0 !important;
+    background-color: transparent !important;
+    font-size: 0.83rem !important;
+    caret-color: #4F8EF7 !important;
+}
+
+/* ── Ok ikonu (eski react-select) ──────────────────────────────────────── */
+.dark-dd .Select-arrow { border-top-color: #556070 !important; }
+.dark-dd .is-open .Select-arrow { border-bottom-color: #556070 !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Açılan menü — hem scoped (normal) hem global (portal fallback)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Menü container */
+.dark-dd .Select__menu,
+.dark-dd .Select-menu-outer,
+.dark-dd [class*="__menu"],
+.dark-dd [class*="-menu"],
+.dark-dd [role="listbox"],
+/* Portal fallback — body seviyesinde render edilirse */
+.Select__menu,
+.dash-dropdown .Select-menu-outer,
+.dash-dropdown [class*="-menu"],
+.dash-dropdown [class*="__menu"] {
+    background-color: #1a2035 !important;
+    border: 1px solid #2d3a4f !important;
+    border-radius: 6px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55) !important;
+    z-index: 9999 !important;
+    overflow: hidden !important;
+    animation: fadeUp 0.12s ease forwards !important;
+}
+
+/* Menü scroll listesi */
+.dark-dd .Select__menu-list,
+.dark-dd .Select-menu,
+.dark-dd [class*="__menu-list"],
+.dark-dd [class*="-MenuList"],
+.Select__menu-list,
+.dash-dropdown [class*="__menu-list"] {
+    background-color: #1a2035 !important;
+    padding: 4px 0 !important;
+    scrollbar-width: thin;
+    scrollbar-color: #2d3a4f #1a2035;
+}
+.dark-dd [class*="__menu-list"]::-webkit-scrollbar,
+.dark-dd [class*="-MenuList"]::-webkit-scrollbar { width: 5px; }
+.dark-dd [class*="__menu-list"]::-webkit-scrollbar-track,
+.dark-dd [class*="-MenuList"]::-webkit-scrollbar-track { background: #1a2035; }
+.dark-dd [class*="__menu-list"]::-webkit-scrollbar-thumb,
+.dark-dd [class*="-MenuList"]::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 3px; }
+
+/* Seçenek satırları */
+.dark-dd .Select__option,
+.dark-dd .Select-option,
+.dark-dd [class*="__option"],
+.dark-dd [class*="-option"],
+.dark-dd [role="option"],
+.Select__option,
+.dash-dropdown [class*="__option"],
+.dash-dropdown [class*="-option"] {
+    background-color: #1a2035 !important;
+    color: #c8cdd8 !important;
+    font-size: 0.83rem !important;
+    padding: 7px 12px !important;
+    cursor: pointer !important;
+    transition: background-color 0.1s ease, color 0.1s ease !important;
+}
+
+/* Hover / focused seçenek */
+.dark-dd .Select__option--is-focused,
+.dark-dd .Select-option.is-focused,
+.dark-dd .Select-option:hover,
+.dark-dd [class*="__option--is-focused"],
+.dark-dd [class*="-option"]:hover,
+.dark-dd [role="option"]:hover,
+.Select__option--is-focused,
+[role="option"]:hover,
+[role="option"]:focus {
+    background-color: #1e2c4a !important;
+    color: #E8EAF0 !important;
+}
+
+/* Seçilmiş seçenek */
+.dark-dd .Select__option--is-selected,
+.dark-dd .Select-option.is-selected,
+.dark-dd [class*="__option--is-selected"],
+.dark-dd [class*="option--is-selected"],
+.Select__option--is-selected,
+[role="option"][aria-selected="true"] {
+    background-color: #1a3a6e !important;
+    color: #4F8EF7 !important;
+}
+
+/* ARIA global fallback */
+[role="listbox"] {
+    background-color: #1a2035 !important;
+    border: 1px solid #2d3a4f !important;
+    border-radius: 6px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55) !important;
+}
+[role="option"] {
+    background-color: #1a2035 !important;
+    color: #c8cdd8 !important;
+    font-size: 0.83rem !important;
+}
+[role="combobox"],
+[role="combobox"] input {
+    background-color: transparent !important;
+    color: #E8EAF0 !important;
+}
+
+/* ── Metrik Kartları ───────────────────────────────────────────────────── */
+.metric-card {
+    background-color: #161C27;
+    border: 1px solid #232d3f;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+    transition: border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+.metric-card:hover {
+    border-color: #4F8EF7;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(79,142,247,0.1);
+}
+.metric-value {
+    font-size: 1.55rem;
+    font-weight: 700;
+    color: #4F8EF7;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+}
+.metric-label {
+    font-size: 0.7rem;
+    color: #7e8fa4;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+}
+
+/* ── Config Banner ─────────────────────────────────────────────────────── */
+.config-banner {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.banner-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid #4F8EF7;
+    border-radius: 6px;
+    padding: 0.3rem 0.65rem;
+    background-color: rgba(79, 142, 247, 0.07);
+    transition: background-color 0.18s ease;
+}
+.banner-badge:hover {
+    background-color: rgba(79, 142, 247, 0.12);
+}
+.banner-badge-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #7e8fa4;
+    text-transform: uppercase;
+}
+.banner-badge-value {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #E8EAF0;
+}
+
+/* ── Alert / Bildirimler ───────────────────────────────────────────────── */
+.alert-info-custom {
+    background-color: #161C27;
+    border: 1px solid #232d3f;
+    border-left: 3px solid #4F8EF7;
+    color: #a8b2c2;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-size: 0.88rem;
+}
+
+/* ── Tablo ─────────────────────────────────────────────────────────────── */
+.dash-table-container {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #232d3f !important;
+}
+
+/* ── Butonlar ──────────────────────────────────────────────────────────── */
+.btn-load {
+    background-color: #4F8EF7 !important;
+    border-color: #4F8EF7 !important;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.04em;
+    width: 100%;
+    border-radius: 6px !important;
+    transition: background-color 0.18s ease, transform 0.1s ease !important;
+}
+.btn-load:hover {
+    background-color: #3a7ae8 !important;
+    border-color: #3a7ae8 !important;
+    transform: translateY(-1px);
+}
+.btn-confirm {
+    background-color: #10b981 !important;
+    border-color: #10b981 !important;
+    font-weight: 600;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    width: 100%;
+    border-radius: 6px !important;
+    transition: background-color 0.18s ease, transform 0.1s ease !important;
+}
+.btn-confirm:hover {
+    background-color: #059669 !important;
+    border-color: #059669 !important;
+    transform: translateY(-1px);
+}
+
+/* ── Clipboard Butonu ──────────────────────────────────────────────────── */
+.clip-btn {
+    cursor: pointer;
+    font-size: 0.72rem;
+    color: #8892a4;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid #2d3a4f;
+    border-radius: 4px;
+    background-color: #1a2035;
+    float: right;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.04em;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+.clip-btn:hover {
+    border-color: #4F8EF7;
+    color: #4F8EF7;
+}
+
+/* ── Smooth Transitions & Animations ──────────────────────────────────── */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+#metrics-row > div,
+#tab-profiling > div,
+#tab-target-iv > div,
+#tab-deep-dive > div,
+#corr-content > div,
+#deep-dive-content > div,
+#pair-scatter > div,
+#corr-r-badge > div,
+#config-banner > div {
+    animation: fadeUp 0.22s ease forwards;
+}
+
+.tab-content > .tab-pane.active {
+    animation: fadeUp 0.18s ease forwards;
+}
+
+/* ── Segment Badge ─────────────────────────────────────────────────────── */
+.segment-badge {
+    background-color: rgba(245, 158, 11, 0.1);
+    border: 1px solid #f59e0b;
+    color: #f59e0b;
+    font-size: 0.72rem;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-weight: 600;
+}
+
+/* ── Uzman Görüşü Checklist — chip / tag tasarımı ──────────────────────── */
+.expert-checklist .form-check {
+    display: inline-flex;
+    align-items: center;
+    margin: 0.2rem 0.3rem;
+    padding: 0;
+}
+
+/* Gerçek checkbox'ı gizle — label'ı tıklanabilir chip yap */
+.expert-checklist .form-check-input {
+    display: none;
+}
+
+.expert-checklist .form-check-label {
+    display: inline-block;
+    padding: 0.25rem 0.65rem;
+    border: 1px solid #3a4a60;
+    border-radius: 4px;
+    background-color: #111827;
+    color: #a8b2c2;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.expert-checklist .form-check-label:hover {
+    border-color: #f59e0b;
+    color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.07);
+}
+
+/* Seçili durum */
+.expert-checklist .form-check-input:checked + .form-check-label {
+    background-color: rgba(245, 158, 11, 0.18);
+    border-color: #f59e0b;
+    color: #f59e0b;
+    font-weight: 600;
+}

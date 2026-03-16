@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Ortam
+.env
+.venv
+venv/
+env/
+
+# Veri dosyaları — yerel kalmalı
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+data/*.db
+
+# Bağlantı / gizli bilgiler
+secrets.toml
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Profiling çıktıları
+*.html
