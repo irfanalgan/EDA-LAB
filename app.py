@@ -1,3 +1,13 @@
+# ── Bağımlılık kontrolü — diğer importlardan önce çalışmalı ──────────────────
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+try:
+    from setup_deps import ensure_deps
+    ensure_deps(verbose=True)
+except Exception as _dep_err:
+    print(f"[setup_deps] Atlandı: {_dep_err}")
+# ─────────────────────────────────────────────────────────────────────────────
+
 import threading
 import webbrowser
 import uuid
