@@ -205,7 +205,10 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
     stat_cards = [
         sc(vstats["dtype"],                    "Tip"),
         sc(f"{vstats['missing']:,}",           f"Eksik  (%{vstats['missing_pct']})", missing_color),
-        sc(f"{vstats['unique']:,}",            "Tekil Değer"),
+        sc(f"{iv_total_dd:.4f}" if target_type == "binary" else f"{vstats['unique']:,}",
+           "IV" if target_type == "binary" else "Tekil Değer",
+           ("#10b981" if iv_total_dd >= 0.1 else "#f59e0b" if iv_total_dd >= 0.02 else "#ef4444")
+           if target_type == "binary" else "#4F8EF7"),
     ]
     if is_num:
         skew_color = "#f59e0b" if abs(vstats.get("skewness") or 0) > 1 else "#10b981"
@@ -303,45 +306,78 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
             ], className="mb-4")
 
         else:
-            # Binary / multiclass: her sınıf için ayrı histogram
-            local[target] = local[target].astype(str).str.replace(r'\.0$', '', regex=True)
+            # Binary / multiclass: bad rate by decile (eşit frekanslı 10 dilim)
+            local_br = local.dropna(subset=[col, target]).copy()
+            local_br[target] = pd.to_numeric(local_br[target], errors="coerce")
+            local_br = local_br.dropna(subset=[target])
+
+            try:
+                local_br["_decile"] = pd.qcut(local_br[col], q=10, labels=False,
+                                               duplicates="drop")
+            except Exception:
+                local_br["_decile"] = pd.cut(local_br[col], bins=10, labels=False)
+
+            decile_agg = (
+                local_br.groupby("_decile", observed=True)
+                .agg(
+                    bad_rate=(target, "mean"),
+                    count=(target, "count"),
+                    min_val=(col, "min"),
+                    max_val=(col, "max"),
+                )
+                .reset_index()
+                .sort_values("_decile")
+            )
+            decile_agg["bad_rate_pct"] = (decile_agg["bad_rate"] * 100).round(2)
+            decile_agg["bin_label"] = decile_agg.apply(
+                lambda r: f"[{r['min_val']:.2f}, {r['max_val']:.2f}]", axis=1
+            )
 
             fig_dist = go.Figure()
-            colors = {"0": "#4F8EF7", "1": "#ef4444"}
-            for t_val, grp in local.groupby(target)[col]:
-                fig_dist.add_trace(go.Histogram(
-                    x=grp, name=f"Target={t_val}",
-                    marker_color=colors.get(str(t_val), "#8892a4"),
-                    opacity=0.65, nbinsx=50,
-                    hovertemplate=f"Target={t_val}<br>Değer: %{{x}}<br>Sayı: %{{y}}<extra></extra>",
-                ))
-
-            if vstats.get("iqr_lower") is not None:
-                for x_val, lbl, clr in [
-                    (vstats["iqr_lower"], "IQR Alt", "#f59e0b"),
-                    (vstats["iqr_upper"], "IQR Üst", "#f59e0b"),
-                    (vstats["p1"],  "P1",  "#556070"),
-                    (vstats["p99"], "P99", "#556070"),
-                ]:
-                    fig_dist.add_vline(x=x_val, line_dash="dot", line_color=clr,
-                                       opacity=0.6, annotation_text=lbl,
-                                       annotation_font_color=clr, annotation_font_size=9)
-
+            fig_dist.add_trace(go.Bar(
+                x=decile_agg["bin_label"],
+                y=decile_agg["count"],
+                name="Gözlem",
+                marker_color="#4F8EF7",
+                opacity=0.6,
+                yaxis="y2",
+                hovertemplate="Aralık: %{x}<br>Gözlem: %{y:,}<extra></extra>",
+            ))
+            fig_dist.add_trace(go.Scatter(
+                x=decile_agg["bin_label"],
+                y=decile_agg["bad_rate_pct"],
+                name="Bad Rate %",
+                mode="lines+markers",
+                line=dict(color="#ef4444", width=2),
+                marker=dict(size=7),
+                yaxis="y",
+                hovertemplate="Aralık: %{x}<br>Bad Rate: %{y:.2f}%<extra></extra>",
+            ))
+            # overall bad rate reference line
+            overall_br = local_br[target].mean() * 100
+            fig_dist.add_hline(
+                y=overall_br, line_dash="dot", line_color="#f59e0b",
+                annotation_text=f"Ortalama %{overall_br:.2f}",
+                annotation_font_color="#f59e0b", annotation_font_size=9,
+            )
             fig_dist.update_layout(
                 **_PLOT_LAYOUT,
-                barmode="overlay",
-                title=dict(text=f"{col} — Dağılım (Target Kırılımı)", font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title=col),
-                yaxis=dict(**_AXIS_STYLE, title="Frekans"),
+                title=dict(text=f"{col} — Bad Rate by Desil", font=dict(color="#E8EAF0", size=13)),
+                xaxis=dict(**_AXIS_STYLE, tickangle=-30),
+                yaxis=dict(**_AXIS_STYLE, title="Bad Rate %", ticksuffix="%"),
+                yaxis2=dict(title="Gözlem", overlaying="y", side="right",
+                            showgrid=False, zeroline=False,
+                            tickfont=dict(color="#8892a4")),
                 legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
                 height=320,
             )
 
             # Target grubu istatistik karşılaştırma tablosu
-            stat_rows = []
-            local = local.dropna(subset=[target])
+            local_tbl = local.dropna(subset=[target]).copy()
+            local_tbl[target] = local_tbl[target].astype(str).str.replace(r'\.0$', '', regex=True)
             grp_data = {str(int(float(tv))): g[col].dropna()
-                        for tv, g in local.groupby(local[target])}
+                        for tv, g in local_tbl.groupby(local_tbl[target])}
+            stat_rows = []
             for stat_name, fn in [
                 ("Gözlem",  lambda s: f"{len(s):,}"),
                 ("Ortalama", lambda s: f"{s.mean():.4f}"),
@@ -513,8 +549,10 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 height=300,
             )
 
-            # Monotonluk etiketi
-            br_arr   = chart_df["Bad Rate %"].values
+            # Monotonluk etiketi — Eksik/Special satırları hariç
+            _mono_mask = ~chart_df["Bin"].isin(["Eksik", "TOPLAM"]) & \
+                         ~chart_df["Bin"].str.startswith("Special", na=False)
+            br_arr   = chart_df.loc[_mono_mask, "Bad Rate %"].values
             br_diffs = np.diff(br_arr)
             if len(br_diffs) == 0:
                 mono_txt, mono_clr = "—", "#6b7a99"

@@ -111,7 +111,7 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
         zmid=0, zmin=-1, zmax=1,
         text=corr_df.round(2).values if show_text else None,
         texttemplate="%{text}" if show_text else None,
-        textfont=dict(size=9),
+        textfont=dict(size=9, color="black"),
         colorbar=dict(
             title=dict(text="r", font=dict(color="#8892a4", size=11)),
             thickness=12, len=0.8,

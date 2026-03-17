@@ -157,8 +157,7 @@ def update_metrics(config, seg_val, key, seg_col_input):
         card(f"{active_rows:,}", "Aktif Satır"),
         card(f"{df_active.shape[1]}", "Kolon Sayısı"),
         date_card,
-        card(f"%{active_rows / len(df_orig) * 100:.1f}", "Segment Kapsamı", "#f59e0b")
-        if seg_col else card(
+        card(
             target_card_val,
             target_card_label,
             target_card_color,

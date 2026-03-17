@@ -5,6 +5,29 @@ from scipy import stats as scipy_stats
 SPECIAL_VALUES = {9999999999, 8888888888}
 
 
+# ── sklearn >= 1.6 uyumluluk yaması (optbinning metrics.py) ──────────────────
+# sklearn 1.6'da force_all_finite → ensure_all_finite olarak yeniden adlandırıldı.
+# optbinning bu değişikliği henüz yansıtmadıysa runtime'da monkey-patch uygula.
+try:
+    import sklearn as _sklearn
+    _sk_ver = tuple(int(v) for v in _sklearn.__version__.split(".")[:2])
+    if _sk_ver >= (1, 6):
+        import optbinning.binning.metrics as _ob_metrics
+        from sklearn.utils import check_array as _check_array
+        from sklearn.utils import check_consistent_length as _check_cl
+
+        def _patched_check_x_y(x, y):
+            x = _check_array(x, ensure_2d=False, ensure_all_finite=True)
+            y = _check_array(y, ensure_2d=False, ensure_all_finite=True)
+            _check_cl(x, y)
+            return x, y
+
+        _ob_metrics._check_x_y = _patched_check_x_y
+except Exception:
+    pass
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def get_woe_detail(df: pd.DataFrame, col: str, target: str,
                    max_n_bins: int = 4,
                    force_dtype: str = None) -> tuple[pd.DataFrame, float, object]:
