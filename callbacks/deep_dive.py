@@ -9,6 +9,8 @@ from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE
 from modules.deep_dive import get_variable_stats, get_woe_detail, compute_psi, compute_period_badrate
+from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
+                                  check_variable_stats, check_train_size)
 
 
 # ── Callback: Deep Dive — Değişken seçeneklerini doldur ──────────────────────
@@ -191,6 +193,14 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
 
     is_num = (vstats["is_numeric"] if _force_dtype is None
               else (_force_dtype == "numerical"))
+
+    # ── 0. Anomali / Tanı Bölümü ──────────────────────────────────────────────
+    _hints = []
+    _hints += check_train_size(len(df_train))
+    _hints += check_variable_stats(vstats)
+    _hints += check_iv(iv_total_dd, woe_df.empty, target_type)
+    _hints += check_psi(psi_res.get("psi"), date_col, cutoff_date)
+    hint_section = build_hint_section(_hints)
 
     # ── 1. Özet İstatistik Kartları ───────────────────────────────────────────
     def sc(val, lbl, color="#4F8EF7"):
@@ -731,6 +741,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
         ], className="mb-4")
 
     return html.Div([
+        hint_section,
         html.P("Özet İstatistikler", className="section-title"),
         stats_row,
         missing_target_card,

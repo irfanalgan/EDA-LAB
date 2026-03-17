@@ -36,6 +36,155 @@ def build_navbar():
     )
 
 
+def _help_card(title: str, rows: list[tuple], note: str = "") -> "dbc.Card":
+    """Başlık + satır listesi içeren küçük referans kartı."""
+    return dbc.Card([
+        dbc.CardHeader(title, style={"fontSize": "0.78rem", "fontWeight": "700",
+                                     "color": "#c8cdd8", "backgroundColor": "#161C27",
+                                     "padding": "0.4rem 0.75rem",
+                                     "borderBottom": "1px solid #2d3a4f"}),
+        dbc.CardBody([
+            html.Table([
+                html.Tbody([
+                    html.Tr([
+                        html.Td(k, style={"color": "#a8b2c2", "fontSize": "0.74rem",
+                                          "paddingRight": "1rem", "whiteSpace": "nowrap",
+                                          "fontWeight": "600"}),
+                        html.Td(v, style={"color": "#c8cdd8", "fontSize": "0.74rem"}),
+                    ]) for k, v in rows
+                ])
+            ], style={"width": "100%", "borderCollapse": "collapse"}),
+            html.P(note, style={"fontSize": "0.72rem", "color": "#556070",
+                                "marginTop": "0.5rem", "marginBottom": "0"}) if note else None,
+        ], style={"padding": "0.5rem 0.75rem"}),
+    ], style={"backgroundColor": "#111827", "border": "1px solid #2d3a4f",
+              "borderRadius": "6px", "marginBottom": "0.75rem"})
+
+
+def _faq_item(q: str, bullets: list[str], level: str = "warning") -> "html.Div":
+    colors = {"error": "#ef4444", "warning": "#f59e0b", "info": "#4F8EF7"}
+    c = colors.get(level, "#f59e0b")
+    return html.Div([
+        html.Div(q, style={"fontSize": "0.78rem", "fontWeight": "600",
+                           "color": c, "marginBottom": "4px"}),
+        html.Ul([html.Li(b, style={"fontSize": "0.74rem", "color": "#9aa5bc",
+                                   "lineHeight": "1.7"}) for b in bullets],
+                style={"paddingLeft": "1.2rem", "margin": "0 0 0.75rem 0"}),
+    ])
+
+
+def _build_help_tab() -> "html.Div":
+    return html.Div([
+        html.Div([
+            html.Span("EDA Lab", style={"fontWeight": "700", "color": "#4F8EF7"}),
+            html.Span("  ·  Yardım & Referans", style={"color": "#7e8fa4"}),
+        ], style={"fontSize": "0.9rem", "marginBottom": "1.5rem",
+                  "borderBottom": "1px solid #2d3a4f", "paddingBottom": "0.75rem"}),
+
+        dbc.Row([
+            # ── Sol: Metrik referans kartları ─────────────────────────────
+            dbc.Col([
+                html.P("Metrik Referansı", style={"fontSize": "0.7rem", "color": "#556070",
+                                                   "textTransform": "uppercase",
+                                                   "letterSpacing": "0.08em", "marginBottom": "0.5rem"}),
+                _help_card("IV (Information Value)", [
+                    ("< 0.02",  "Çok zayıf — anlamsız"),
+                    ("0.02–0.1", "Zayıf"),
+                    ("0.1–0.3",  "Orta"),
+                    ("0.3–0.5",  "Güçlü"),
+                    ("> 0.5",    "Şüpheli — overfitting riski"),
+                ]),
+                _help_card("PSI (Population Stability Index)", [
+                    ("< 0.10",   "Stabil — model güvenilir"),
+                    ("0.10–0.25","Dikkat — izle"),
+                    ("> 0.25",   "Kritik kayma — model yenilenmeli"),
+                ]),
+                _help_card("Gini / AUC", [
+                    ("AUC < 0.60", "Zayıf ayrım gücü"),
+                    ("AUC 0.60–0.70", "Kabul edilebilir"),
+                    ("AUC 0.70–0.80", "İyi"),
+                    ("AUC > 0.80",    "Çok iyi"),
+                ]),
+                _help_card("p-value (Logit katsayısı)", [
+                    ("< 0.05",  "İstatistiksel olarak anlamlı ✓"),
+                    ("0.05–0.10","Sınırda anlamlı"),
+                    ("> 0.10",  "Anlamlı değil — modelde tutma/çıkar"),
+                ]),
+            ], width=4),
+
+            # ── Sağ: Sık karşılaşılan sorunlar ───────────────────────────
+            dbc.Col([
+                html.P("Sık Karşılaşılan Sorunlar", style={
+                    "fontSize": "0.7rem", "color": "#556070",
+                    "textTransform": "uppercase", "letterSpacing": "0.08em",
+                    "marginBottom": "0.5rem"}),
+
+                _faq_item("IV = 0 geliyor", [
+                    "Train setinde yeterli event veya non-event yok (< 5 adet).",
+                    "Değişken bu segmentte sabit (zero variance) — tüm değerler aynı.",
+                    "sklearn ≥ 1.6 + eski optbinning uyumsuzluğu: modules/deep_dive.py "
+                    "başındaki monkey-patch bloğunun çalıştığından emin olun.",
+                    "Çözüm: Değişken tipini 'Kategorik' olarak zorla ve tekrar dene. "
+                    "Ya da train/OOT kesim tarihini kaydırarak train setini büyüt.",
+                ], "error"),
+
+                _faq_item("PSI hesaplanamıyor (—)", [
+                    "Tarih kolonu seçilmemiş → sol panelden tarih kolonu seç.",
+                    "OOT kesim tarihi tanımlanmamış → 'PSI Kesim Tarihi' dropdown'ını doldur.",
+                    "Seçilen kesim tarihinde o değişken tamamen eksik.",
+                    "Baseline veya OOT periyodunda değişken sabit → PSI matematiksel olarak 0/inf üretir.",
+                ], "warning"),
+
+                _faq_item("WOE tablosu boş geliyor", [
+                    "Target binary değil — WOE yalnızca 0/1 target için hesaplanır.",
+                    "Train setinde çok az gözlem var.",
+                    "Max Bin Sayısı değerini düşür (4 → 2) ve tekrar dene.",
+                ], "warning"),
+
+                _faq_item("Korelasyon matrisinde NaN / boş hücreler", [
+                    "İki değişkenden biri sabit (zero variance) → korelasyon tanımsız.",
+                    "Değişkende yüksek eksik veri varsa korelasyon çifti düşüyor.",
+                    "Kategorik kolonlar otomatik çıkarılır; encode edilmiş hali dahil edilmez.",
+                ], "info"),
+
+                _faq_item("Çoklu tablo join sonrası beklenmedik kolon sayısı", [
+                    "Join key dışında her iki tabloda da ortak kolon varsa (ör. Model_Segment) "
+                    "otomatik olarak tablo 1'den alınır, tablo 2/3'ten düşürülür.",
+                    "Beklenen kolon sayısı: T1 + T2 + T3 − (join_key × 3) − ortak_kolon × (n-1).",
+                    "Kontrol: yükleme sonrası 'Önizleme' sekmesinde kolon listesine bak.",
+                ], "info"),
+
+                _faq_item("Logistic Regression modeli kurulamıyor (BFGS hatası)", [
+                    "WOE sütunlarında NaN/Inf var — değişken seçiminde sorunlu sütunları çıkar.",
+                    "Target tüm train setinde aynı değer (all-0 veya all-1) → segment filtresi genişlet.",
+                    "Çok fazla değişken az gözlem ile birleşince matris tekil (singular) olabilir — "
+                    "değişken sayısını azalt veya L2 regularization için C değerini düşür.",
+                ], "error"),
+
+                _faq_item("Segment seçince metrikler değişmiyor", [
+                    "Segment kolonu ve değeri doğru seçildi mi? Sol panel → 'Segment Değeri'.",
+                    "Seçilen segmentte çok az satır varsa bazı hesaplamalar boş dönebilir.",
+                    "Bazı hesaplamalar df_active (segment filtreli), bazıları df_train kullanır — "
+                    "OOT/train split segment filtresini de etkiler.",
+                ], "info"),
+
+            ], width=8),
+        ]),
+
+        # ── Alt: Versiyon / env notu ──────────────────────────────────────────
+        html.Hr(style={"borderColor": "#2d3a4f", "marginTop": "1.5rem"}),
+        html.Div([
+            html.Span("Bağımlılıklar: ", style={"color": "#556070", "fontSize": "0.72rem"}),
+            html.Span("optbinning · scikit-learn · statsmodels · lightgbm · xgboost · shap",
+                      style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
+            html.Br(),
+            html.Span("sklearn ≥ 1.6 monkey-patch: ", style={"color": "#556070", "fontSize": "0.72rem"}),
+            html.Span("modules/deep_dive.py — başında otomatik uygulanır.",
+                      style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
+        ]),
+    ], style={"padding": "1.5rem"})
+
+
 def build_sidebar():
     return html.Div([
 
@@ -895,6 +1044,8 @@ def build_main():
                 dcc.Store(id="store-pg-model-vars", storage_type="memory"),
             ]), label="Playground", tab_id="tab-playground",
                className="tab-content-area"),
+            dbc.Tab(_build_help_tab(), label="Yardım", tab_id="tab-help",
+                    className="tab-content-area"),
         ], id="main-tabs", active_tab="tab-preview", className="main-tabs"),
     ], id="main-content")
 
