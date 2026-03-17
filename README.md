@@ -133,7 +133,11 @@ SQL / CSV → df_original (server-side cache, UUID key)
                 └─ modules/screening.py      (eksik/sabit eleme)
 ```
 
-**Temel kural:** `df_original` hiçbir zaman değiştirilmez. Tüm analizler `df_active.copy()` üzerinde çalışır.
+**Temel kural:** `df_original` hiçbir zaman değiştirilmez. Tüm analizler `df_active` üzerinde çalışır.
+
+### Precompute — Background Thread
+
+Yapılandırma onaylanınca IV Ranking, Profiling ve Korelasyon hesaplamaları ayrı bir `threading.Thread` içinde çalışır. Dash ana thread'i bloklanmaz; diğer sekmeler hesaplama süresince kullanılabilir. İlerleme 300ms aralıklarla `dcc.Interval` üzerinden UI'ya yansır.
 
 ---
 
@@ -192,7 +196,9 @@ Windows Authentication kullanılır, kullanıcı adı/şifre gerekmez.
 
 ```
 EDA-LAB/
-├── app.py                  # Ana uygulama
+├── app.py                  # Giriş noktası (23 satır)
+├── app_instance.py         # Dash app tanımı — tek yer
+├── server_state.py         # Paylaşılan state (_SERVER_STORE, _PRECOMPUTE_PROGRESS)
 ├── benchmark.py            # Performans test scripti
 ├── setup_deps.py           # Otomatik bağımlılık yükleyici
 ├── pip_prefix.txt          # Kurumsal pip prefix (opsiyonel)
@@ -201,6 +207,21 @@ EDA-LAB/
 │   └── custom.css          # Dark tema stilleri
 ├── data/
 │   └── loader.py           # SQL bağlantısı
+├── layout/
+│   └── __init__.py         # build_layout() — sidebar, tab yapıları
+├── callbacks/
+│   ├── __init__.py         # Tüm modülleri import eder (kayıt tetikler)
+│   ├── data_loading.py     # CSV/SQL yükleme, config, segment
+│   ├── precompute.py       # Background thread + progress modal
+│   ├── preview.py          # Metrikler + veri önizleme + ön eleme raporu
+│   ├── profiling.py        # Profiling sekmesi
+│   ├── target_iv.py        # Target & IV sekmesi
+│   ├── outlier.py          # Outlier Analizi sekmesi
+│   ├── deep_dive.py        # Değişken Analizi (WoE, PSI, bivariate)
+│   ├── correlation.py      # Korelasyon sekmesi
+│   ├── stat_tests.py       # Chi-Square, ANOVA, KS, VIF
+│   ├── var_summary.py      # Değişken Özeti
+│   └── playground.py       # Grafik + Hızlı Model + SHAP
 ├── modules/
 │   ├── profiling.py        # Veri profiling
 │   ├── target_analysis.py  # Target & IV hesaplamaları
@@ -208,7 +229,8 @@ EDA-LAB/
 │   ├── correlation.py      # Korelasyon matrisi, VIF
 │   └── screening.py        # Kolon kalite filtresi
 └── utils/
-    └── helpers.py          # Segment filtresi vb.
+    ├── helpers.py          # Segment filtresi
+    └── chart_helpers.py    # Grafik teması, DataTable stili, tab_info, r badge
 ```
 
 ---
@@ -224,6 +246,12 @@ EDA-LAB/
 ---
 
 ## Değişiklik Geçmişi
+
+### v1.3
+- **Modüler mimari** — 5232 satırlık monolitik `app.py` 17 dosyaya bölündü; her sekme bağımsız bir `callbacks/` modülü
+- **Background thread precompute** — IV Ranking ve ağır hesaplamalar ayrı thread'de çalışır, Dash ana thread'i bloklanmaz; diğer sekmeler hesaplama sırasında kullanılabilir
+- **Otomatik precompute başlatma** — yapılandırma onaylanınca hesaplama kendiliğinden başlar, "Başlat" butonu kaldırıldı
+- **Precompute buton kaydı düzeltildi** — butonlar baştan layout'a hidden olarak eklendi; Dash frontend ID'leri sayfa yüklenirken tanır
 
 ### v1.2
 - **Precompute Popup** — yapılandırma onaylanınca IV Ranking, Profiling, Korelasyon adım adım hesaplanır; sekmelerde cold-start bekleme ortadan kalkar
