@@ -227,27 +227,26 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
 
     # ── Birleştirilmiş bin sınırlarını parse et (PSI için) ───────────────────
     if is_numeric:
-        main_bins = result[~result["Bin"].isin(["TOPLAM", "Eksik"])
-                          & ~result["Bin"].str.startswith("Special")]
-        parsed_edges = []
-        for label in main_bins["Bin"]:
-            m = _INTERVAL_RE.match(str(label))
-            if m:
-                lo = m.group(2).strip()
-                hi = m.group(3).strip()
-                try:
+        try:
+            skip_labels = {"TOPLAM", "Eksik"}
+            main_bin_labels = [
+                b for b in result["Bin"].tolist()
+                if isinstance(b, str) and b not in skip_labels and not b.startswith("Special")
+            ]
+            parsed_edges = []
+            for label in main_bin_labels:
+                m = _INTERVAL_RE.match(label)
+                if m:
+                    lo, hi = m.group(2).strip(), m.group(3).strip()
                     lo_val = -np.inf if lo in ("-inf", "-Inf", "−inf") else float(lo)
-                except ValueError:
-                    lo_val = -np.inf
-                try:
-                    hi_val = np.inf if hi in ("inf", "Inf") else float(hi)
-                except ValueError:
-                    hi_val = np.inf
-                if not parsed_edges:
-                    parsed_edges.append(lo_val)
-                parsed_edges.append(hi_val)
-        if len(parsed_edges) >= 2:
-            _bin_edges = np.array(parsed_edges, dtype=float)
+                    hi_val =  np.inf if hi in ("inf",  "Inf")          else float(hi)
+                    if not parsed_edges:
+                        parsed_edges.append(lo_val)
+                    parsed_edges.append(hi_val)
+            if len(parsed_edges) >= 2:
+                _bin_edges = np.array(parsed_edges, dtype=float)
+        except Exception:
+            _bin_edges = None
 
     return result, iv_total, _bin_edges
 
@@ -255,17 +254,16 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
 def compute_iv_ranking_optimal(df: pd.DataFrame, target: str,
                                 max_n_bins: int = 4) -> pd.DataFrame:
     """Tüm değişkenler için IV hesaplar (tam veri)."""
-    local = df.copy()
     records = []
-    for col in local.columns:
+    for col in df.columns:
         if col == target:
             continue
         try:
-            _, iv, _ = get_woe_detail(local, col, target, max_n_bins)
+            _, iv, _ = get_woe_detail(df, col, target, max_n_bins)
             records.append({
                 "Değişken": col,
                 "IV":       round(iv, 4),
-                "Eksik %":  round(local[col].isna().mean() * 100, 2),
+                "Eksik %":  round(df[col].isna().mean() * 100, 2),
                 "Güç":      _iv_label(iv),
             })
         except Exception:
