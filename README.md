@@ -28,7 +28,7 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 - **Müşteri bazında detay** — seçilen kimlik kolonu üzerinden her müşterinin kaç farklı değişkende aykırı olduğu
 
 ### İstatistiksel Testler
-- **Korelasyon** — Pearson r matrisi, çift scatter, VIF
+- **Korelasyon** — Pearson r matrisi (|r| ≥ 0.60 çiftler), scatter, VIF
 - **Chi-Square** — Cramér's V, contingency heatmap
 - **ANOVA** — F-testi, grup istatistikleri, box plot
 - **KS** — Ampirik CDF karşılaştırması, Good vs Bad
@@ -39,6 +39,83 @@ Logistic Regression · LightGBM · XGBoost · Random Forest — train/test ayrı
 
 - **Eşik optimizasyonu** — Sabit 0.50 / F1 Maks. / KS Noktası / Özel
 - **SHAP Beeswarm** — Tree modeller için tüm test verisi üzerinde shap.summary_plot ile özellik katkı grafiği
+
+### Sistem Hazırlama (Precompute)
+Yapılandırma onaylandıktan sonra bir popup açılır ve IV Ranking, Profiling, Korelasyon gibi ağır hesaplamalar arka planda adım adım yapılır. Her adımın durumu ve süresi görüntülenir. Tamamlandıktan sonra sekmeler açılışta bekleme olmadan çalışır.
+
+---
+
+## Performans — Benchmark Testi
+
+**Test ortamı:** Windows 11 Pro · Python 3.13.3 · 16 çekirdek · 31.2 GB RAM
+**Test verisi:** 5,745,504 satır × 37 kolon (4 Parquet klasörü + 1 CSV, merge edilmiş)
+**Kütüphaneler:** Pandas 2.3.3 · scikit-learn 1.8.0 · LightGBM 4.6.0 · XGBoost 3.1.2 · SHAP 0.50.0
+
+### Veri Yükleme
+
+| İşlem | Süre | RAM Artışı |
+|-------|------|-----------|
+| Parquet + CSV okuma + 4 tablo merge | **4.4s** | +2,319 MB |
+
+5.7M satırlık veri 4.4 saniyede belleğe alınıyor.
+
+### Modül Bazında Performans
+
+| Test | Süre | Durum |
+|------|------|-------|
+| Profiling (37 kolon) | **11.2s** | ✓ |
+| Target İstatistikleri | **0.04s** | ✓ |
+| IV Ranking — tüm numerik kolonlar | **282s** | ⚠ cache ile ilk seferlik |
+| Ön Eleme (Screening) | **3.7s** | ✓ |
+| Korelasyon Matrisi (30 kolon) | **7.3s** | ✓ |
+| VIF (30 kolon) | **0.7s** | ✓ |
+| WOE Detail (1 kolon) | **14.5s** | ✓ |
+| PSI (1 kolon) | **4.1s** | ✓ |
+| Variable Stats (1 kolon) | **0.6s** | ✓ |
+| Target Over Time | **0.3s** | ✓ |
+| High Corr Pairs (threshold=0.7) | **7.3s** | ✓ |
+| Chi-Square testi | **13.2s** | ✓ |
+| ANOVA testi (200k/grup örnekleme) | **0.1s** | ✓ |
+| KS testi (tam veri) | **0.05s** | ✓ |
+| Outlier IQR 1.5 (20 kolon) | **1.9s** | ✓ |
+| Outlier IQR 3.0 (20 kolon) | **1.9s** | ✓ |
+| Outlier Z-Score 3.0 (20 kolon) | **1.9s** | ✓ |
+| Müşteri Outlier Tablosu (IQR 1.5) | **3.3s** | ✓ |
+
+### Segment Filtresi Etkisi
+
+| Veri Boyutu | Profiling | IV Ranking | Outlier IQR |
+|-------------|-----------|-----------|-------------|
+| %100 — 5,745,504 satır | 11.5s | 291s | 2.0s |
+| %50 — 2,872,752 satır | 5.3s | 139s | 1.0s |
+| %10 — 574,550 satır | 0.9s | **12s** | 0.2s |
+
+Segment filtresi IV Ranking'i **23×** hızlandırıyor. Küçük segment ile çalışmak önerilir.
+
+### Model Eğitimi
+
+| Model | Fit Süresi | Notlar |
+|-------|-----------|--------|
+| Logistic Regression | **20.6s** | 4M satır, SAGA solver |
+| LightGBM | **3.7s** | 100 estimator |
+| XGBoost | **3.6s** | 100 estimator |
+| Random Forest | **47.0s** | 100 estimator |
+
+### SHAP (1,723,652 satır test seti)
+
+| Model | SHAP Süresi | RAM Artışı |
+|-------|------------|-----------|
+| LightGBM | **59.4s** | +408 MB |
+| XGBoost | **3.9s** | +414 MB |
+| Random Forest | — | Atlandı (saat mertebesi) |
+
+### Temel Bulgular
+
+**Darboğaz:** IV Ranking, tüm veri üzerinde ~282 saniye sürmektedir. Bu değer segment filtresiyle dramatik biçimde düşmektedir (%10 segmentte 12s). Uygulama bu hesabı `key + segment` kombinasyonu başına bir kez yapıp cache'ler; aynı sekmede ikinci açılış anında gelir. Yapılandırma onayı sırasında açılan precompute popup'ı bu süreyi ilk kullanımda şeffaf hale getirir.
+
+**Hızlı olanlar:** Veri yükleme (4.4s), Outlier (2s), KS testi (0.05s), VIF (0.7s), LightGBM fit (3.7s) ve XGBoost SHAP (3.9s) beklenen sürelerin çok altındadır.
+
+**SHAP notu:** Random Forest SHAP, 1.7M satır ve 100 ağaç kombinasyonunda saat mertebesinde sürmektedir. Büyük veri setlerinde RF seçilmesi durumunda örnekleme önerilir.
 
 ---
 
@@ -115,7 +192,8 @@ Windows Authentication kullanılır, kullanıcı adı/şifre gerekmez.
 
 ```
 EDA-LAB/
-├── app.py                  # Ana uygulama (~5000 satır)
+├── app.py                  # Ana uygulama
+├── benchmark.py            # Performans test scripti
 ├── setup_deps.py           # Otomatik bağımlılık yükleyici
 ├── pip_prefix.txt          # Kurumsal pip prefix (opsiyonel)
 ├── config.toml             # DB bağlantı ayarları
@@ -140,11 +218,19 @@ EDA-LAB/
 - 5M+ satır için optimize edilmiştir (server-side cache, aggregate-first istatistik)
 - Segment filtresi tüm sekmelere anlık yansır; `df_original`'e dokunmaz
 - WoE encode başarısız olan değişkenler ham değerle modele girer, sessizce atlanmaz — bildirim gösterilir
-- SHAP hesabı tüm test seti üzerinde çalışır; büyük veri setlerinde birkaç saniye sürebilir
+- SHAP hesabı tüm test seti üzerinde çalışır; Random Forest için büyük veri setlerinde örnekleme önerilir
+- PSI bin sınırları WOE analizi ile birebir aynıdır; tutarsız karşılaştırma olmaz
 
 ---
 
 ## Değişiklik Geçmişi
+
+### v1.2
+- **Precompute Popup** — yapılandırma onaylanınca IV Ranking, Profiling, Korelasyon adım adım hesaplanır; sekmelerde cold-start bekleme ortadan kalkar
+- **PSI bin düzeltmesi** — PSI artık WOE ile aynı bin sınırlarını kullanır; bin sayısı ve aralıklar birebir eşleşir, x ekseni numerik sırayla görünür
+- **Korelasyon çiftleri** — |r| < 0.60 çiftler tabloda gösterilmez, gürültü azaltıldı
+- **Benchmark testi** — 5.7M satır veri seti üzerinde tüm modüller ölçüldü, sonuçlar README'ye eklendi
+- `benchmark.py` scripti eklendi
 
 ### v1.1
 - **Outlier Analizi sekmesi** eklendi (IQR / Z-score, müşteri bazında detay tablosu)

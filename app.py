@@ -11,6 +11,7 @@ except Exception as _dep_err:
 import threading
 import webbrowser
 import uuid
+import time
 
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
@@ -110,7 +111,7 @@ _SIDEBAR_CLOSED_STYLE = {"maxWidth": "0", "overflow": "hidden", "opacity": "0",
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.DARKLY],
-    title="EDA Laboratuvarı",
+    title="EDA LAB",
     suppress_callback_exceptions=True,
 )
 
@@ -127,7 +128,7 @@ def build_navbar():
         dbc.Container([
             html.Div([
                 html.Span("EDA", className="navbar-logo-text"),
-                html.Span("Laboratuvarı", className="navbar-brand-title"),
+                html.Span("LAB", className="navbar-brand-title"),
             ], style={"display": "flex", "alignItems": "baseline", "gap": "0.4rem"}),
             html.Div("Keşifsel Veri Analizi", className="navbar-subtitle"),
         ], fluid=True, style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
@@ -853,6 +854,39 @@ app.layout = html.Div([
     dcc.Store(id="store-key", storage_type="memory"),
     dcc.Store(id="store-config", storage_type="memory"),
     dcc.Store(id="store-expert-exclude", storage_type="memory"),
+    dcc.Store(id="store-precompute-state", storage_type="memory"),
+    dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
+
+    # ── Precompute Modal ──────────────────────────────────────────────────────
+    dbc.Modal([
+        dbc.ModalHeader(
+            html.Div([
+                html.Span("Sistem Hazırlanıyor", style={
+                    "fontWeight": "700", "fontSize": "1.05rem", "color": "#c8cdd8"
+                }),
+                html.Span(" — sekmeler yüklendikten sonra bekleme olmayacak", style={
+                    "fontSize": "0.8rem", "color": "#6b7a99", "marginLeft": "8px"
+                }),
+            ]),
+            close_button=False,
+            style={"backgroundColor": "#0e1117", "borderBottom": "1px solid #1e2a3a"},
+        ),
+        dbc.ModalBody(
+            id="precompute-modal-body",
+            style={"backgroundColor": "#0e1117", "padding": "1.5rem 2rem"},
+        ),
+        dbc.ModalFooter(
+            id="precompute-modal-footer",
+            style={"backgroundColor": "#0e1117", "borderTop": "1px solid #1e2a3a"},
+        ),
+    ],
+        id="modal-precompute",
+        is_open=False,
+        backdrop="static",
+        keyboard=False,
+        size="lg",
+        style={"zIndex": 9999},
+    ),
 ])
 
 
@@ -1000,10 +1034,100 @@ def open_config_section(key):
     return True, all_opts, date_opts, seg_opts
 
 
+# ── Precompute yardımcıları ───────────────────────────────────────────────────
+_PRECOMPUTE_STEPS = [
+    {"key": "screening",    "label": "Ön Eleme (Screening)"},
+    {"key": "profiling",    "label": "Profil Analizi"},
+    {"key": "iv_ranking",   "label": "IV Ranking"},
+    {"key": "correlation",  "label": "Korelasyon Matrisi"},
+]
+
+def _precompute_step_row(step_key: str, label: str, status: str, duration: float = None):
+    """status: 'done' | 'running' | 'waiting'"""
+    if status == "done":
+        icon  = html.Span("✓", style={"color": "#10b981", "fontWeight": "700", "marginRight": "10px", "fontSize": "1rem"})
+        text_style = {"color": "#c8cdd8"}
+        dur_text = f"{duration:.1f}s" if duration is not None else ""
+    elif status == "running":
+        icon  = html.Span("⟳", style={"color": "#4F8EF7", "fontWeight": "700", "marginRight": "10px", "fontSize": "1rem"})
+        text_style = {"color": "#4F8EF7"}
+        dur_text = "hesaplanıyor..."
+    else:
+        icon  = html.Span("○", style={"color": "#3a4a60", "marginRight": "10px", "fontSize": "1rem"})
+        text_style = {"color": "#3a4a60"}
+        dur_text = "bekliyor"
+
+    return html.Div([
+        icon,
+        html.Span(label, style={**text_style, "fontSize": "0.9rem", "width": "220px", "display": "inline-block"}),
+        html.Span(dur_text, style={"color": "#6b7a99", "fontSize": "0.8rem", "marginLeft": "12px"}),
+    ], style={"padding": "6px 0", "display": "flex", "alignItems": "center"})
+
+
+def _build_modal_body(step_idx: int, durations: dict):
+    """step_idx: şu an hangi adım çalışıyor (0-based). -1 = tüm adımlar bitti."""
+    rows = []
+    for i, s in enumerate(_PRECOMPUTE_STEPS):
+        if i < step_idx:
+            status = "done"
+        elif i == step_idx:
+            status = "running"
+        else:
+            status = "waiting"
+        rows.append(_precompute_step_row(s["key"], s["label"], status, durations.get(s["key"])))
+
+    n_done   = step_idx
+    n_total  = len(_PRECOMPUTE_STEPS)
+    pct      = int(n_done / n_total * 100)
+    bar_fill = f"{pct}%"
+
+    progress = html.Div([
+        html.Div(style={
+            "height": "6px", "width": bar_fill,
+            "backgroundColor": "#4F8EF7", "borderRadius": "3px",
+            "transition": "width 0.4s ease",
+        }),
+    ], style={
+        "height": "6px", "backgroundColor": "#1e2a3a",
+        "borderRadius": "3px", "marginTop": "20px",
+    })
+
+    return html.Div([
+        html.Div(rows),
+        progress,
+        html.Div(f"%{pct} tamamlandı", style={
+            "color": "#6b7a99", "fontSize": "0.78rem", "marginTop": "6px", "textAlign": "right"
+        }),
+    ])
+
+
+def _build_modal_body_done(durations: dict):
+    rows = [_precompute_step_row(s["key"], s["label"], "done", durations.get(s["key"]))
+            for s in _PRECOMPUTE_STEPS]
+    total = sum(v for v in durations.values() if v)
+    return html.Div([
+        html.Div(rows),
+        html.Div([
+            html.Div(style={
+                "height": "6px", "width": "100%",
+                "backgroundColor": "#10b981", "borderRadius": "3px",
+            }),
+        ], style={"height": "6px", "backgroundColor": "#1e2a3a", "borderRadius": "3px", "marginTop": "20px"}),
+        html.Div(f"Tüm adımlar tamamlandı — {total:.1f}s", style={
+            "color": "#10b981", "fontSize": "0.78rem", "marginTop": "6px", "textAlign": "right"
+        }),
+    ])
+
+
 # ── Callback: Yapılandırmayı Onayla ──────────────────────────────────────────
 @app.callback(
     Output("store-config", "data"),
     Output("config-status", "children"),
+    Output("store-precompute-state", "data"),
+    Output("modal-precompute", "is_open"),
+    Output("interval-precompute", "disabled"),
+    Output("precompute-modal-body", "children"),
+    Output("precompute-modal-footer", "children"),
     Input("btn-confirm", "n_clicks"),
     State("dd-target-col", "value"),
     State("dd-date-col", "value"),
@@ -1012,11 +1136,12 @@ def open_config_section(key):
     prevent_initial_call=True,
 )
 def confirm_config(n_clicks, target_col, date_col, segment_col, key):
+    no_modal = (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
     if not target_col or target_col == "":
-        return dash.no_update, dbc.Alert(
+        return (dash.no_update, dbc.Alert(
             "Target kolonu zorunludur.", color="warning",
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
-        )
+        ), *no_modal)
 
     config = {
         "target_col": target_col,
@@ -1024,13 +1149,15 @@ def confirm_config(n_clicks, target_col, date_col, segment_col, key):
         "segment_col": segment_col or None,
     }
 
-    # ── Ön Eleme ──────────────────────────────────────────────────────────────
-    df = _get_df(key)
-    if df is not None:
-        passed, screen_report = screen_columns(
-            df, target_col, date_col or None, segment_col or None
-        )
-        _SERVER_STORE[f"{key}_screen"] = (passed, screen_report)
+    precompute_state = {
+        "step": 0,   # 0 = screening adımından başla
+        "key": key,
+        "target": target_col,
+        "date_col": date_col or None,
+        "seg_col": segment_col or None,
+        "seg_val": None,
+        "durations": {},
+    }
 
     parts = [html.Strong("✓ Onaylandı")]
     if date_col:
@@ -1038,10 +1165,107 @@ def confirm_config(n_clicks, target_col, date_col, segment_col, key):
     if segment_col:
         parts += [f"  ·  Segment: {segment_col}"]
 
-    return config, dbc.Alert(
-        parts, color="success",
-        style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
+    initial_body   = _build_modal_body(0, {})
+    initial_footer = html.Div()
+
+    return (
+        config,
+        dbc.Alert(parts, color="success", style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"}),
+        precompute_state,
+        True,    # modal aç
+        False,   # interval etkinleştir
+        initial_body,
+        initial_footer,
     )
+
+
+# ── Callback: Precompute Interval ────────────────────────────────────────────
+@app.callback(
+    Output("precompute-modal-body",   "children", allow_duplicate=True),
+    Output("precompute-modal-footer", "children", allow_duplicate=True),
+    Output("store-precompute-state",  "data",     allow_duplicate=True),
+    Output("interval-precompute",     "disabled", allow_duplicate=True),
+    Output("modal-precompute",        "is_open",  allow_duplicate=True),
+    Input("interval-precompute", "n_intervals"),
+    State("store-precompute-state", "data"),
+    prevent_initial_call=True,
+)
+def precompute_tick(n, state):
+    if not state or state.get("step") is None:
+        return dash.no_update, dash.no_update, dash.no_update, True, dash.no_update
+
+    step      = state["step"]
+    key       = state["key"]
+    target    = state["target"]
+    date_col  = state.get("date_col")
+    seg_col   = state.get("seg_col")
+    seg_val   = state.get("seg_val")
+    durations = state.get("durations", {})
+
+    df_orig = _get_df(key)
+    if df_orig is None:
+        return dash.no_update, dash.no_update, dash.no_update, True, False
+
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    # ── Adım 0: Screening ────────────────────────────────────────────────────
+    if step == 0:
+        t0 = time.perf_counter()
+        passed, screen_report = screen_columns(df_active, target, date_col, seg_col)
+        _SERVER_STORE[f"{key}_screen"] = (passed, screen_report)
+        durations["screening"] = round(time.perf_counter() - t0, 1)
+        new_state = {**state, "step": 1, "durations": durations}
+        return _build_modal_body(1, durations), html.Div(), new_state, False, True
+
+    # ── Adım 1: Profiling ────────────────────────────────────────────────────
+    elif step == 1:
+        t0 = time.perf_counter()
+        prof = compute_profile(df_active)
+        _SERVER_STORE[f"{key}_profile_{seg_col}_{seg_val}"] = prof
+        durations["profiling"] = round(time.perf_counter() - t0, 1)
+        new_state = {**state, "step": 2, "durations": durations}
+        return _build_modal_body(2, durations), html.Div(), new_state, False, True
+
+    # ── Adım 2: IV Ranking ───────────────────────────────────────────────────
+    elif step == 2:
+        t0 = time.perf_counter()
+        num_cols_pre = [c for c in df_active.select_dtypes(include=[np.number]).columns
+                        if c != target]
+        iv_df = compute_iv_ranking_optimal(df_active, target, num_cols_pre)
+        cache_key = f"{key}_iv_{seg_col}_{seg_val}"
+        _SERVER_STORE[cache_key] = iv_df
+        durations["iv_ranking"] = round(time.perf_counter() - t0, 1)
+        new_state = {**state, "step": 3, "durations": durations}
+        return _build_modal_body(3, durations), html.Div(), new_state, False, True
+
+    # ── Adım 3: Korelasyon ───────────────────────────────────────────────────
+    elif step == 3:
+        t0 = time.perf_counter()
+        num_cols_corr = [c for c in df_active.select_dtypes(include=[np.number]).columns
+                         if c != target][:30]
+        corr_df = compute_correlation_matrix(df_active, num_cols_corr)
+        _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}_precomp"] = (corr_df, num_cols_corr)
+        durations["correlation"] = round(time.perf_counter() - t0, 1)
+        new_state = {**state, "step": 4, "durations": durations}
+        done_body   = _build_modal_body_done(durations)
+        done_footer = dbc.Button(
+            "Tamam — Sekmelere Git",
+            id="btn-precompute-close",
+            color="primary",
+            style={"fontSize": "0.85rem", "padding": "0.4rem 1.2rem"},
+        )
+        return done_body, done_footer, new_state, True, True
+
+    return dash.no_update, dash.no_update, dash.no_update, True, dash.no_update
+
+
+@app.callback(
+    Output("modal-precompute", "is_open", allow_duplicate=True),
+    Input("btn-precompute-close", "n_clicks"),
+    prevent_initial_call=True,
+)
+def close_precompute_modal(n):
+    return False
 
 
 # ── Callback: Segment değer dropdown'ını aç ───────────────────────────────────
@@ -2209,12 +2433,13 @@ def render_deep_dive_content(col, psi_split, dd_config):
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
     vstats   = get_variable_stats(df_active, col, target)
-    woe_df, iv_total_dd, _ = get_woe_detail(df_active, col, target)
+    woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(df_active, col, target)
     cutoff_date = psi_split if psi_split else None
     psi_res = compute_psi(
         df_active, col, target,
         date_col=date_col if date_col else None,
         cutoff_date=cutoff_date,
+        bin_edges=woe_bin_edges,
     )
 
     is_num = vstats["is_numeric"]
@@ -2878,7 +3103,7 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
     fig_heat.update_layout(margin=dict(l=120, r=40, t=50, b=120))
 
     # ── 2. Tüm çiftler tablosu (|r| büyükten küçüğe) ─────────────────────────
-    all_pairs = find_high_corr_pairs(corr_df, threshold=0.0)
+    all_pairs = find_high_corr_pairs(corr_df, threshold=0.60)
 
     # ── 3. Korelasyon Çifti dropdownları ──────────────────────────────────────
     var_opts = [{"label": c, "value": c} for c in cols]

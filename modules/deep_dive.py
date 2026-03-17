@@ -72,10 +72,12 @@ def _compute_woe_stats(df: pd.DataFrame, total_bad: float, total_good: float,
 
 
 def get_woe_detail(df: pd.DataFrame, col: str, target: str,
-                   max_n_bins: int = 4) -> tuple[pd.DataFrame, float, None]:
+                   max_n_bins: int = 4) -> tuple[pd.DataFrame, float, object]:
     """
     Monoton WOE/IV tablosu döndürür.
-    Returns: (woe_df, iv_total, None)
+    Returns: (woe_df, iv_total, bin_edges)
+    bin_edges: numerik kolonlar için WOE'de kullanılan bin sınırları (numpy array),
+               kategorik kolonlar için None. PSI'ya geçirilerek aynı sınırlar kullanılır.
     """
     local = df[[col, target]].copy()
     local[target] = local[target].astype(float)
@@ -100,6 +102,8 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
 
     # ── Binning ───────────────────────────────────────────────────────────────
     bins_list = []
+
+    _bin_edges = None   # PSI'ya aktarılacak WOE bin sınırları (merge sonrası)
 
     if is_numeric:
         # Eksik bin
@@ -221,7 +225,31 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
     }])
     result = pd.concat([result, total_row], ignore_index=True)
 
-    return result, iv_total, None
+    # ── Birleştirilmiş bin sınırlarını parse et (PSI için) ───────────────────
+    if is_numeric:
+        main_bins = result[~result["Bin"].isin(["TOPLAM", "Eksik"])
+                          & ~result["Bin"].str.startswith("Special")]
+        parsed_edges = []
+        for label in main_bins["Bin"]:
+            m = _INTERVAL_RE.match(str(label))
+            if m:
+                lo = m.group(2).strip()
+                hi = m.group(3).strip()
+                try:
+                    lo_val = -np.inf if lo in ("-inf", "-Inf", "−inf") else float(lo)
+                except ValueError:
+                    lo_val = -np.inf
+                try:
+                    hi_val = np.inf if hi in ("inf", "Inf") else float(hi)
+                except ValueError:
+                    hi_val = np.inf
+                if not parsed_edges:
+                    parsed_edges.append(lo_val)
+                parsed_edges.append(hi_val)
+        if len(parsed_edges) >= 2:
+            _bin_edges = np.array(parsed_edges, dtype=float)
+
+    return result, iv_total, _bin_edges
 
 
 def compute_iv_ranking_optimal(df: pd.DataFrame, target: str,
@@ -259,7 +287,7 @@ def _iv_label(iv: float) -> str:
 
 def compute_psi(df: pd.DataFrame, col: str, target: str,
                 date_col: str = None, cutoff_date: str = None,
-                max_n_bins: int = 4) -> dict:
+                max_n_bins: int = 4, bin_edges=None) -> dict:
     """
     PSI hesaplar.
     1. Baseline (tarih öncesi) üzerinde bin sınırları belirlenir.
@@ -289,38 +317,52 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
     if len(df_base) == 0 or len(df_comp) == 0:
         return {"psi": None, "error": "Split sonucu boş segment."}
 
-    # ── Baseline üzerinde bin sınırları ───────────────────────────────────────
+    # ── Bin sınırları: WOE'dan geldiyse kullan, yoksa baseline'dan hesapla ────
     if is_numeric:
-        base_clean = df_base[col].dropna()
-        base_clean = base_clean[~base_clean.isin(SPECIAL_VALUES)]
-        try:
-            _, bin_edges = pd.qcut(base_clean, q=max_n_bins,
+        if bin_edges is not None:
+            # WOE ile aynı sınırları kullan
+            edges = np.array(bin_edges, dtype=float)
+            edges[0]  = -np.inf
+            edges[-1] =  np.inf
+        else:
+            base_clean = df_base[col].dropna()
+            base_clean = base_clean[~base_clean.isin(SPECIAL_VALUES)]
+            try:
+                _, edges = pd.qcut(base_clean, q=max_n_bins,
                                    duplicates="drop", retbins=True)
-            bin_edges[0]  = -np.inf
-            bin_edges[-1] =  np.inf
+                edges[0]  = -np.inf
+                edges[-1] =  np.inf
+            except Exception as e:
+                return {"psi": None, "error": f"Bin hatası: {e}"}
 
-            def _cut(s):
-                return pd.cut(s, bins=bin_edges, include_lowest=True).astype(str).fillna("Eksik")
-
-            base_binned = _cut(df_base[col])
-            comp_binned = _cut(df_comp[col])
+        try:
+            # Interval nesnelerini koru — str'e çevirme, sıralama için gerekli
+            base_binned = pd.cut(df_base[col], bins=edges, include_lowest=True)
+            comp_binned = pd.cut(df_comp[col], bins=edges, include_lowest=True)
         except Exception as e:
-            return {"psi": None, "error": f"Bin hatası: {e}"}
+            return {"psi": None, "error": f"Cut hatası: {e}"}
     else:
         top_cats    = df_base[col].value_counts().head(max_n_bins).index
         base_binned = df_base[col].where(df_base[col].isin(top_cats), "Diğer").fillna("Eksik").astype(str)
         comp_binned = df_comp[col].where(df_comp[col].isin(top_cats), "Diğer").fillna("Eksik").astype(str)
 
     # ── PSI hesabı ────────────────────────────────────────────────────────────
-    base_dist = base_binned.value_counts(normalize=True).sort_index()
-    comp_dist = comp_binned.value_counts(normalize=True).sort_index()
+    base_dist = base_binned.value_counts(normalize=True)
+    comp_dist = comp_binned.value_counts(normalize=True)
 
-    all_bins  = sorted(set(base_dist.index) | set(comp_dist.index), key=str)
+    # Numerik: Interval nesneleri sol sınıra göre doğal sıralanır
+    # Kategorik: string olarak alfabetik sıra
+    try:
+        all_bins = sorted(set(base_dist.index) | set(comp_dist.index))
+    except TypeError:
+        all_bins = sorted(set(base_dist.index) | set(comp_dist.index), key=str)
     eps       = 1e-9
     psi_total = 0.0
     rows      = []
 
     for b in all_bins:
+        if b is None or (hasattr(b, '__class__') and b.__class__.__name__ == 'float' and np.isnan(b)):
+            continue   # NaN bin'i atla
         p_base   = float(base_dist.get(b, eps))
         p_comp   = float(comp_dist.get(b, eps))
         psi_part = (p_comp - p_base) * np.log((p_comp + eps) / (p_base + eps))
