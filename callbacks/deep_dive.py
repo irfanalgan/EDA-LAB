@@ -255,11 +255,79 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 ])
 
     # ── 2. Dağılım Grafikleri ─────────────────────────────────────────────────
+    _has_date = bool(date_col and date_col in df_active.columns)
+
+    def _build_temporal_fig(df_t, col_t, target_t, target_type_t, date_col_t, is_num_t):
+        """Zaman bazlı dağılım: x=tarih periyodu, bar=değişken ort./sayı, line=DR."""
+        tmp = df_t[[col_t, target_t, date_col_t]].copy()
+        tmp[date_col_t] = pd.to_datetime(tmp[date_col_t], errors="coerce")
+        tmp = tmp.dropna(subset=[date_col_t])
+        tmp["_period"] = tmp[date_col_t].dt.to_period("M").astype(str)
+
+        if is_num_t:
+            tmp_c = tmp.dropna(subset=[col_t])
+            bar_agg = (tmp_c.groupby("_period")[col_t]
+                       .mean().reset_index().rename(columns={col_t: "_bar"}))
+            bar_label = f"Ort. {col_t}"
+            bar_hover = "Ort. Değer: %{y:.4f}"
+        else:
+            bar_agg = (tmp.groupby("_period")[col_t]
+                       .count().reset_index().rename(columns={col_t: "_bar"}))
+            bar_label = "Gözlem"
+            bar_hover = "Gözlem: %{y:,}"
+
+        tmp_dr = tmp.dropna(subset=[target_t]).copy()
+        tmp_dr[target_t] = pd.to_numeric(tmp_dr[target_t], errors="coerce")
+        tmp_dr = tmp_dr.dropna(subset=[target_t])
+        dr_agg = (tmp_dr.groupby("_period")[target_t]
+                  .mean().reset_index().rename(columns={target_t: "_dr"}))
+
+        merged = bar_agg.merge(dr_agg, on="_period", how="left").sort_values("_period")
+
+        if target_type_t == "binary":
+            merged["_dr"] = (merged["_dr"] * 100).round(2)
+            dr_label, dr_suffix = "Default Rate %", "%"
+        else:
+            dr_label, dr_suffix = f"Ort. {target_t}", ""
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=merged["_period"], y=merged["_bar"],
+            name=bar_label,
+            marker_color="#4F8EF7", opacity=0.7,
+            hovertemplate=f"Dönem: %{{x}}<br>{bar_hover}<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=merged["_period"], y=merged["_dr"],
+            name=dr_label,
+            mode="lines+markers",
+            line=dict(color="#ef4444", width=2),
+            marker=dict(size=5),
+            yaxis="y2",
+            hovertemplate=f"Dönem: %{{x}}<br>{dr_label}: %{{y:.2f}}{dr_suffix}<extra></extra>",
+        ))
+        fig.update_layout(
+            **_PLOT_LAYOUT,
+            title=dict(text=f"{col_t} — Zaman Dağılımı", font=dict(color="#E8EAF0", size=13)),
+            xaxis=dict(**_AXIS_STYLE, tickangle=-30),
+            yaxis=dict(**_AXIS_STYLE, title=bar_label),
+            yaxis2=dict(
+                title=dr_label, overlaying="y", side="right",
+                showgrid=False, zeroline=False,
+                tickfont=dict(color="#ef4444", size=9),
+                ticksuffix=dr_suffix,
+            ),
+            legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
+            height=320,
+        )
+        return fig
+
     if is_num:
         local = df_active[[col, target]].dropna(subset=[col, target]).copy()
 
-        if target_type == "continuous":
-            # Continuous target: basit histogram + scatter (col vs target)
+        if _has_date:
+            fig_dist = _build_temporal_fig(df_active, col, target, target_type, date_col, True)
+        elif target_type == "continuous":
             fig_dist = go.Figure()
             fig_dist.add_trace(go.Histogram(
                 x=local[col], name=col,
@@ -283,83 +351,41 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 yaxis=dict(**_AXIS_STYLE, title="Frekans"),
                 height=320,
             )
-
-            # Scatter: col vs target (korelasyon görselleştirmesi)
-            sample = local.sample(min(2000, len(local)), random_state=42)
-            fig_scatter = go.Figure(go.Scatter(
-                x=sample[col], y=sample[target],
-                mode="markers",
-                marker=dict(color="#4F8EF7", opacity=0.4, size=4),
-                hovertemplate=f"{col}: %{{x}}<br>{target}: %{{y}}<extra></extra>",
-            ))
-            fig_scatter.update_layout(
-                **_PLOT_LAYOUT,
-                title=dict(text=f"{col} vs {target} — Scatter", font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title=col),
-                yaxis=dict(**_AXIS_STYLE, title=target),
-                height=320,
-            )
-
-            dist_section = dbc.Row([
-                dbc.Col(dcc.Graph(figure=fig_dist,    config={"displayModeBar": False}), width=6),
-                dbc.Col(dcc.Graph(figure=fig_scatter, config={"displayModeBar": False}), width=6),
-            ], className="mb-4")
-
         else:
-            # Binary / multiclass: bad rate by decile (eşit frekanslı 10 dilim)
+            # Binary / multiclass — decile fallback (tarih yok)
             local_br = local.dropna(subset=[col, target]).copy()
             local_br[target] = pd.to_numeric(local_br[target], errors="coerce")
             local_br = local_br.dropna(subset=[target])
-
             try:
                 local_br["_decile"] = pd.qcut(local_br[col], q=10, labels=False,
                                                duplicates="drop")
             except Exception:
                 local_br["_decile"] = pd.cut(local_br[col], bins=10, labels=False)
-
             decile_agg = (
                 local_br.groupby("_decile", observed=True)
-                .agg(
-                    bad_rate=(target, "mean"),
-                    count=(target, "count"),
-                    min_val=(col, "min"),
-                    max_val=(col, "max"),
-                )
-                .reset_index()
-                .sort_values("_decile")
+                .agg(bad_rate=(target, "mean"), count=(target, "count"),
+                     min_val=(col, "min"), max_val=(col, "max"))
+                .reset_index().sort_values("_decile")
             )
             decile_agg["bad_rate_pct"] = (decile_agg["bad_rate"] * 100).round(2)
             decile_agg["bin_label"] = decile_agg.apply(
-                lambda r: f"[{r['min_val']:.2f}, {r['max_val']:.2f}]", axis=1
-            )
-
+                lambda r: f"[{r['min_val']:.2f}, {r['max_val']:.2f}]", axis=1)
+            overall_br = local_br[target].mean() * 100
             fig_dist = go.Figure()
             fig_dist.add_trace(go.Bar(
-                x=decile_agg["bin_label"],
-                y=decile_agg["count"],
-                name="Gözlem",
-                marker_color="#4F8EF7",
-                opacity=0.6,
-                yaxis="y2",
+                x=decile_agg["bin_label"], y=decile_agg["count"],
+                name="Gözlem", marker_color="#4F8EF7", opacity=0.6, yaxis="y2",
                 hovertemplate="Aralık: %{x}<br>Gözlem: %{y:,}<extra></extra>",
             ))
             fig_dist.add_trace(go.Scatter(
-                x=decile_agg["bin_label"],
-                y=decile_agg["bad_rate_pct"],
-                name="Bad Rate %",
-                mode="lines+markers",
-                line=dict(color="#ef4444", width=2),
-                marker=dict(size=7),
-                yaxis="y",
+                x=decile_agg["bin_label"], y=decile_agg["bad_rate_pct"],
+                name="Bad Rate %", mode="lines+markers",
+                line=dict(color="#ef4444", width=2), marker=dict(size=7), yaxis="y",
                 hovertemplate="Aralık: %{x}<br>Bad Rate: %{y:.2f}%<extra></extra>",
             ))
-            # overall bad rate reference line
-            overall_br = local_br[target].mean() * 100
-            fig_dist.add_hline(
-                y=overall_br, line_dash="dot", line_color="#f59e0b",
-                annotation_text=f"Ortalama %{overall_br:.2f}",
-                annotation_font_color="#f59e0b", annotation_font_size=9,
-            )
+            fig_dist.add_hline(y=overall_br, line_dash="dot", line_color="#f59e0b",
+                               annotation_text=f"Ortalama %{overall_br:.2f}",
+                               annotation_font_color="#f59e0b", annotation_font_size=9)
             fig_dist.update_layout(
                 **_PLOT_LAYOUT,
                 title=dict(text=f"{col} — Bad Rate by Desil", font=dict(color="#E8EAF0", size=13)),
@@ -372,14 +398,34 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 height=320,
             )
 
-            # Target grubu istatistik karşılaştırma tablosu
+        if target_type == "continuous" and not _has_date:
+            # Scatter: col vs target
+            sample = local.sample(min(2000, len(local)), random_state=42)
+            fig_scatter = go.Figure(go.Scatter(
+                x=sample[col], y=sample[target], mode="markers",
+                marker=dict(color="#4F8EF7", opacity=0.4, size=4),
+                hovertemplate=f"{col}: %{{x}}<br>{target}: %{{y}}<extra></extra>",
+            ))
+            fig_scatter.update_layout(
+                **_PLOT_LAYOUT,
+                title=dict(text=f"{col} vs {target} — Scatter", font=dict(color="#E8EAF0", size=13)),
+                xaxis=dict(**_AXIS_STYLE, title=col),
+                yaxis=dict(**_AXIS_STYLE, title=target),
+                height=320,
+            )
+            dist_section = dbc.Row([
+                dbc.Col(dcc.Graph(figure=fig_dist,    config={"displayModeBar": False}), width=6),
+                dbc.Col(dcc.Graph(figure=fig_scatter, config={"displayModeBar": False}), width=6),
+            ], className="mb-4")
+        else:
+            # Binary/multiclass — stat table on right
             local_tbl = local.dropna(subset=[target]).copy()
             local_tbl[target] = local_tbl[target].astype(str).str.replace(r'\.0$', '', regex=True)
             grp_data = {str(int(float(tv))): g[col].dropna()
                         for tv, g in local_tbl.groupby(local_tbl[target])}
             stat_rows = []
             for stat_name, fn in [
-                ("Gözlem",  lambda s: f"{len(s):,}"),
+                ("Gözlem",   lambda s: f"{len(s):,}"),
                 ("Ortalama", lambda s: f"{s.mean():.4f}"),
                 ("Std",      lambda s: f"{s.std():.4f}"),
                 ("Min",      lambda s: f"{s.min():.4f}"),
@@ -394,7 +440,6 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 for tv, g in grp_data.items():
                     row[f"Target={tv}"] = fn(g) if len(g) else "—"
                 stat_rows.append(row)
-
             stat_tbl_cols = ["İstatistik"] + [f"Target={k}" for k in sorted(grp_data.keys())]
             stat_table = dash_table.DataTable(
                 data=stat_rows,
@@ -426,47 +471,46 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
             ], className="mb-4")
 
     else:
-        # Kategorik — bar chart
-        local = df_active[[col, target]].copy()
-        local[col] = local[col].fillna("Eksik").astype(str)
-        top_cats = local[col].value_counts().head(20).index
-        local = local[local[col].isin(top_cats)]
-
-        fig_dist = go.Figure()
-        if target_type == "continuous":
-            # Continuous target: sadece frekans (target kırılımı anlamsız)
-            vc = local[col].value_counts().reset_index()
-            vc.columns = [col, "count"]
-            fig_dist.add_trace(go.Bar(
-                x=vc[col], y=vc["count"],
-                marker_color="#4F8EF7",
-                hovertemplate="%{x}<br>Sayı: %{y}<extra></extra>",
-            ))
-            bar_title = f"{col} — Değer Dağılımı (Top 20)"
+        # Kategorik
+        if _has_date:
+            fig_dist = _build_temporal_fig(df_active, col, target, target_type, date_col, False)
         else:
-            local[target] = pd.to_numeric(local[target], errors='coerce')
-            local = local.dropna(subset=[target])
-            vc = local.groupby([col, target]).size().reset_index(name="count")
-            vc[target] = vc[target].astype(str).str.replace(r'\.0$', '', regex=True)
-            colors = {"0": "#4F8EF7", "1": "#ef4444"}
-            for t_val, grp in vc.groupby(target):
+            local = df_active[[col, target]].copy()
+            local[col] = local[col].fillna("Eksik").astype(str)
+            top_cats = local[col].value_counts().head(20).index
+            local = local[local[col].isin(top_cats)]
+            fig_dist = go.Figure()
+            if target_type == "continuous":
+                vc = local[col].value_counts().reset_index()
+                vc.columns = [col, "count"]
                 fig_dist.add_trace(go.Bar(
-                    x=grp[col], y=grp["count"],
-                    name=f"Target={t_val}",
-                    marker_color=colors.get(str(t_val), "#8892a4"),
+                    x=vc[col], y=vc["count"], marker_color="#4F8EF7",
                     hovertemplate="%{x}<br>Sayı: %{y}<extra></extra>",
                 ))
-            bar_title = f"{col} — Değer Dağılımı (Top 20)"
-
-        fig_dist.update_layout(
-            **_PLOT_LAYOUT,
-            barmode="stack",
-            title=dict(text=bar_title, font=dict(color="#E8EAF0", size=13)),
-            xaxis=dict(**_AXIS_STYLE, title=col, tickangle=-30),
-            yaxis=dict(**_AXIS_STYLE, title="Frekans"),
-            legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
-            height=340,
-        )
+                bar_title = f"{col} — Değer Dağılımı (Top 20)"
+            else:
+                local[target] = pd.to_numeric(local[target], errors='coerce')
+                local = local.dropna(subset=[target])
+                vc = local.groupby([col, target]).size().reset_index(name="count")
+                vc[target] = vc[target].astype(str).str.replace(r'\.0$', '', regex=True)
+                colors = {"0": "#4F8EF7", "1": "#ef4444"}
+                for t_val, grp in vc.groupby(target):
+                    fig_dist.add_trace(go.Bar(
+                        x=grp[col], y=grp["count"],
+                        name=f"Target={t_val}",
+                        marker_color=colors.get(str(t_val), "#8892a4"),
+                        hovertemplate="%{x}<br>Sayı: %{y}<extra></extra>",
+                    ))
+                bar_title = f"{col} — Değer Dağılımı (Top 20)"
+            fig_dist.update_layout(
+                **_PLOT_LAYOUT,
+                barmode="stack",
+                title=dict(text=bar_title, font=dict(color="#E8EAF0", size=13)),
+                xaxis=dict(**_AXIS_STYLE, title=col, tickangle=-30),
+                yaxis=dict(**_AXIS_STYLE, title="Frekans"),
+                legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
+                height=340,
+            )
         dist_section = html.Div([
             dcc.Graph(figure=fig_dist, config={"displayModeBar": False}),
         ], className="mb-4")
