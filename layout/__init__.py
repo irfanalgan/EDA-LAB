@@ -91,15 +91,9 @@ def build_sidebar():
             # Tablo listesi
             dbc.Label("Tablolar", className="form-label"),
             # Tablo 1 — master, her zaman görünür
-            dbc.InputGroup([
-                dbc.Input(id="input-table-1", type="text", placeholder="dbo.TABLO1",
-                          className="form-control",
-                          style={"fontSize": "0.82rem"}),
-                dbc.InputGroupText("Master",
-                                   style={"fontSize": "0.7rem", "color": "#a78bfa",
-                                          "backgroundColor": "#1a1f2e",
-                                          "border": "1px solid #2d3a4f"}),
-            ], className="mb-1"),
+            dbc.Input(id="input-table-1", type="text", placeholder="dbo.TABLO1",
+                      className="form-control mb-1",
+                      style={"fontSize": "0.82rem"}),
             # Tablo 2 — gizli başlar
             html.Div(id="sql-table-row-2", style={"display": "none"}, children=[
                 dbc.InputGroup([
