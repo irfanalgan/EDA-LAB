@@ -8,7 +8,7 @@ import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, detect_target_type
 from modules.profiling import compute_profile
 from modules.deep_dive import compute_iv_ranking_optimal
 from modules.correlation import compute_correlation_matrix
@@ -193,10 +193,14 @@ def confirm_config(n_clicks, target_col, date_col, segment_col, key):
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
         ), *no_modal)
 
+    df_orig = _get_df(key)
+    target_type = detect_target_type(df_orig[target_col]) if df_orig is not None else "binary"
+
     config = {
-        "target_col": target_col,
-        "date_col": date_col or None,
+        "target_col":  target_col,
+        "date_col":    date_col or None,
         "segment_col": segment_col or None,
+        "target_type": target_type,
     }
 
     prog_key = f"{key}_precompute"

@@ -10,6 +10,7 @@ import pandas as pd
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from data.loader import get_data_from_sql
+from utils.helpers import coerce_numeric_columns
 
 
 # ── Callback: Kaynak Toggle ───────────────────────────────────────────────────
@@ -62,11 +63,13 @@ def load_csv(n_clicks, contents, filename, sep):
         decoded = base64.b64decode(content_string)
         df = pd.read_csv(io.StringIO(decoded.decode("utf-8", errors="replace")),
                          sep=sep, low_memory=False)
+        df, converted = coerce_numeric_columns(df)
         key = str(uuid.uuid4())
         _SERVER_STORE[key] = df
+        conv_note = f"  ·  {len(converted)} kolon otomatik numerik dönüştürüldü" if converted else ""
         return key, dbc.Alert(
             [html.Strong(f"{len(df):,} satır"),
-             f"  ·  {df.shape[1]} kolon  ·  {filename}"],
+             f"  ·  {df.shape[1]} kolon  ·  {filename}{conv_note}"],
             color="success",
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
         )
@@ -93,12 +96,14 @@ def load_data(n_clicks, table_name):
         )
     try:
         df = get_data_from_sql(table_name.strip())
+        df, converted = coerce_numeric_columns(df)
         key = str(uuid.uuid4())
         _SERVER_STORE[key] = df
+        conv_note = f"  ·  {len(converted)} kolon otomatik numerik dönüştürüldü" if converted else ""
         return key, dbc.Alert(
             [
                 html.Strong(f"{len(df):,} satır"),
-                f"  ·  {df.shape[1]} kolon yüklendi.",
+                f"  ·  {df.shape[1]} kolon yüklendi.{conv_note}",
             ],
             color="success",
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},

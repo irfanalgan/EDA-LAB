@@ -108,6 +108,7 @@ def render_deep_dive_content(col, psi_split, dd_config):
     seg_val  = dd_config.get("seg_val")
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
+
     vstats   = get_variable_stats(df_active, col, target)
     woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(df_active, col, target)
     cutoff_date = psi_split if psi_split else None
@@ -163,8 +164,8 @@ def render_deep_dive_content(col, psi_split, dd_config):
     # ── 2. Dağılım Grafikleri ─────────────────────────────────────────────────
     if is_num:
         # Histogram — target sınıflarına göre renkli
-        local = df_active[[col, target]].dropna(subset=[col]).copy()
-        local[target] = local[target].astype(str)
+        local = df_active[[col, target]].dropna(subset=[col, target]).copy()
+        local[target] = local[target].astype(str).str.replace(r'\.0$', '', regex=True)
 
         fig_dist = go.Figure()
         colors = {"0": "#4F8EF7", "1": "#ef4444"}
@@ -200,6 +201,7 @@ def render_deep_dive_content(col, psi_split, dd_config):
 
         # Target grubu istatistik karşılaştırma tablosu
         stat_rows = []
+        local = local.dropna(subset=[target])
         grp_data = {str(int(float(tv))): g[col].dropna()
                     for tv, g in local.groupby(local[target])}
         for stat_name, fn in [
@@ -253,16 +255,17 @@ def render_deep_dive_content(col, psi_split, dd_config):
         # Kategorik — bar chart (value counts, target rengi)
         local = df_active[[col, target]].copy()
         local[col]    = local[col].fillna("Eksik").astype(str)
-        local[target] = local[target].astype(float)
+        local[target] = pd.to_numeric(local[target], errors='coerce')
+        local = local.dropna(subset=[target])
         top_cats = local[col].value_counts().head(20).index
         local = local[local[col].isin(top_cats)]
         vc = local.groupby([col, target]).size().reset_index(name="count")
-        vc[target] = vc[target].astype(str)
+        vc[target] = vc[target].astype(str).str.replace(r'\.0$', '', regex=True)
         total = vc.groupby(col)["count"].transform("sum")
         vc["pct"] = (vc["count"] / total * 100).round(1)
 
         fig_dist = go.Figure()
-        colors = {"0.0": "#4F8EF7", "1.0": "#ef4444"}
+        colors = {"0": "#4F8EF7", "1": "#ef4444"}
         for t_val, grp in vc.groupby(target):
             fig_dist.add_trace(go.Bar(
                 x=grp[col], y=grp["count"],

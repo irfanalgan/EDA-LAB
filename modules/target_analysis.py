@@ -6,7 +6,10 @@ import pandas as pd
 def compute_target_stats(df: pd.DataFrame, target: str) -> dict:
     """Target değişkeninin temel istatistiklerini hesaplar."""
     local = df[[target]].copy()
-    s = local[target].astype(float)
+    if local[target].dtype == object:
+        local[target] = (local[target].astype(str)
+                         .str.replace('%', '', regex=False).str.strip())
+    s = pd.to_numeric(local[target], errors='coerce')
 
     total    = len(s)
     missing  = int(s.isna().sum())
@@ -35,7 +38,10 @@ def compute_target_over_time(df: pd.DataFrame, target: str, date_col: str,
     """
     local = df[[date_col, target]].copy()
     local[date_col] = pd.to_datetime(local[date_col], errors="coerce")
-    local[target]   = local[target].astype(float)
+    if local[target].dtype == object:
+        local[target] = (local[target].astype(str)
+                         .str.replace('%', '', regex=False).str.strip())
+    local[target] = pd.to_numeric(local[target], errors='coerce')
     local = local.dropna(subset=[date_col])
     local = local.set_index(date_col).sort_index()
 

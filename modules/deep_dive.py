@@ -80,7 +80,10 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
                kategorik kolonlar için None. PSI'ya geçirilerek aynı sınırlar kullanılır.
     """
     local = df[[col, target]].copy()
-    local[target] = local[target].astype(float)
+    if local[target].dtype == object:
+        local[target] = (local[target].astype(str)
+                         .str.replace('%', '', regex=False).str.strip())
+    local[target] = pd.to_numeric(local[target], errors='coerce')
     local = local.dropna(subset=[target])
 
     total_bad  = local[target].sum()
@@ -294,7 +297,10 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
     """
     cols_needed = [col, target] + ([date_col] if date_col and date_col in df.columns else [])
     local = df[cols_needed].copy()
-    local[target] = local[target].astype(float)
+    if local[target].dtype == object:
+        local[target] = (local[target].astype(str)
+                         .str.replace('%', '', regex=False).str.strip())
+    local[target] = pd.to_numeric(local[target], errors='coerce')
     is_numeric    = pd.api.types.is_numeric_dtype(local[col])
 
     # ── Split ─────────────────────────────────────────────────────────────────
@@ -431,7 +437,12 @@ def get_variable_stats(df: pd.DataFrame, col: str, target: str) -> dict:
         base["top5"] = s.value_counts().head(5).to_dict()
 
     lc = df[[col, target]].copy()
-    lc[target] = lc[target].astype(float)
+    # String-formatted numbers ('1.49%', '0.5', vb.) için güvenli dönüşüm
+    if lc[target].dtype == object:
+        lc[target] = (lc[target].astype(str)
+                      .str.replace('%', '', regex=False)
+                      .str.strip())
+    lc[target] = pd.to_numeric(lc[target], errors='coerce')
     if missing > 0:
         base["missing_bad_rate"] = round(float(lc[lc[col].isna()][target].mean() * 100), 2)
         base["present_bad_rate"] = round(float(lc[lc[col].notna()][target].mean() * 100), 2)

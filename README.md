@@ -247,6 +247,17 @@ EDA-LAB/
 
 ## Değişiklik Geçmişi
 
+### v1.4
+- **Target Tipi Tespiti** — `confirm_config` anında target kolonu otomatik olarak `binary | continuous | multiclass | categorical` olarak sınıflandırılır; tüm sekmeler bu bilgiyi kullanır
+- **Target & IV sekmesi** — binary dışı targetlar için IV/WoE yerine dağılım grafiği, temel istatistikler ve zaman serisi gösterilir; IV'nin binary-only olduğuna dair açıklama notu eklendi
+- **Değişken Özeti** — binary olmayan targetlarda IV yerine **Mutual Information** (sklearn) kullanılır; `MI` sütunu ve eşik notları eklendi
+- **KS Testi** — binary: Good vs Bad; multiclass: dominant sınıf vs diğerleri; continuous: medyan split (Düşük / Yüksek)
+- **Chi-Square** — continuous target seçildiğinde otomatik `qcut(5)` ile 5 gruba bölünür
+- **ANOVA → Kruskal-Wallis** — multiclass ve 3+ sınıf varsa parametrik olmayan Kruskal-Wallis testi otomatik devreye girer
+- **Playground Regresyon** — continuous target için Ridge, LightGBM Regressor, XGBoost Regressor, Random Forest Regressor eklendi; metrikler R² · RMSE · MAE; Actual vs Predicted scatter + artık dağılımı grafiği
+- **Preview target kartı** — binary: bad rate; continuous: ortalama + min/max/std tooltip; multiclass: sınıf sayısı; categorical: unique değer sayısı
+- **Genel numeric yükleme** — CSV/SQL yüklemede tüm object kolonlar %95 eşikle otomatik numerik dönüşüme tabi tutulur
+
 ### v1.3
 - **Modüler mimari** — 5232 satırlık monolitik `app.py` 17 dosyaya bölündü; her sekme bağımsız bir `callbacks/` modülü
 - **Background thread precompute** — IV Ranking ve ağır hesaplamalar ayrı thread'de çalışır, Dash ana thread'i bloklanmaz; diğer sekmeler hesaplama sırasında kullanılabilir

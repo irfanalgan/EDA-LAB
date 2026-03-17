@@ -1,6 +1,8 @@
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
+import numpy as np
+from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -29,22 +31,60 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     if df_orig is None:
         return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
 
-    target    = config["target_col"]
-    date_col  = config.get("date_col")
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    use_woe   = "woe" in (woe_toggle or [])
+    target      = config["target_col"]
+    date_col    = config.get("date_col")
+    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    target_type = config.get("target_type", "binary")
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    use_woe     = "woe" in (woe_toggle or [])
 
-    # ── 1. IV + Eksik% — her zaman ham veriden ────────────────────────────────
-    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
-    if iv_cache_key in _SERVER_STORE:
-        iv_df = _SERVER_STORE[iv_cache_key]
+    # ── 1. IV (binary) veya Mutual Information (non-binary) ───────────────────
+    is_binary = target_type == "binary"
+
+    if is_binary:
+        iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
+        if iv_cache_key in _SERVER_STORE:
+            iv_df = _SERVER_STORE[iv_cache_key]
+        else:
+            iv_df = compute_iv_ranking_optimal(df_active, target)
+            _SERVER_STORE[iv_cache_key] = iv_df
+
+        summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
+        var_list = summary["Değişken"].tolist()
     else:
-        iv_df = compute_iv_ranking_optimal(df_active, target)
-        _SERVER_STORE[iv_cache_key] = iv_df
+        # Mutual Information — binary olmayan targetlar için
+        num_cols = [c for c in df_active.columns
+                    if c != target and pd.api.types.is_numeric_dtype(df_active[c])]
+        y_mi = pd.to_numeric(df_active[target], errors="coerce")
+        valid_mask = y_mi.notna()
+        X_mi = df_active[num_cols].loc[valid_mask].fillna(0)
+        y_mi = y_mi[valid_mask]
 
-    summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
-    var_list = summary["Değişken"].tolist()
+        mi_fn = (mutual_info_regression if target_type == "continuous"
+                 else mutual_info_classif)
+        try:
+            mi_scores = mi_fn(X_mi, y_mi, random_state=42)
+        except Exception:
+            mi_scores = np.zeros(len(num_cols))
+
+        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)
+        summary = pd.DataFrame({
+            "Değişken": num_cols,
+            "MI":        np.round(mi_scores, 6),
+            "Eksik %":   eksik_pct.values,
+        })
+        # MI gücü etiketleri (IV eşiklerine kaba benzeşim)
+        def _mi_guc(v):
+            if v < 0.01:  return "Çok Zayıf"
+            if v < 0.05:  return "Zayıf"
+            if v < 0.15:  return "Orta"
+            if v < 0.30:  return "Güçlü"
+            return "Şüpheli"
+        summary["Güç"] = summary["MI"].apply(_mi_guc)
+        summary = summary.sort_values("MI", ascending=False).reset_index(drop=True)
+        var_list = summary["Değişken"].tolist()
+        # IV sütununu "IV" yerine "MI" adıyla tutuyoruz — öneri mantığı aşağıda adapte
+        summary = summary.rename(columns={"MI": "IV"})
 
     # ── 2. WoE dataset (gerekiyorsa) ──────────────────────────────────────────
     if use_woe:
@@ -153,6 +193,7 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     summary["PSI Durum"] = summary["Değişken"].map(lambda v: psi_label_map.get(v, "—"))
 
     # ── 5. Öneri mantığı ──────────────────────────────────────────────────────
+    # Non-binary: IV sütunu aslında MI — eşikler aynı (MI ölçeği benzer)
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
@@ -211,7 +252,26 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     ]
 
     # Öneri ve Sebep kolonlarını öne al
-    col_order = ["Değişken", "Öneri", "Sebep", "IV", "Güç", "Eksik %",
+    # Non-binary: "IV" sütununun görünen adını "MI" yap (kopyalamadan rename)
+    iv_col_label = "IV" if is_binary else "MI"
+    if not is_binary and "IV" in summary.columns:
+        summary = summary.rename(columns={"IV": "MI"})
+        style_conditions = [
+            s for s in style_conditions if '"IV"' not in str(s)
+        ] + [
+            {"if": {"filter_query": '{Güç} = "Güçlü"',     "column_id": "Güç"},
+             "color": "#10b981"},
+            {"if": {"filter_query": '{Güç} = "Orta"',      "column_id": "Güç"},
+             "color": "#4F8EF7"},
+            {"if": {"filter_query": '{Güç} = "Zayıf"',     "column_id": "Güç"},
+             "color": "#f59e0b"},
+            {"if": {"filter_query": '{Güç} = "Çok Zayıf"', "column_id": "Güç"},
+             "color": "#7e8fa4"},
+            {"if": {"filter_query": '{Güç} = "Şüpheli"',   "column_id": "Güç"},
+             "color": "#ef4444"},
+        ]
+
+    col_order = ["Değişken", "Öneri", "Sebep", iv_col_label, "Güç", "Eksik %",
                  "PSI", "PSI Durum", "Yüksek Korr.", "VIF"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
@@ -268,19 +328,26 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
             page_size=25,
             tooltip_header={
                 "Değişken":    {"value": "Değişkenin adı", "type": "markdown"},
-                "Öneri":       {"value": "IV, Eksik%, PSI, Korelasyon ve VIF'e göre otomatik öneri:\n"
+                "Öneri":       {"value": "IV/MI, Eksik%, PSI, Korelasyon ve VIF'e göre otomatik öneri:\n"
                                          "- **✅ Tut** — Tüm kriterler tatmin edici\n"
                                          "- **⚠️ İncele** — En az bir zayıf sinyal var\n"
                                          "- **❌ Çıkar** — Kritik sorun tespit edildi", "type": "markdown"},
                 "Sebep":       {"value": "Önerinin gerekçesi — hangi kural(lar) tetiklendi", "type": "markdown"},
-                "IV":          {"value": "**Information Value** — target ile doğrusal olmayan ilişki gücü\n\n"
+                "IV":          {"value": "**Information Value** — binary target ile doğrusal olmayan ilişki gücü\n\n"
                                          "| Aralık | Güç |\n|---|---|\n"
                                          "| < 0.02 | Çok Zayıf |\n"
                                          "| 0.02–0.10 | Zayıf |\n"
                                          "| 0.10–0.30 | Orta |\n"
                                          "| 0.30–0.50 | Güçlü |\n"
                                          "| > 0.50 | Şüpheli (overfit riski) |", "type": "markdown"},
-                "Güç":         {"value": "IV değerine göre değişken gücü kategorisi", "type": "markdown"},
+                "MI":          {"value": "**Mutual Information** — target ile ilişki gücü (binary olmayan targetlar)\n\n"
+                                         "| Aralık | Güç |\n|---|---|\n"
+                                         "| < 0.01 | Çok Zayıf |\n"
+                                         "| 0.01–0.05 | Zayıf |\n"
+                                         "| 0.05–0.15 | Orta |\n"
+                                         "| 0.15–0.30 | Güçlü |\n"
+                                         "| > 0.30 | Şüpheli (overfit riski) |", "type": "markdown"},
+                "Güç":         {"value": "IV/MI değerine göre değişken gücü kategorisi", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 80%** → Çıkar\n- **20–80%** → İncele", "type": "markdown"},
                 "PSI":         {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"

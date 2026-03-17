@@ -283,8 +283,75 @@ def _render_anova(df_active: pd.DataFrame, var_col: str, target: str) -> html.Di
     ])
 
 
+# ── Render: Kruskal-Wallis (multiclass / 3+ grup) ────────────────────────────
+def _render_kruskal(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
+    """Non-parametrik ANOVA: 3+ sınıf için grup dağılımı karşılaştırması."""
+    data = df_active[[var_col, target]].dropna()
+    data[var_col] = pd.to_numeric(data[var_col], errors="coerce")
+    data = data.dropna()
+    groups = [grp[var_col].values for _, grp in data.groupby(target)
+              if len(grp) >= 2]
+    if len(groups) < 2:
+        return html.Div("Yeterli grup yok (en az 2 sınıf gerekli).",
+                        className="alert-info-custom")
+    stat, p_val = scipy_stats.kruskal(*groups)
+    p_color = "#10b981" if p_val < 0.001 else "#f59e0b" if p_val < 0.05 else "#ef4444"
+    p_interp = (
+        "p < 0.001 — Gruplar arası medyan farklılığı istatistiksel olarak anlamlı"
+        if p_val < 0.001 else
+        f"p = {p_val:.4f} — Anlamlı farklılık" if p_val < 0.05
+        else f"p = {p_val:.4f} — Gruplar arası fark gözlenemedi (H₀ reddedilemedi)"
+    )
+    grp_stats = (data.groupby(target)[var_col]
+                 .agg(N="count", Medyan="median", Ort="mean", Std="std")
+                 .reset_index().round(4))
+    fig = go.Figure()
+    for cls, grp in data.groupby(target):
+        fig.add_trace(go.Box(
+            y=grp[var_col], name=str(int(float(cls))),
+            marker_color="#4F8EF7", boxmean="sd", opacity=0.8,
+        ))
+    fig.update_layout(
+        **_PLOT_LAYOUT,
+        title=dict(text=f"Kruskal-Wallis — {var_col} × {target}",
+                   font=dict(color="#E8EAF0", size=13)),
+        yaxis=dict(**{k: v for k, v in {
+            "gridcolor": "#1e293b", "tickfont": dict(color="#8892a4"),
+            "title": var_col,
+        }.items()}),
+        xaxis=dict(tickfont=dict(color="#8892a4"), title=target),
+        height=380,
+    )
+    return html.Div([
+        html.P("Kruskal-Wallis Testi (Multiclass)", className="section-title"),
+        html.Div(p_interp, style={"color": p_color, "fontSize": "0.82rem",
+                                  "marginBottom": "1rem", "fontWeight": "600"}),
+        dbc.Row([
+            dbc.Col(html.Div([html.Div("H İstatistiği", className="metric-label"),
+                              html.Div(f"{stat:.4f}", className="metric-value")],
+                             className="metric-card"), width=3),
+            dbc.Col(html.Div([html.Div("p-değeri", className="metric-label"),
+                              html.Div(f"{p_val:.6f}", className="metric-value",
+                                       style={"color": p_color})],
+                             className="metric-card"), width=3),
+            dbc.Col(html.Div([html.Div("Grup Sayısı", className="metric-label"),
+                              html.Div(str(len(groups)), className="metric-value")],
+                             className="metric-card"), width=3),
+        ], className="mb-3"),
+        dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        html.P("Grup Medyan İstatistikleri", className="section-title",
+               style={"marginTop": "1.5rem"}),
+        dash_table.DataTable(
+            data=grp_stats.to_dict("records"),
+            columns=[{"name": c, "id": c} for c in grp_stats.columns],
+            sort_action="native", **_TABLE_STYLE,
+        ),
+    ])
+
+
 # ── Render: KS Testi ─────────────────────────────────────────────────────────
-def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
+def _render_ks(df_active: pd.DataFrame, var_col: str, target: str,
+               target_type: str = "binary") -> html.Div:
     col_data = df_active[[var_col, target]].dropna()
     col_data = col_data[pd.api.types.is_numeric_dtype(col_data[var_col]) |
                         col_data[var_col].apply(lambda x: isinstance(x, (int, float)))]
@@ -294,8 +361,23 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
         pass
     col_data = col_data.dropna()
 
-    good = col_data[col_data[target] == 0][var_col].values
-    bad  = col_data[col_data[target] == 1][var_col].values
+    # Grubu target tipine göre belirle
+    if target_type == "binary":
+        good = col_data[col_data[target] == 0][var_col].values
+        bad  = col_data[col_data[target] == 1][var_col].values
+        grp_labels = ("Good (0)", "Bad (1)")
+    elif target_type == "multiclass":
+        # En büyük sınıf vs geri kalanlar
+        dominant = col_data[target].mode()[0]
+        good = col_data[col_data[target] == dominant][var_col].values
+        bad  = col_data[col_data[target] != dominant][var_col].values
+        grp_labels = (f"Dominant ({int(dominant)})", "Diğer Sınıflar")
+    else:
+        # Continuous/categorical: medyan split
+        med  = col_data[target].median()
+        good = col_data[col_data[target] <= med][var_col].values
+        bad  = col_data[col_data[target] >  med][var_col].values
+        grp_labels = (f"Düşük (≤ {med:.2f})", f"Yüksek (> {med:.2f})")
 
     if len(good) == 0 or len(bad) == 0:
         return html.Div("Yeterli veri yok — her iki grupta da gözlem gerekli.",
@@ -325,11 +407,11 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
             html.Div(f"{p_val:.6f}", className="metric-value", style={"color": p_color}),
         ], className="metric-card"), width=3),
         dbc.Col(html.Div([
-            html.Div("Good (0) N", className="metric-label"),
+            html.Div(f"{grp_labels[0]} N", className="metric-label"),
             html.Div(f"{len(good):,}", className="metric-value"),
         ], className="metric-card"), width=3),
         dbc.Col(html.Div([
-            html.Div("Bad (1) N", className="metric-label"),
+            html.Div(f"{grp_labels[1]} N", className="metric-label"),
             html.Div(f"{len(bad):,}", className="metric-value"),
         ], className="metric-card"), width=3),
     ], className="mb-3")
@@ -356,11 +438,11 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
     fig_cdf = go.Figure()
     fig_cdf.add_trace(go.Scatter(
         x=g_plot, y=g_cdf, mode="lines",
-        name="Good (0)", line=dict(color="#4F8EF7", width=2),
+        name=grp_labels[0], line=dict(color="#4F8EF7", width=2),
     ))
     fig_cdf.add_trace(go.Scatter(
         x=b_plot, y=b_cdf, mode="lines",
-        name="Bad (1)", line=dict(color="#ef4444", width=2),
+        name=grp_labels[1], line=dict(color="#ef4444", width=2),
     ))
     # KS mesafesi işareti
     fig_cdf.add_shape(
@@ -548,9 +630,21 @@ def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, seg_val,
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    max_cats  = int(max_cats_str or 15)
+    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    target_type = config.get("target_type", "binary")
+    target      = config.get("target_col", "")
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val).copy()
+    max_cats    = int(max_cats_str or 15)
+    # Continuous target: auto-bin ile 5 gruba böl
+    for col in [var1, var2]:
+        if col == target and target_type == "continuous":
+            try:
+                df_active[col] = pd.qcut(
+                    pd.to_numeric(df_active[col], errors="coerce"),
+                    q=5, duplicates="drop"
+                ).astype(str)
+            except Exception:
+                pass
     try:
         return _render_chi_square(df_active, var1, var2, max_cats)
     except Exception as exc:
@@ -574,12 +668,18 @@ def compute_anova(n_clicks, var_col, key, config, seg_val, seg_col_input):
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    target    = config.get("target_col")
+    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    target      = config.get("target_col")
+    target_type = config.get("target_type", "binary")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
     try:
+        # Multiclass ve 3+ sınıf varsa Kruskal-Wallis; diğerleri ANOVA
+        if target_type == "multiclass":
+            n_cls = df_active[target].dropna().nunique()
+            if n_cls >= 3:
+                return _render_kruskal(df_active, var_col, target)
         return _render_anova(df_active, var_col, target)
     except Exception as exc:
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
@@ -602,13 +702,14 @@ def compute_ks_test(n_clicks, var_col, key, config, seg_val, seg_col_input):
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    target    = config.get("target_col")
+    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    target      = config.get("target_col")
+    target_type = config.get("target_type", "binary")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
     try:
-        return _render_ks(df_active, var_col, target)
+        return _render_ks(df_active, var_col, target, target_type)
     except Exception as exc:
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 
