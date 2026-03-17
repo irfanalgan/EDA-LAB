@@ -104,40 +104,39 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
 
     # ── 1. Heatmap ────────────────────────────────────────────────────────────
     show_text = len(cols) <= 18
-    # Dark-theme uyumlu colorscale: 0 → plot arka planı, negatif → kırmızı, pozitif → mavi
-    _dark_corr_scale = [
-        [0.00, "#b91c1c"],  # -1.0  koyu kırmızı
-        [0.35, "#ef4444"],  # -0.3  açık kırmızı
-        [0.45, "#2d3a4f"],  # -0.1  arka plana yakın
-        [0.50, "#0E1117"],  # 0.0   plot arka planı
-        [0.55, "#1e3a5f"],  # +0.1  arka plana yakın
-        [0.65, "#4F8EF7"],  # +0.3  açık mavi
-        [1.00, "#1d4ed8"],  # +1.0  koyu mavi
-    ]
+    # Renk: mutlak değer yoğunluğu → kırmızı skalası (beyaz=0, koyu kırmızı=1)
+    # Gerçek değerler hover + text olarak gösterilir (negatif dahil)
+    z_abs  = corr_df.abs().values
+    z_text = corr_df.round(2).values if show_text else None
+
     fig_heat = go.Figure(go.Heatmap(
-        z=corr_df.values,
+        z=z_abs,
         x=cols, y=cols,
-        colorscale=_dark_corr_scale,
-        zmid=0, zmin=-1, zmax=1,
-        text=corr_df.round(2).values if show_text else None,
+        colorscale="Reds",
+        zmin=0, zmax=1,
+        text=z_text,
         texttemplate="%{text}" if show_text else None,
-        textfont=dict(size=9, color="#E8EAF0"),
+        textfont=dict(size=9, color="#222"),
+        customdata=corr_df.round(4).values,
         colorbar=dict(
-            title=dict(text="r", font=dict(color="#8892a4", size=11)),
+            title=dict(text="|r|", font=dict(color="#555", size=11)),
             thickness=12, len=0.8,
-            tickfont=dict(color="#8892a4", size=10),
+            tickfont=dict(color="#555", size=10),
         ),
-        hovertemplate="<b>%{y}</b> × <b>%{x}</b><br>r = %{z:.4f}<extra></extra>",
+        hovertemplate="<b>%{y}</b> × <b>%{x}</b><br>r = %{customdata:.4f}<extra></extra>",
     ))
     cell_px = max(18, min(40, 600 // max(len(cols), 1)))
     fig_heat.update_layout(
-        **_PLOT_LAYOUT,
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        font=dict(family="Inter, Segoe UI, sans-serif", color="#333", size=11),
+        margin=dict(l=40, r=20, t=40, b=40),
         title=dict(text=f"Korelasyon Matrisi  ({len(cols)} değişken)",
-                   font=dict(color="#E8EAF0", size=13)),
-        xaxis=dict(tickangle=-45, tickfont=dict(size=9, color="#8892a4"),
-                   showgrid=False, linecolor="#232d3f"),
-        yaxis=dict(tickfont=dict(size=9, color="#8892a4"),
-                   showgrid=False, linecolor="#232d3f", autorange="reversed"),
+                   font=dict(color="#333", size=13)),
+        xaxis=dict(tickangle=-45, tickfont=dict(size=9, color="#555"),
+                   showgrid=False, linecolor="#ddd"),
+        yaxis=dict(tickfont=dict(size=9, color="#555"),
+                   showgrid=False, linecolor="#ddd", autorange="reversed"),
         height=max(400, len(cols) * cell_px + 100),
     )
     fig_heat.update_layout(margin=dict(l=120, r=40, t=50, b=120))
