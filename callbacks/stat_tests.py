@@ -283,6 +283,103 @@ def _render_anova(df_active: pd.DataFrame, var_col: str, target: str) -> html.Di
     ])
 
 
+# ── Render: Pearson & Spearman Korelasyon (continuous target) ────────────────
+def _render_pearson_spearman(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
+    """Continuous target için sayısal değişken ~ target korelasyon testi."""
+    data = df_active[[var_col, target]].copy()
+    data[var_col] = pd.to_numeric(data[var_col], errors="coerce")
+    data[target]  = pd.to_numeric(data[target],  errors="coerce")
+    data = data.dropna()
+
+    if len(data) < 5:
+        return html.Div("Yeterli veri yok (en az 5 gözlem gerekli).",
+                        className="alert-info-custom")
+
+    pearson_r,  pearson_p  = scipy_stats.pearsonr(data[var_col], data[target])
+    spearman_r, spearman_p = scipy_stats.spearmanr(data[var_col], data[target])
+
+    def _p_color(p): return "#10b981" if p < 0.001 else "#f59e0b" if p < 0.05 else "#ef4444"
+    def _r_label(r):
+        a = abs(r)
+        return "Güçlü" if a >= 0.5 else "Orta" if a >= 0.3 else "Zayıf" if a >= 0.1 else "Önemsiz"
+
+    stat_cards = dbc.Row([
+        dbc.Col(html.Div([
+            html.Div("Pearson r", className="metric-label"),
+            html.Div(f"{pearson_r:+.4f}  ({_r_label(pearson_r)})",
+                     className="metric-value",
+                     style={"color": "#10b981" if abs(pearson_r) >= 0.3 else "#f59e0b"}),
+        ], className="metric-card"), width=3),
+        dbc.Col(html.Div([
+            html.Div("Pearson p", className="metric-label"),
+            html.Div(f"{pearson_p:.6f}", className="metric-value",
+                     style={"color": _p_color(pearson_p)}),
+        ], className="metric-card"), width=3),
+        dbc.Col(html.Div([
+            html.Div("Spearman ρ", className="metric-label"),
+            html.Div(f"{spearman_r:+.4f}  ({_r_label(spearman_r)})",
+                     className="metric-value",
+                     style={"color": "#10b981" if abs(spearman_r) >= 0.3 else "#f59e0b"}),
+        ], className="metric-card"), width=3),
+        dbc.Col(html.Div([
+            html.Div("Spearman p", className="metric-label"),
+            html.Div(f"{spearman_p:.6f}", className="metric-value",
+                     style={"color": _p_color(spearman_p)}),
+        ], className="metric-card"), width=3),
+    ], className="mb-3")
+
+    # Scatter + regresyon doğrusu (max 3000 örnek)
+    sample = data.sample(min(3000, len(data)), random_state=42)
+    coeffs  = np.polyfit(data[var_col], data[target], 1)
+    x_range = np.linspace(float(data[var_col].min()), float(data[var_col].max()), 100)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=sample[var_col], y=sample[target],
+        mode="markers",
+        marker=dict(color="#4F8EF7", opacity=0.35, size=4),
+        name="Gözlemler",
+        hovertemplate=f"{var_col}: %{{x:.3f}}<br>{target}: %{{y:.3f}}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=x_range, y=np.polyval(coeffs, x_range),
+        mode="lines", line=dict(color="#ef4444", width=2, dash="dash"),
+        name=f"Regresyon Doğrusu (y={coeffs[0]:+.3f}x {'+' if coeffs[1]>=0 else ''}{coeffs[1]:.3f})",
+    ))
+    fig.update_layout(
+        **_PLOT_LAYOUT,
+        title=dict(text=f"{var_col}  ×  {target} — Scatter & Korelasyon",
+                   font=dict(color="#E8EAF0", size=13)),
+        xaxis=dict(title=var_col, gridcolor="#1e293b", tickfont=dict(color="#8892a4")),
+        yaxis=dict(title=target,  gridcolor="#1e293b", tickfont=dict(color="#8892a4")),
+        height=400, showlegend=True,
+        legend=dict(font=dict(color="#c8cdd8", size=10), bgcolor="rgba(0,0,0,0)"),
+    )
+
+    p_interp_txt = (
+        "p < 0.001 — İlişki istatistiksel olarak çok anlamlı" if pearson_p < 0.001 else
+        f"p = {pearson_p:.4f} — Anlamlı ilişki" if pearson_p < 0.05 else
+        f"p = {pearson_p:.4f} — Anlamlı ilişki bulunamadı"
+    )
+    return html.Div([
+        html.P(f"Korelasyon Analizi — {var_col}  ×  {target}  (Continuous Target)",
+               className="section-title"),
+        html.Div(p_interp_txt, style={"color": _p_color(pearson_p), "fontSize": "0.82rem",
+                                      "marginBottom": "1rem", "fontWeight": "600"}),
+        stat_cards,
+        dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        html.Div([
+            html.Span("Not: ", style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
+            html.Span(
+                f"Scatter için en fazla 3.000 örnek gösterilir. "
+                f"Pearson doğrusal ilişkiyi, Spearman monoton ilişkiyi ölçer. "
+                f"N = {len(data):,}",
+                style={"color": "#a8b2c2", "fontSize": "0.72rem"},
+            ),
+        ], style={"marginTop": "0.5rem"}),
+    ])
+
+
 # ── Render: Kruskal-Wallis (multiclass / 3+ grup) ────────────────────────────
 def _render_kruskal(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
     """Non-parametrik ANOVA: 3+ sınıf için grup dağılımı karşılaştırması."""
@@ -675,11 +772,15 @@ def compute_anova(n_clicks, var_col, key, config, seg_val, seg_col_input):
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
     try:
-        # Multiclass ve 3+ sınıf varsa Kruskal-Wallis; diğerleri ANOVA
+        # Continuous: Pearson/Spearman korelasyon testi
+        if target_type == "continuous":
+            return _render_pearson_spearman(df_active, var_col, target)
+        # Multiclass ve 3+ sınıf varsa Kruskal-Wallis
         if target_type == "multiclass":
             n_cls = df_active[target].dropna().nunique()
             if n_cls >= 3:
                 return _render_kruskal(df_active, var_col, target)
+        # Binary / 2-sınıf multiclass: ANOVA
         return _render_anova(df_active, var_col, target)
     except Exception as exc:
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})

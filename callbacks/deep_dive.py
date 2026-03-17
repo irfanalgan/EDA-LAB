@@ -2,6 +2,7 @@ from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -83,8 +84,34 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
                     dbc.Select(id="dd-deepdive-col", options=col_options,
                                value=cols[0] if cols else None,
                                className="dark-select"),
+                    html.Div([
+                        html.Span("Kolon tipi: ",
+                                  style={"color": "#7e8fa4", "fontSize": "0.72rem",
+                                         "marginRight": "6px"}),
+                        dbc.RadioItems(
+                            id="dd-dtype-override",
+                            options=[
+                                {"label": "Otomatik", "value": "auto"},
+                                {"label": "Sayısal",  "value": "numerical"},
+                                {"label": "Kategorik", "value": "categorical"},
+                            ],
+                            value="auto",
+                            inline=True,
+                            labelStyle={"fontSize": "0.72rem", "color": "#9aa5bc",
+                                        "marginRight": "10px", "cursor": "pointer"},
+                            inputStyle={"marginRight": "3px", "cursor": "pointer"},
+                        ),
+                    ], style={"marginTop": "6px", "display": "flex", "alignItems": "center"}),
                 ], width=4),
                 psi_date_col,
+                dbc.Col([
+                    dbc.Label("Max Bin Sayısı", className="form-label"),
+                    html.Div("WOE & IV için", className="form-hint"),
+                    dbc.Input(id="dd-max-bins", type="number", value=4,
+                              min=2, max=20, step=1,
+                              style={"backgroundColor": "#1a2035", "color": "#c8cdd8",
+                                     "border": "1px solid #2d3a4f", "fontSize": "0.85rem"}),
+                ], width=2),
             ], className="mb-4"),
         ]),
         dcc.Loading(html.Div(id="deep-dive-content"), type="dot", color="#4F8EF7", delay_show=300),
@@ -104,13 +131,24 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
 
 
 @app.callback(
+    Output("dd-dtype-override", "value"),
+    Input("dd-deepdive-col", "value"),
+    prevent_initial_call=True,
+)
+def reset_dtype_override(_col):
+    return "auto"
+
+
+@app.callback(
     Output("deep-dive-content", "children"),
     Input("dd-deepdive-col", "value"),
     Input("dd-psi-split", "value"),
+    Input("dd-dtype-override", "value"),
     State("store-dd-config", "data"),
+    State("dd-max-bins", "value"),
     prevent_initial_call=False,
 )
-def render_deep_dive_content(col, psi_split, dd_config):
+def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bins):
     if not col or not dd_config:
         return html.Div()
 
@@ -131,9 +169,13 @@ def render_deep_dive_content(col, psi_split, dd_config):
 
     vstats = get_variable_stats(df_active, col, target)
 
+    _max_bins    = int(max_n_bins) if max_n_bins and int(max_n_bins) >= 2 else 4
+    _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
+
     # WOE yalnızca binary target için anlamlı, sadece train üzerinden
     if target_type == "binary":
-        woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(df_train, col, target)
+        woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(
+            df_train, col, target, _max_bins, force_dtype=_force_dtype)
     else:
         woe_df, iv_total_dd, woe_bin_edges = pd.DataFrame(), 0.0, None
 
@@ -144,9 +186,11 @@ def render_deep_dive_content(col, psi_split, dd_config):
         date_col=date_col if date_col else None,
         cutoff_date=cutoff_date,
         bin_edges=woe_bin_edges,
+        force_dtype=_force_dtype,
     )
 
-    is_num = vstats["is_numeric"]
+    is_num = (vstats["is_numeric"] if _force_dtype is None
+              else (_force_dtype == "numerical"))
 
     # ── 1. Özet İstatistik Kartları ───────────────────────────────────────────
     def sc(val, lbl, color="#4F8EF7"):
@@ -408,26 +452,20 @@ def render_deep_dive_content(col, psi_split, dd_config):
         iv_color = {"Çok Zayıf": "#4a5568", "Zayıf": "#f59e0b", "Orta": "#4F8EF7",
                     "Güçlü": "#10b981", "Şüpheli": "#ef4444"}.get(iv_label, "#4F8EF7")
 
-        def _monotone_label(arr):
-            diffs = [arr[i+1] - arr[i] for i in range(len(arr)-1)]
-            if all(d >= 0 for d in diffs): return "↑ Monoton Artan", "#10b981"
-            if all(d <= 0 for d in diffs): return "↓ Monoton Azalan", "#10b981"
-            return "✗ Monoton Değil", "#ef4444"
-
         def _build_woe_period_panel(period_label, period_df, ref_woe_df,
-                                    ref_bin_edges, accent, show_full_table=False):
-            """Tek bir periyot için WOE & Bad Rate paneli oluşturur.
-            - Train: ref_woe_df'deki WOE değerleri + bad rate barları
-            - Test/OOT: ref_woe_df'den WOE referans çizgisi + period_df bad rate
+                                    ref_bin_edges, accent, is_train=False):
+            """Tek bir periyot için bad rate paneli oluşturur.
+            X: bin etiketleri, bar: adet (y2), line: bad rate % (y1).
+            Tüm periyotlar için tablo gösterilir.
             """
             if period_df is None or len(period_df) == 0:
                 return None
 
-            if show_full_table:
-                # Train periyodu: woe_df direkt kullan
+            tsv_id = f"woe-tsv-{period_label.lower()}"
+
+            if is_train:
                 chart_df = ref_woe_df[ref_woe_df["Bin"] != "TOPLAM"].copy()
-                br_vals  = chart_df["Bad Rate %"].values
-                woe_vals = chart_df["WOE"].values
+                table_df = ref_woe_df.copy()
             else:
                 # Test / OOT: train bin edges ile bad rate hesapla
                 p_df = compute_period_badrate(period_df, col, target,
@@ -435,74 +473,73 @@ def render_deep_dive_content(col, psi_split, dd_config):
                 if p_df.empty:
                     return None
                 chart_df = p_df[p_df["Bin"] != "TOPLAM"].copy()
-                # WOE referans: train'den al (aynı bin sırası)
-                train_chart = ref_woe_df[ref_woe_df["Bin"] != "TOPLAM"].copy()
-                woe_map = dict(zip(train_chart["Bin"], train_chart["WOE"]))
-                chart_df["WOE_ref"] = chart_df["Bin"].map(woe_map)
-                br_vals  = chart_df["Bad Rate %"].values
-                woe_vals = chart_df["WOE_ref"].fillna(0).values
+                # Tablo: period sonuçları + train WOE referansı
+                table_df = p_df.copy()
+                woe_ref = ref_woe_df.set_index("Bin")["WOE"].to_dict()
+                table_df["WOE (Train)"] = table_df["Bin"].map(
+                    lambda b: woe_ref.get(b, "")
+                )
 
-            br_mono_txt, br_mono_clr = _monotone_label(br_vals)
-
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=chart_df["Bin"], y=chart_df["Bad Rate %"],
-                name="Bad Rate %", marker_color=accent, opacity=0.75,
-                hovertemplate="Bin: %{x}<br>Bad Rate: %{y:.2f}%<extra></extra>",
-            ))
-            fig.add_trace(go.Scatter(
-                x=chart_df["Bin"], y=woe_vals,
-                name="WOE (Train)", mode="lines+markers",
-                line=dict(color="#4F8EF7", width=2, dash="dot" if not show_full_table else "solid"),
-                marker=dict(size=6),
-                yaxis="y2",
-                hovertemplate="Bin: %{x}<br>WOE: %{y:.4f}<extra></extra>",
-            ))
-            fig.add_hline(y=0, line_dash="dot", line_color="#556070", opacity=0.5, yref="y2")
-
-            n_period = len(period_df) if period_df is not None else 0
-            bad_n    = int(period_df[target].sum()) if period_df is not None else 0
+            n_period   = len(period_df)
+            bad_n      = int(period_df[target].sum())
             br_overall = round(bad_n / n_period * 100, 2) if n_period > 0 else 0.0
 
             title_text = (f"{period_label}  ·  n={n_period:,}  ·  Bad Rate: {br_overall:.2f}%"
-                          + (f"  |  IV: {iv_total:.4f}  [{iv_label}]" if show_full_table else ""))
+                          + (f"  |  IV: {iv_total:.4f}  [{iv_label}]" if is_train else ""))
 
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=chart_df["Bin"], y=chart_df["Toplam"],
+                name="Adet", marker_color="#232d4f", opacity=0.75,
+                yaxis="y2",
+                hovertemplate="Bin: %{x}<br>Adet: %{y:,}<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=chart_df["Bin"], y=chart_df["Bad Rate %"],
+                name="Bad Rate %", mode="lines+markers",
+                line=dict(color=accent, width=2),
+                marker=dict(size=6),
+                hovertemplate="Bin: %{x}<br>Bad Rate: %{y:.2f}%<extra></extra>",
+            ))
             fig.update_layout(
                 **_PLOT_LAYOUT,
                 title=dict(text=title_text,
-                           font=dict(color=iv_color if show_full_table else "#c8cdd8", size=12)),
+                           font=dict(color=iv_color if is_train else "#c8cdd8", size=12)),
                 xaxis=dict(**_AXIS_STYLE, tickangle=-30),
                 yaxis=dict(**_AXIS_STYLE, title="Bad Rate %", ticksuffix="%"),
-                yaxis2=dict(title="WOE", overlaying="y", side="right", showgrid=False,
-                            zeroline=True, zerolinecolor="#556070"),
+                yaxis2=dict(title="Adet", overlaying="y", side="right", showgrid=False,
+                            zeroline=False),
                 legend=dict(bgcolor="#161C27", bordercolor="#232d3f", font=dict(size=10)),
                 height=300,
             )
+
+            # Monotonluk etiketi
+            br_arr   = chart_df["Bad Rate %"].values
+            br_diffs = np.diff(br_arr)
+            if len(br_diffs) == 0:
+                mono_txt, mono_clr = "—", "#6b7a99"
+            elif all(d >= 0 for d in br_diffs):
+                mono_txt, mono_clr = "↑ Monoton Artan", "#10b981"
+            elif all(d <= 0 for d in br_diffs):
+                mono_txt, mono_clr = "↓ Monoton Azalan", "#10b981"
+            else:
+                mono_txt, mono_clr = "✗ Monoton Değil", "#ef4444"
+
+            table_tsv = table_df.to_csv(sep="\t", index=False)
+            table_cols = [{"name": c, "id": c} for c in table_df.columns]
 
             children = [
                 html.Div([
                     html.Span(f"{period_label}  ", style={"color": accent, "fontWeight": "700",
                                                            "fontSize": "0.80rem"}),
                     html.Span("Bad Rate ", style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
-                    html.Span(br_mono_txt, style={"color": br_mono_clr, "fontSize": "0.72rem",
-                                                   "fontWeight": "700"}),
+                    html.Span(mono_txt, style={"color": mono_clr, "fontSize": "0.72rem",
+                                               "fontWeight": "700"}),
                 ], style={"marginBottom": "0.3rem"}),
                 dcc.Graph(figure=fig, config={"displayModeBar": False}),
-            ]
-
-            if show_full_table:
-                # Train paneline WOE tablosunu ekle
-                woe_mono_txt, woe_mono_clr = _monotone_label(
-                    ref_woe_df[ref_woe_df["Bin"] != "TOPLAM"]["WOE"].values)
-                woe_tsv = ref_woe_df.to_csv(sep="\t", index=False)
-                children.append(html.Div([
-                    html.Span("WOE ", style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
-                    html.Span(woe_mono_txt, style={"color": woe_mono_clr,
-                                                    "fontSize": "0.72rem", "fontWeight": "700"}),
-                ], style={"marginBottom": "0.4rem", "marginTop": "0.5rem"}))
-                children.append(html.Div([
+                html.Div([
                     html.Div(
-                        dcc.Clipboard(target_id="woe-tsv", title="Kopyala",
+                        dcc.Clipboard(target_id=tsv_id, title="Kopyala",
                                       style={"cursor": "pointer", "fontSize": "0.72rem",
                                              "color": "#a8b2c2", "padding": "0.2rem 0.55rem",
                                              "border": "1px solid #2d3a4f", "borderRadius": "4px",
@@ -510,10 +547,10 @@ def render_deep_dive_content(col, psi_split, dd_config):
                                              "marginBottom": "0.4rem"}),
                         style={"overflow": "hidden"},
                     ),
-                    html.Pre(woe_tsv, id="woe-tsv", style={"display": "none"}),
+                    html.Pre(table_tsv, id=tsv_id, style={"display": "none"}),
                     dash_table.DataTable(
-                        data=ref_woe_df.to_dict("records"),
-                        columns=[{"name": c, "id": c} for c in ref_woe_df.columns],
+                        data=table_df.to_dict("records"),
+                        columns=table_cols,
                         style_table={"overflowX": "auto"},
                         style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
                                       "fontWeight": "700", "fontSize": "0.72rem",
@@ -529,7 +566,8 @@ def render_deep_dive_content(col, psi_split, dd_config):
                         style_cell={"padding": "0.4rem 0.65rem", "textAlign": "right"},
                         style_cell_conditional=[{"if": {"column_id": "Bin"}, "textAlign": "left"}],
                     ),
-                ]))
+                ]),
+            ]
 
             return html.Div(children, style={
                 "border": "1px solid #1e2a3a", "borderRadius": "6px",
@@ -548,7 +586,7 @@ def render_deep_dive_content(col, psi_split, dd_config):
         for p_label, p_df, p_accent, is_train in period_configs:
             panel = _build_woe_period_panel(
                 p_label, p_df, woe_df, woe_bin_edges, p_accent,
-                show_full_table=is_train,
+                is_train=is_train,
             )
             if panel:
                 period_panels.append(panel)

@@ -8,7 +8,7 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter
 from utils.chart_helpers import _build_woe_dataset
-from modules.deep_dive import compute_iv_ranking_optimal, compute_psi
+from modules.deep_dive import compute_iv_ranking_optimal, compute_psi, get_woe_detail
 from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
 
 
@@ -33,31 +33,39 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
 
     target      = config["target_col"]
     date_col    = config.get("date_col")
+    oot_date    = config.get("oot_date")
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     target_type = config.get("target_type", "binary")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     use_woe     = "woe" in (woe_toggle or [])
 
+    # OOT date varsa: IV/WOE sadece train (< oot_date) üzerinden hesaplanır
+    if oot_date and date_col and date_col in df_active.columns:
+        train_mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date)
+        df_train   = df_active[train_mask]
+    else:
+        df_train = df_active
+
     # ── 1. IV (binary) veya Mutual Information (non-binary) ───────────────────
     is_binary = target_type == "binary"
 
     if is_binary:
-        iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
+        iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_date}"
         if iv_cache_key in _SERVER_STORE:
             iv_df = _SERVER_STORE[iv_cache_key]
         else:
-            iv_df = compute_iv_ranking_optimal(df_active, target)
+            iv_df = compute_iv_ranking_optimal(df_train, target)
             _SERVER_STORE[iv_cache_key] = iv_df
 
         summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
         var_list = summary["Değişken"].tolist()
     else:
-        # Mutual Information — binary olmayan targetlar için
-        num_cols = [c for c in df_active.columns
-                    if c != target and pd.api.types.is_numeric_dtype(df_active[c])]
-        y_mi = pd.to_numeric(df_active[target], errors="coerce")
+        # Mutual Information — binary olmayan targetlar için (train üzerinden)
+        num_cols = [c for c in df_train.columns
+                    if c != target and pd.api.types.is_numeric_dtype(df_train[c])]
+        y_mi = pd.to_numeric(df_train[target], errors="coerce")
         valid_mask = y_mi.notna()
-        X_mi = df_active[num_cols].loc[valid_mask].fillna(0)
+        X_mi = df_train[num_cols].loc[valid_mask].fillna(0)
         y_mi = y_mi[valid_mask]
 
         mi_fn = (mutual_info_regression if target_type == "continuous"
@@ -67,7 +75,7 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         except Exception:
             mi_scores = np.zeros(len(num_cols))
 
-        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)
+        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)  # eksik % tüm veri
         summary = pd.DataFrame({
             "Değişken": num_cols,
             "MI":        np.round(mi_scores, 6),
@@ -171,17 +179,13 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     if date_col:
         for var in var_list:
             try:
-                if use_woe:
-                    woe_col = f"{var}_woe"
-                    if woe_col not in woe_df_enc.columns:
-                        continue
-                    tmp = woe_df_enc[[woe_col]].copy()
-                    tmp.columns = [var]
-                    tmp[target]   = df_active[target].values
-                    tmp[date_col] = df_active[date_col].values
-                    res = compute_psi(tmp, var, target, date_col=date_col)
-                else:
-                    res = compute_psi(df_active, var, target, date_col=date_col)
+                try:
+                    _, _, _bin_edges = get_woe_detail(df_train, var, target)
+                except Exception:
+                    _bin_edges = None
+                res = compute_psi(df_active, var, target,
+                                  date_col=date_col, cutoff_date=oot_date,
+                                  bin_edges=_bin_edges)
                 if res.get("psi") is not None:
                     psi_map[var]       = res["psi"]
                     psi_label_map[var] = res["label"]

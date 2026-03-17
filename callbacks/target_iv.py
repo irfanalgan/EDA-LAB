@@ -1,3 +1,4 @@
+import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
@@ -6,7 +7,7 @@ import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE
 from modules.target_analysis import compute_target_stats, compute_target_over_time
 from modules.deep_dive import compute_iv_ranking_optimal
@@ -19,14 +20,81 @@ def _tcard(value, label, color="#4F8EF7"):
     ], className="metric-card"), width=2)
 
 
+def _binary_stats_row(df, target):
+    stats = compute_target_stats(df, target)
+    imbalance_color = (
+        "#ef4444" if stats["bad_rate"] < 5 or stats["bad_rate"] > 50
+        else "#f59e0b" if stats["bad_rate"] < 15 else "#10b981"
+    )
+    return dbc.Row([
+        _tcard(f"{stats['valid']:,}",        "Geçerli Kayıt"),
+        _tcard(f"{stats['bad']:,}",          "Bad (1)",   "#ef4444"),
+        _tcard(f"{stats['good']:,}",         "Good (0)",  "#10b981"),
+        _tcard(f"%{stats['bad_rate']:.2f}",  "Bad Rate",  imbalance_color),
+        _tcard(f"{stats['ratio']:.1f}x",     "Good/Bad Oran"),
+        _tcard(f"{stats['missing']:,}",      "Target Eksik",
+               "#f59e0b" if stats["missing"] > 0 else "#556070"),
+    ], className="g-3 mb-2")
+
+
+def _render_trend_chart(df_plot, target, date_col, target_type, period_label):
+    """Verilen df_plot için trend grafiği HTML döndürür."""
+    if target_type == "binary":
+        time_df = compute_target_over_time(df_plot, target, date_col)
+        if len(time_df) < 2:
+            return html.Div(f"Yeterli veri yok ({period_label}).",
+                            style={"color": "#7e8fa4", "fontSize": "0.8rem"})
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=time_df["Tarih"], y=time_df["total_count"],
+            name="Toplam", marker_color="#232d4f", yaxis="y2", opacity=0.6,
+        ))
+        fig.add_trace(go.Scatter(
+            x=time_df["Tarih"], y=time_df["bad_rate"],
+            name="Bad Rate %", mode="lines+markers",
+            line=dict(color="#ef4444", width=2), marker=dict(size=5),
+        ))
+        fig.update_layout(
+            **_PLOT_LAYOUT,
+            title=dict(text=f"Bad Rate Trendi — {period_label}",
+                       font=dict(color="#E8EAF0", size=13)),
+            xaxis={**_AXIS_STYLE},
+            yaxis=dict(**_AXIS_STYLE, title="Bad Rate %", ticksuffix="%"),
+            yaxis2=dict(title="Kayıt Sayısı", overlaying="y",
+                        side="right", showgrid=False),
+            legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
+            hovermode="x unified", height=320,
+        )
+        return html.Div([
+            dcc.Graph(figure=fig, config={"displayModeBar": False}),
+        ], style={"marginBottom": "2rem"})
+    else:
+        line_color = "#4F8EF7" if target_type == "continuous" else "#a78bfa"
+        return _time_chart_generic(df_plot, target, date_col,
+                                   f"Ort. {target}", line_color)
+
+
 def _time_chart_generic(df_active, target, date_col, y_label, line_color):
     """Zaman içinde target ortalaması/oranı — her target tipi için kullanılır."""
     tmp = df_active[[date_col, target]].copy()
     tmp[date_col] = pd.to_datetime(tmp[date_col], errors="coerce")
     tmp = tmp.dropna(subset=[date_col]).set_index(date_col).sort_index()
-    agg = tmp.resample("ME")[target].agg(
+
+    # Veri aralığına göre otomatik resample frekansı seç
+    span_days = (tmp.index.max() - tmp.index.min()).days if len(tmp) > 1 else 0
+    if span_days <= 90:
+        freq = "W"
+    elif span_days <= 730:
+        freq = "ME"
+    elif span_days <= 1825:
+        freq = "QE"
+    else:
+        freq = "YE"
+
+    agg = tmp.resample(freq)[target].agg(
         mean_val="mean", count_val="count"
     ).reset_index().rename(columns={date_col: "Tarih"})
+    agg = agg[agg["count_val"] > 0]  # boş periyotları çıkar
     if len(agg) < 2:
         return html.Div()
     fig = go.Figure()
@@ -69,68 +137,98 @@ def update_target_iv(config, seg_val, key, seg_col_input):
 
     target      = config["target_col"]
     date_col    = config.get("date_col")
+    oot_date    = config.get("oot_date")
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     target_type = config.get("target_type", "binary")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    # IV için sadece train verisi kullan
+    df_train, df_test, df_oot = get_splits(df_active, config)
 
     s = pd.to_numeric(df_active[target], errors="coerce")
     n_total   = len(s)
     n_missing = int(s.isna().sum())
     n_valid   = n_total - n_missing
 
+    # ── Trend periyot dropdown (date_col varsa) ────────────────────────────────
+    def _build_trend_dropdown():
+        if not date_col or date_col not in df_active.columns:
+            return html.Div(), []
+        opts = [{"label": "Tüm Veri", "value": "all"}]
+        if oot_date:
+            opts.append({"label": "Train (OOT öncesi)", "value": "train"})
+            if df_test is not None and len(df_test) > 0:
+                opts.append({"label": "Test", "value": "test"})
+            if df_oot is not None and len(df_oot) > 0:
+                opts.append({"label": "OOT", "value": "oot"})
+        row = dbc.Row([
+            dbc.Col([
+                dbc.Label("Trend Periyodu", className="form-label",
+                          style={"fontSize": "0.78rem", "marginBottom": "3px"}),
+                dbc.Select(
+                    id="dd-trend-period",
+                    options=opts,
+                    value="all",
+                    className="dark-select",
+                    style={"maxWidth": "220px", "fontSize": "0.82rem"},
+                ),
+            ], width="auto"),
+        ], className="mb-3 align-items-end")
+        return row, [o["value"] for o in opts]
+
+    trend_dropdown, _trend_opts = _build_trend_dropdown()
+
     # ── Binary ────────────────────────────────────────────────────────────────
     if target_type == "binary":
-        cache_key = f"{key}_iv_{seg_col}_{seg_val}"
+        # IV — sadece train üzerinden
+        oot_key   = config.get("oot_date") or "none"
+        cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_key}"
         if cache_key in _SERVER_STORE:
             iv_df = _SERVER_STORE[cache_key]
         else:
-            iv_df = compute_iv_ranking_optimal(df_active, target)
+            iv_df = compute_iv_ranking_optimal(df_train, target)
             _SERVER_STORE[cache_key] = iv_df
 
-        stats = compute_target_stats(df_active, target)
-        imbalance_color = (
-            "#ef4444" if stats["bad_rate"] < 5 or stats["bad_rate"] > 50
-            else "#f59e0b" if stats["bad_rate"] < 15 else "#10b981"
+        # Train stats badge
+        tr_stats  = compute_target_stats(df_train, target)
+        train_note = html.Div(
+            f"IV Train verisi: n={len(df_train):,}  ·  Bad Rate %{tr_stats['bad_rate']:.2f}"
+            + (f"  ·  OOT ≥ {oot_date}" if oot_date else "  ·  Rastgele split"),
+            style={"color": "#a78bfa", "fontSize": "0.73rem",
+                   "marginBottom": "0.75rem"},
         )
-        stats_row = dbc.Row([
-            _tcard(f"{stats['valid']:,}",        "Geçerli Kayıt"),
-            _tcard(f"{stats['bad']:,}",          "Bad (1)",   "#ef4444"),
-            _tcard(f"{stats['good']:,}",         "Good (0)",  "#10b981"),
-            _tcard(f"%{stats['bad_rate']:.2f}",  "Bad Rate",  imbalance_color),
-            _tcard(f"{stats['ratio']:.1f}x",     "Good/Bad Oran"),
-            _tcard(f"{stats['missing']:,}",      "Target Eksik",
-                   "#f59e0b" if stats["missing"] > 0 else "#556070"),
-        ], className="g-3 mb-4")
+
+        # İlk gösterim: "Tüm Veri" varsayılan seçenek
+        stats_row = html.Div(
+            _binary_stats_row(df_active, target),
+            id="trend-stats-row",
+        )
 
         time_chart = html.Div()
         if date_col and date_col in df_active.columns:
-            time_df = compute_target_over_time(df_active, target, date_col)
-            if len(time_df) > 1:
-                fig_time = go.Figure()
-                fig_time.add_trace(go.Bar(
-                    x=time_df["Tarih"], y=time_df["total_count"],
-                    name="Toplam", marker_color="#232d4f", yaxis="y2", opacity=0.6,
-                ))
-                fig_time.add_trace(go.Scatter(
-                    x=time_df["Tarih"], y=time_df["bad_rate"],
-                    name="Bad Rate %", mode="lines+markers",
-                    line=dict(color="#ef4444", width=2), marker=dict(size=5),
-                ))
-                fig_time.update_layout(
-                    **_PLOT_LAYOUT,
-                    title=dict(text="Bad Rate Zaman Serisi",
-                               font=dict(color="#E8EAF0", size=13)),
-                    xaxis={**_AXIS_STYLE},
-                    yaxis=dict(**_AXIS_STYLE, title="Bad Rate %", ticksuffix="%"),
-                    yaxis2=dict(title="Kayıt Sayısı", overlaying="y",
-                                side="right", showgrid=False),
-                    legend=dict(bgcolor="#161C27", bordercolor="#232d3f"),
-                    hovermode="x unified", height=320,
-                )
-                time_chart = html.Div([
-                    html.P("Bad Rate Trendi", className="section-title"),
-                    dcc.Graph(figure=fig_time, config={"displayModeBar": False}),
-                ], style={"marginBottom": "2rem"})
+            _trend_store_data = {
+                "key": key, "target": target, "date_col": date_col,
+                "target_type": target_type,
+                "seg_col": seg_col, "seg_val": seg_val,
+                "oot_date": oot_date,
+                "has_test_split": config.get("has_test_split", False),
+                "test_size": config.get("test_size", 20),
+            }
+            time_chart = html.Div([
+                trend_dropdown,
+                dcc.Store(id="store-trend-config", data=_trend_store_data),
+                html.Div(
+                    _render_trend_chart(df_active, target, date_col,
+                                        target_type, "Tüm Veri"),
+                    id="trend-chart-container",
+                ),
+            ])
+
+        iv_label_note = html.Div(
+            "ℹ IV sadece Train verisi üzerinden hesaplanmıştır.",
+            style={"color": "#7e8fa4", "fontSize": "0.72rem",
+                   "marginBottom": "0.5rem"},
+        ) if oot_date else html.Div()
 
         iv_color_map = {
             "Çok Zayıf": "#4a5568", "Zayıf": "#f59e0b",
@@ -221,9 +319,11 @@ def update_target_iv(config, seg_val, key, seg_col_input):
             html.P("Target Dağılımı", className="section-title"),
             stats_row,
             time_chart,
+            html.P("IV Sıralaması (Train)", className="section-title"),
+            train_note,
+            iv_label_note,
             dbc.Row([
                 dbc.Col([
-                    html.P("IV Sıralaması", className="section-title"),
                     dcc.Graph(figure=fig_iv, config={"displayModeBar": False}),
                 ], width=6),
                 dbc.Col([
@@ -276,9 +376,23 @@ def update_target_iv(config, seg_val, key, seg_col_input):
 
         time_chart = html.Div()
         if date_col and date_col in df_active.columns:
-            time_chart = _time_chart_generic(
-                df_active, target, date_col, f"Ort. {target}", "#4F8EF7"
-            )
+            _trend_store_data = {
+                "key": key, "target": target, "date_col": date_col,
+                "target_type": target_type,
+                "seg_col": seg_col, "seg_val": seg_val,
+                "oot_date": oot_date,
+                "has_test_split": config.get("has_test_split", False),
+                "test_size": config.get("test_size", 20),
+            }
+            time_chart = html.Div([
+                trend_dropdown,
+                dcc.Store(id="store-trend-config", data=_trend_store_data),
+                html.Div(
+                    _render_trend_chart(df_active, target, date_col,
+                                        target_type, "Tüm Veri"),
+                    id="trend-chart-container",
+                ),
+            ])
 
         iv_note = html.Div(
             "ℹ️  WoE / Information Value yalnızca binary (0/1) target için hesaplanır. "
@@ -339,9 +453,23 @@ def update_target_iv(config, seg_val, key, seg_col_input):
 
         time_chart = html.Div()
         if date_col and date_col in df_active.columns:
-            time_chart = _time_chart_generic(
-                df_active, target, date_col, f"Ort. {target}", "#a78bfa"
-            )
+            _trend_store_data = {
+                "key": key, "target": target, "date_col": date_col,
+                "target_type": target_type,
+                "seg_col": seg_col, "seg_val": seg_val,
+                "oot_date": oot_date,
+                "has_test_split": config.get("has_test_split", False),
+                "test_size": config.get("test_size", 20),
+            }
+            time_chart = html.Div([
+                trend_dropdown,
+                dcc.Store(id="store-trend-config", data=_trend_store_data),
+                html.Div(
+                    _render_trend_chart(df_active, target, date_col,
+                                        target_type, "Tüm Veri"),
+                    id="trend-chart-container",
+                ),
+            ])
 
         iv_note = html.Div(
             "ℹ️  WoE / Information Value yalnızca binary (0/1) target için hesaplanır. "
@@ -406,3 +534,53 @@ def update_target_iv(config, seg_val, key, seg_col_input):
             style={"color": "#a78bfa", "fontSize": "0.8rem", "marginTop": "1rem"},
         ),
     ])
+
+
+# ── Callback: Trend grafiği + stats — periyot seçimine göre güncelle ─────────
+@app.callback(
+    Output("trend-chart-container", "children"),
+    Output("trend-stats-row", "children"),
+    Input("dd-trend-period", "value"),
+    State("store-trend-config", "data"),
+    prevent_initial_call=True,
+)
+def update_trend_chart(period_val, trend_cfg):
+    _no = dash.no_update
+    if not trend_cfg:
+        return html.Div(), _no
+
+    key         = trend_cfg["key"]
+    target      = trend_cfg["target"]
+    date_col    = trend_cfg["date_col"]
+    target_type = trend_cfg["target_type"]
+    seg_col     = trend_cfg.get("seg_col")
+    seg_val     = trend_cfg.get("seg_val")
+    oot_date    = trend_cfg.get("oot_date")
+
+    df_orig = _get_df(key)
+    if df_orig is None:
+        return html.Div(), _no
+
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    period = period_val or "all"
+    if period != "all" and oot_date:
+        df_train, df_test, df_oot = get_splits(df_active, trend_cfg)
+        if period == "train":
+            df_plot, period_label = df_train, "Train"
+        elif period == "test" and df_test is not None:
+            df_plot, period_label = df_test, "Test"
+        elif period == "oot" and df_oot is not None:
+            df_plot, period_label = df_oot, "OOT"
+        else:
+            df_plot, period_label = df_active, "Tüm Veri"
+    else:
+        df_plot, period_label = df_active, "Tüm Veri"
+
+    # Stats kartları — yalnızca binary target için; seçili periyodun verisi
+    if target_type == "binary":
+        new_stats = _binary_stats_row(df_plot, target)
+    else:
+        new_stats = _no
+
+    return _render_trend_chart(df_plot, target, date_col, target_type, period_label), new_stats

@@ -1,84 +1,21 @@
-import re
 import pandas as pd
 import numpy as np
 from scipy import stats as scipy_stats
 
 SPECIAL_VALUES = {9999999999, 8888888888}
 
-_INTERVAL_RE = re.compile(r'^([\(\[])\s*(.*?)\s*,\s*(.*?)\s*([\)\]])$')
-
-
-def _merge_label(a: str, b: str) -> str:
-    """Merge two interval label strings into a clean combined range."""
-    ma = _INTERVAL_RE.match(a)
-    mb = _INTERVAL_RE.match(b)
-    if ma and mb:
-        return f"{ma.group(1)}{ma.group(2)}, {mb.group(3)}{mb.group(4)}"
-    return f"{a} | {b}"
-
-
-# ── WOE / IV — Monoton Optimal Binning ───────────────────────────────────────
-
-def _merge_bins(bins_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    WOE monotonluğunu sağlamak için komşu non-monoton bin'leri birleştirir.
-    bins_df: [bin_label, total, bad, good, woe] kolonları olmalı.
-    """
-    df = bins_df.copy().reset_index(drop=True)
-    changed = True
-    while changed and len(df) > 2:
-        changed = False
-        woes = df["woe"].values
-        # Yön: çoğunluk yönünde monotonluk ara
-        diffs = np.diff(woes)
-        if np.sum(diffs > 0) >= np.sum(diffs < 0):
-            # Artan olmalı — azalan geçişleri bul
-            bad_idx = np.where(diffs < 0)[0]
-        else:
-            # Azalan olmalı — artan geçişleri bul
-            bad_idx = np.where(diffs > 0)[0]
-
-        if len(bad_idx) == 0:
-            break
-
-        # En küçük IV katkılı komşu çifti birleştir
-        merge_at = min(bad_idx, key=lambda i: df.loc[i, "iv_part"] + df.loc[i+1, "iv_part"])
-        i, j = merge_at, merge_at + 1
-        merged = {
-            "bin_label": _merge_label(df.loc[i,'bin_label'], df.loc[j,'bin_label']),
-            "total":     df.loc[i,"total"] + df.loc[j,"total"],
-            "bad":       df.loc[i,"bad"]   + df.loc[j,"bad"],
-            "good":      df.loc[i,"good"]  + df.loc[j,"good"],
-        }
-        df = df.drop([i, j]).reset_index(drop=True)
-        df = pd.concat([df.iloc[:i],
-                        pd.DataFrame([merged]),
-                        df.iloc[i:]], ignore_index=True)
-        changed = True
-
-    return df
-
-
-def _compute_woe_stats(df: pd.DataFrame, total_bad: float, total_good: float,
-                       eps: float = 1e-9) -> pd.DataFrame:
-    """WOE ve IV katkısını hesaplar."""
-    df = df.copy()
-    df["dist_bad"]  = df["bad"]  / (total_bad  + eps)
-    df["dist_good"] = df["good"] / (total_good + eps)
-    df["woe"]       = np.log((df["dist_bad"] + eps) / (df["dist_good"] + eps))
-    df["iv_part"]   = (df["dist_bad"] - df["dist_good"]) * df["woe"]
-    df["bad_rate"]  = df["bad"] / (df["total"] + eps) * 100
-    return df
-
 
 def get_woe_detail(df: pd.DataFrame, col: str, target: str,
-                   max_n_bins: int = 4) -> tuple[pd.DataFrame, float, object]:
+                   max_n_bins: int = 4,
+                   force_dtype: str = None) -> tuple[pd.DataFrame, float, object]:
     """
-    Monoton WOE/IV tablosu döndürür.
+    OptimalBinning ile monoton WOE/IV tablosu döndürür.
     Returns: (woe_df, iv_total, bin_edges)
-    bin_edges: numerik kolonlar için WOE'de kullanılan bin sınırları (numpy array),
-               kategorik kolonlar için None. PSI'ya geçirilerek aynı sınırlar kullanılır.
+    bin_edges: [-inf, split1, ..., +inf] numpy array (numerik), None (kategorik).
+    force_dtype: None | "numerical" | "categorical"  — otomatik algıyı ezer.
     """
+    from optbinning import OptimalBinning as _OB
+
     local = df[[col, target]].copy()
     if local[target].dtype == object:
         local[target] = (local[target].astype(str)
@@ -93,163 +30,80 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
         return pd.DataFrame(), 0.0, None
 
     is_numeric = pd.api.types.is_numeric_dtype(local[col])
+    if force_dtype == "categorical":
+        is_numeric = False
+    elif force_dtype == "numerical":
+        is_numeric = True
+    X = local[col].values
+    y = local[target].values.astype(int)
 
-    # Special değerleri ayır
-    if is_numeric:
-        special_mask = local[col].isin(SPECIAL_VALUES)
-        special_data = local[special_mask]
-        main_data    = local[~special_mask]
-    else:
-        special_data = pd.DataFrame()
-        main_data    = local
-
-    # ── Binning ───────────────────────────────────────────────────────────────
-    bins_list = []
-
-    _bin_edges = None   # PSI'ya aktarılacak WOE bin sınırları (merge sonrası)
-
-    if is_numeric:
-        # Eksik bin
-        missing = main_data[main_data[col].isna()]
-        present = main_data[main_data[col].notna()]
-
-        # qcut ile quantile sınırları belirle, uçları ±inf yap, pd.cut ile uygula
-        n_init = max(max_n_bins * 2, 6)
-        present = present.copy()
-        try:
-            _, edges = pd.qcut(present[col], q=n_init, duplicates="drop", retbins=True)
-        except Exception:
-            try:
-                _, edges = pd.qcut(present[col], q=max_n_bins, duplicates="drop", retbins=True)
-            except Exception:
-                edges = None
-
-        if edges is not None:
-            edges[0], edges[-1] = -np.inf, np.inf
-            _cut = pd.cut(present[col], bins=edges, include_lowest=False)
-        else:
-            _cut = pd.Categorical(present[col].astype(str))
-
-        # cat.codes → kesin sayısal sıra (string sort değil)
-        present["_bin_code"] = _cut.cat.codes if hasattr(_cut, "cat") else 0
-        present["bin_label"] = _cut.astype(str).replace("nan", "Eksik")
-
-        for _, grp in present.groupby("_bin_code", sort=True):
-            lbl = grp["bin_label"].iloc[0]
-            if lbl in ("nan", "Eksik", ""):
-                continue
-            bins_list.append({
-                "bin_label": str(lbl),
-                "total": len(grp),
-                "bad":   grp[target].sum(),
-                "good":  len(grp) - grp[target].sum(),
-            })
-
-        # Special bins
-        for sv in SPECIAL_VALUES:
-            sv_grp = special_data[special_data[col] == sv]
-            if len(sv_grp):
-                bins_list.append({
-                    "bin_label": f"Special ({int(sv)})",
-                    "total": len(sv_grp),
-                    "bad":   sv_grp[target].sum(),
-                    "good":  len(sv_grp) - sv_grp[target].sum(),
-                })
-
-        # Missing bin
-        if len(missing):
-            bins_list.append({
-                "bin_label": "Eksik",
-                "total": len(missing),
-                "bad":   missing[target].sum(),
-                "good":  len(missing) - missing[target].sum(),
-            })
-    else:
-        # Kategorik: top N kategoriler + Diğer + Eksik
-        local_cat = main_data.copy()
-        top_cats  = local_cat[col].value_counts().head(max_n_bins).index
-        local_cat["bin_label"] = (local_cat[col]
-                                  .where(local_cat[col].isin(top_cats), "Diğer")
-                                  .fillna("Eksik")
-                                  .astype(str))
-        for lbl, grp in local_cat.groupby("bin_label"):
-            bins_list.append({
-                "bin_label": str(lbl),
-                "total": len(grp),
-                "bad":   grp[target].sum(),
-                "good":  len(grp) - grp[target].sum(),
-            })
-
-    if not bins_list:
+    try:
+        kwargs = dict(
+            name=col,
+            monotonic_trend="auto_asc_desc",
+            max_n_bins=max_n_bins,
+            solver="cp",
+            dtype="numerical" if is_numeric else "categorical",
+        )
+        if is_numeric:
+            kwargs["special_codes"] = list(SPECIAL_VALUES)
+        optb = _OB(**kwargs)
+        optb.fit(X, y)
+        bt = optb.binning_table.build(show_digits=8)
+        iv_total = float(bt.loc["Totals", "IV"])
+    except Exception:
         return pd.DataFrame(), 0.0, None
 
-    bins_df = pd.DataFrame(bins_list)
-    bins_df = _compute_woe_stats(bins_df, total_bad, total_good)
+    # Main bins: non-empty Bin string, not "Special" or "Missing"
+    data_rows = bt[bt["Bin"].astype(str).str.len() > 0]
+    data_rows = data_rows[~data_rows["Bin"].isin(["Special", "Missing"])]
 
-    # ── Monotonluk zorla (sadece numeric main binler için) ────────────────────
-    if is_numeric and len(bins_df) > 2:
-        # Special ve Eksik binleri ayır, sadece main binlerde monotonluk
-        special_rows = bins_df[bins_df["bin_label"].str.startswith(("Special", "Eksik"))]
-        main_rows    = bins_df[~bins_df["bin_label"].str.startswith(("Special", "Eksik"))]
+    rows = []
+    for _, row in data_rows.iterrows():
+        total   = int(row["Count"])
+        bad     = int(row["Event"])
+        good    = int(row["Non-event"])
+        bad_rate = round(float(row["Event rate"]) * 100, 2)
+        woe     = round(float(row["WoE"]), 4)
+        iv_part = round(float(row["IV"]), 4)
+        rows.append({"Bin": str(row["Bin"]), "Toplam": total, "Bad": bad,
+                     "Good": good, "Bad Rate %": bad_rate, "WOE": woe, "IV Katkı": iv_part})
 
-        if len(main_rows) > 2:
-            main_rows = _merge_bins(main_rows)
-            main_rows = _compute_woe_stats(main_rows, total_bad, total_good)
+    # Special and Missing rows with count > 0
+    for special_lbl in ["Special", "Missing"]:
+        sr = bt[bt["Bin"] == special_lbl]
+        if not sr.empty and int(sr.iloc[0]["Count"]) > 0:
+            r = sr.iloc[0]
+            display_lbl = "Eksik" if special_lbl == "Missing" else "Special"
+            rows.append({"Bin": display_lbl, "Toplam": int(r["Count"]),
+                         "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
+                         "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                         "WOE": round(float(r["WoE"]), 4),
+                         "IV Katkı": round(float(r["IV"]), 4)})
 
-        bins_df = pd.concat([main_rows, special_rows], ignore_index=True)
+    if not rows:
+        return pd.DataFrame(), 0.0, None
 
-    iv_total = float(bins_df["iv_part"].sum())
-
-    result = bins_df[[
-        "bin_label", "total", "bad", "good", "bad_rate", "woe", "iv_part"
-    ]].rename(columns={
-        "bin_label": "Bin",
-        "total":     "Toplam",
-        "bad":       "Bad",
-        "good":      "Good",
-        "bad_rate":  "Bad Rate %",
-        "woe":       "WOE",
-        "iv_part":   "IV Katkı",
-    })
-    result["Bad Rate %"] = result["Bad Rate %"].round(2)
-    result["WOE"]        = result["WOE"].round(4)
-    result["IV Katkı"]   = result["IV Katkı"].round(4)
-
-    total_bad_n  = result["Bad"].sum()
-    total_all_n  = result["Toplam"].sum()
+    result = pd.DataFrame(rows)
+    total_all_n = result["Toplam"].sum()
+    total_bad_n = result["Bad"].sum()
     total_row = pd.DataFrame([{
-        "Bin":       "TOPLAM",
-        "Toplam":    int(total_all_n),
-        "Bad":       int(total_bad_n),
-        "Good":      int(result["Good"].sum()),
+        "Bin": "TOPLAM", "Toplam": int(total_all_n), "Bad": int(total_bad_n),
+        "Good": int(result["Good"].sum()),
         "Bad Rate %": round(total_bad_n / total_all_n * 100, 2) if total_all_n > 0 else 0.0,
-        "WOE":       "",
-        "IV Katkı":  round(iv_total, 4),
+        "WOE": "", "IV Katkı": round(iv_total, 4),
     }])
     result = pd.concat([result, total_row], ignore_index=True)
 
-    # ── Birleştirilmiş bin sınırlarını parse et (PSI için) ───────────────────
+    # bin_edges from optbinning splits (for PSI and compute_period_badrate)
+    _bin_edges = None
     if is_numeric:
         try:
-            skip_labels = {"TOPLAM", "Eksik"}
-            main_bin_labels = [
-                b for b in result["Bin"].tolist()
-                if isinstance(b, str) and b not in skip_labels and not b.startswith("Special")
-            ]
-            parsed_edges = []
-            for label in main_bin_labels:
-                m = _INTERVAL_RE.match(label)
-                if m:
-                    lo, hi = m.group(2).strip(), m.group(3).strip()
-                    lo_val = -np.inf if lo in ("-inf", "-Inf", "−inf") else float(lo)
-                    hi_val =  np.inf if hi in ("inf",  "Inf")          else float(hi)
-                    if not parsed_edges:
-                        parsed_edges.append(lo_val)
-                    parsed_edges.append(hi_val)
-            if len(parsed_edges) >= 2:
-                _bin_edges = np.array(parsed_edges, dtype=float)
+            splits = list(optb.splits)
+            if splits:
+                _bin_edges = np.array([-np.inf] + splits + [np.inf], dtype=float)
         except Exception:
-            _bin_edges = None
+            pass
 
     return result, iv_total, _bin_edges
 
@@ -258,10 +112,9 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
                            woe_df: pd.DataFrame, bin_edges) -> pd.DataFrame:
     """
     Train WOE binlerini yeni bir df'ye (test/OOT) uygulayarak her bin için
-    bad rate hesaplar.
+    bad rate hesaplar. Bin eşleştirmesi pozisyon bazlıdır (label formatından bağımsız).
 
-    Returns DataFrame with columns [Bin, Toplam, Bad, Bad Rate %] aligned
-    with woe_df bins.
+    Returns DataFrame with columns [Bin, Toplam, Bad, Bad Rate %] aligned with woe_df bins.
     """
     local = df[[col, target]].copy()
     local[target] = pd.to_numeric(local[target], errors="coerce")
@@ -270,53 +123,56 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
         return pd.DataFrame()
 
     is_numeric = pd.api.types.is_numeric_dtype(local[col])
-    train_bins = [b for b in woe_df["Bin"].tolist()
-                  if b not in ("TOPLAM",) and not b.startswith("Special")]
+
+    # Main train bins (excluding TOPLAM, Eksik, Special) — in order
+    main_bins_df = woe_df[
+        ~woe_df["Bin"].isin(["TOPLAM", "Eksik"]) &
+        ~woe_df["Bin"].astype(str).str.startswith("Special", na=False)
+    ].reset_index(drop=True)
 
     if is_numeric and bin_edges is not None and len(bin_edges) >= 2:
         special_mask = local[col].isin(SPECIAL_VALUES)
         special_data = local[special_mask]
         main_data    = local[~special_mask]
-        present      = main_data[main_data[col].notna()]
+        present      = main_data[main_data[col].notna()].copy()
         missing      = main_data[main_data[col].isna()]
 
-        _cut = pd.cut(present[col], bins=bin_edges, include_lowest=False)
-        present = present.copy()
-        present["bin_label"] = _cut.astype(str).replace("nan", "Eksik")
+        # Use integer labels (0-based) to match by position, not by label string
+        _cut = pd.cut(present[col], bins=bin_edges, include_lowest=False, labels=False)
+        present["bin_idx"] = _cut
 
         rows = []
-        for lbl in train_bins:
-            if lbl == "Eksik":
-                continue
-            grp = present[present["bin_label"] == lbl]
+        for i, bin_lbl in enumerate(main_bins_df["Bin"]):
+            grp   = present[present["bin_idx"] == i]
             total = len(grp)
-            bad   = grp[target].sum()
-            rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
+            bad   = int(grp[target].sum())
+            rows.append({"Bin": bin_lbl, "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
 
         # Special bins
         for sv in SPECIAL_VALUES:
             sv_grp = special_data[special_data[col] == sv]
             if len(sv_grp):
-                lbl = f"Special ({int(sv)})"
+                lbl   = f"Special ({int(sv)})"
                 total = len(sv_grp)
-                bad   = sv_grp[target].sum()
+                bad   = int(sv_grp[target].sum())
                 rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
                              "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
         # Eksik bin
         if len(missing):
             total = len(missing)
-            bad   = missing[target].sum()
+            bad   = int(missing[target].sum())
             rows.append({"Bin": "Eksik", "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
     else:
-        # Kategorik: match by value
+        # Kategorik: eşleştirme değer adına göre
         local["bin_label"] = local[col].fillna("Eksik").astype(str)
+        all_train_bins = woe_df[woe_df["Bin"] != "TOPLAM"]["Bin"].tolist()
         rows = []
-        for lbl in train_bins:
+        for lbl in all_train_bins:
             grp   = local[local["bin_label"] == lbl]
             total = len(grp)
-            bad   = grp[target].sum()
+            bad   = int(grp[target].sum())
             rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
 
@@ -324,10 +180,10 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
     if result.empty:
         return result
     total_all = result["Toplam"].sum()
-    total_bad = result["Bad"].sum()
+    total_bad_r = result["Bad"].sum()
     total_row = pd.DataFrame([{
-        "Bin": "TOPLAM", "Toplam": int(total_all), "Bad": int(total_bad),
-        "Bad Rate %": round(total_bad / total_all * 100, 2) if total_all > 0 else 0.0,
+        "Bin": "TOPLAM", "Toplam": int(total_all), "Bad": int(total_bad_r),
+        "Bad Rate %": round(total_bad_r / total_all * 100, 2) if total_all > 0 else 0.0,
     }])
     return pd.concat([result, total_row], ignore_index=True)
 
@@ -366,12 +222,14 @@ def _iv_label(iv: float) -> str:
 
 def compute_psi(df: pd.DataFrame, col: str, target: str,
                 date_col: str = None, cutoff_date: str = None,
-                max_n_bins: int = 4, bin_edges=None) -> dict:
+                max_n_bins: int = 4, bin_edges=None,
+                force_dtype: str = None) -> dict:
     """
     PSI hesaplar.
     1. Baseline (tarih öncesi) üzerinde bin sınırları belirlenir.
     2. Aynı sınırlar comparison (tarih sonrası) üzerinde uygulanır.
     3. İki dönemin bin dağılımı karşılaştırılır → PSI.
+    force_dtype: None | "numerical" | "categorical"  — otomatik algıyı ezer.
     """
     cols_needed = [col, target] + ([date_col] if date_col and date_col in df.columns else [])
     local = df[cols_needed].copy()
@@ -380,6 +238,10 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
                          .str.replace('%', '', regex=False).str.strip())
     local[target] = pd.to_numeric(local[target], errors='coerce')
     is_numeric    = pd.api.types.is_numeric_dtype(local[col])
+    if force_dtype == "categorical":
+        is_numeric = False
+    elif force_dtype == "numerical":
+        is_numeric = True
 
     # ── Split ─────────────────────────────────────────────────────────────────
     if date_col and cutoff_date and date_col in local.columns:
@@ -533,77 +395,44 @@ def get_variable_stats(df: pd.DataFrame, col: str, target: str) -> dict:
 
 # ── WoE Encoding ──────────────────────────────────────────────────────────────
 
-def _parse_interval_bounds(label: str):
-    """'(-inf, 0.5]' → (lo, hi) float tuple. None if not an interval."""
-    m = _INTERVAL_RE.match(str(label).strip())
-    if not m:
-        return None
-    try:
-        lo_s = m.group(2).strip()
-        hi_s = m.group(3).strip()
-        lo = float('-inf') if lo_s in ('-inf', '-Inf') else float(lo_s)
-        hi = float('inf')  if hi_s in ('inf',  'Inf')  else float(hi_s)
-        return lo, hi
-    except ValueError:
-        return None
-
-
 def get_woe_encoder(df: pd.DataFrame, col: str, target: str,
                     max_n_bins: int = 4) -> tuple:
     """
-    Her satır için WoE değeri hesaplar.
+    OptimalBinning ile her satır için WoE değeri hesaplar.
     Returns: (woe_series, iv_total, success: bool)
     Başarısızsa woe_series = NaN dolu, success = False.
     """
-    woe_df, iv, _ = get_woe_detail(df, col, target, max_n_bins)
-    if woe_df.empty:
+    from optbinning import OptimalBinning as _OB
+
+    local = df[[col, target]].copy()
+    if local[target].dtype == object:
+        local[target] = (local[target].astype(str)
+                         .str.replace('%', '', regex=False).str.strip())
+    local[target] = pd.to_numeric(local[target], errors='coerce')
+    local = local.dropna(subset=[target])
+
+    total_bad  = local[target].sum()
+    total_good = len(local) - total_bad
+    if total_bad == 0 or total_good == 0:
         return pd.Series(np.nan, index=df.index), 0.0, False
 
-    # TOPLAM satırını çıkar
-    woe_map = {
-        row["Bin"]: row["WOE"]
-        for _, row in woe_df.iterrows()
-        if row["Bin"] != "TOPLAM" and row["WOE"] != ""
-    }
+    is_numeric = pd.api.types.is_numeric_dtype(local[col])
 
-    is_numeric = pd.api.types.is_numeric_dtype(df[col])
+    try:
+        kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
+                      max_n_bins=max_n_bins, solver="cp",
+                      dtype="numerical" if is_numeric else "categorical")
+        if is_numeric:
+            kwargs["special_codes"] = list(SPECIAL_VALUES)
+        optb = _OB(**kwargs)
+        optb.fit(local[col].values, local[target].values.astype(int))
+        bt   = optb.binning_table.build(show_digits=8)
+        iv   = float(bt.loc["Totals", "IV"])
+        woe_vals = optb.transform(df[col].values, metric="woe",
+                                   metric_missing="empirical",
+                                   metric_special="empirical")
+        woe_series = pd.Series(woe_vals, index=df.index).fillna(0.0)
+    except Exception:
+        return pd.Series(np.nan, index=df.index), 0.0, False
 
-    if is_numeric:
-        no_special = df[col][~df[col].isin(SPECIAL_VALUES) & df[col].notna()]
-        n_init = max(max_n_bins * 2, 6)
-        try:
-            _, edges = pd.qcut(no_special, q=n_init, duplicates="drop", retbins=True)
-            edges[0], edges[-1] = -np.inf, np.inf
-            cut_result = pd.cut(df[col], bins=edges, include_lowest=False)
-            bin_labels = cut_result.astype(str)
-        except Exception:
-            bin_labels = df[col].astype(str)
-
-        for sv in SPECIAL_VALUES:
-            bin_labels = bin_labels.where(df[col] != sv, f"Special ({int(sv)})")
-        bin_labels = bin_labels.where(df[col].notna(), "Eksik")
-    else:
-        top_cats = df[col].dropna().value_counts().head(max_n_bins).index
-        bin_labels = (df[col]
-                      .where(df[col].isin(top_cats), "Diğer")
-                      .fillna("Eksik")
-                      .astype(str))
-
-    woe_series = bin_labels.map(woe_map)
-
-    # Birleştirilmiş bin etiketleriyle eşleşemeyen numerik satırlar için
-    # ham değer üzerinden aralık kontrolü yap
-    if is_numeric:
-        unmatched = woe_series.isna() & df[col].notna() & ~df[col].isin(SPECIAL_VALUES)
-        if unmatched.any():
-            vals = df.loc[unmatched, col]
-            for merged_label, woe_val in woe_map.items():
-                bounds = _parse_interval_bounds(str(merged_label))
-                if bounds is None:
-                    continue
-                lo, hi = bounds
-                in_range = (vals > lo) & (vals <= hi)
-                woe_series.loc[in_range[in_range].index] = woe_val
-
-    woe_series = woe_series.fillna(0.0)
     return woe_series, iv, True
