@@ -57,50 +57,188 @@ def build_sidebar():
 
         # SQL paneli
         html.Div(id="source-sql-div", children=[
-            dbc.Label("Tablo Adı", className="form-label"),
-            dbc.Input(
-                id="input-table",
-                value="dbo.MODEL_DATA",
-                type="text",
-                className="form-control mb-2",
-                style={"fontSize": "0.85rem"},
-            ),
+            # Bağlantı bilgileri
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Server", className="form-label"),
+                    dbc.Input(id="input-sql-server", type="text",
+                              placeholder="SERVERNAME",
+                              className="form-control",
+                              style={"fontSize": "0.82rem"}),
+                ], width=12, className="mb-2"),
+                dbc.Col([
+                    dbc.Label("Database", className="form-label"),
+                    dbc.Input(id="input-sql-database", type="text",
+                              placeholder="DatabaseName",
+                              className="form-control",
+                              style={"fontSize": "0.82rem"}),
+                ], width=12, className="mb-2"),
+                dbc.Col([
+                    dbc.Label("Driver", className="form-label"),
+                    dbc.Select(
+                        id="dd-sql-driver",
+                        options=[
+                            {"label": "ODBC Driver 18", "value": "ODBC Driver 18 for SQL Server"},
+                            {"label": "ODBC Driver 17", "value": "ODBC Driver 17 for SQL Server"},
+                            {"label": "ODBC Driver 13", "value": "ODBC Driver 13 for SQL Server"},
+                        ],
+                        className="dark-select",
+                        style={"fontSize": "0.82rem"},
+                    ),
+                ], width=12, className="mb-3"),
+            ], className="g-0"),
+
+            # Tablo listesi
+            dbc.Label("Tablolar", className="form-label"),
+            # Tablo 1 — master, her zaman görünür
+            dbc.InputGroup([
+                dbc.Input(id="input-table-1", type="text", placeholder="dbo.TABLO1",
+                          className="form-control",
+                          style={"fontSize": "0.82rem"}),
+                dbc.InputGroupText("Master",
+                                   style={"fontSize": "0.7rem", "color": "#a78bfa",
+                                          "backgroundColor": "#1a1f2e",
+                                          "border": "1px solid #2d3a4f"}),
+            ], className="mb-1"),
+            # Tablo 2 — gizli başlar
+            html.Div(id="sql-table-row-2", style={"display": "none"}, children=[
+                dbc.InputGroup([
+                    dbc.Input(id="input-table-2", type="text", placeholder="dbo.TABLO2",
+                              className="form-control",
+                              style={"fontSize": "0.82rem"}),
+                    dbc.Button("×", id="btn-remove-sql-2", color="link",
+                               style={"color": "#ef4444", "fontSize": "1rem",
+                                      "padding": "0 0.5rem"}),
+                ], className="mb-1"),
+            ]),
+            # Tablo 3 — gizli başlar
+            html.Div(id="sql-table-row-3", style={"display": "none"}, children=[
+                dbc.InputGroup([
+                    dbc.Input(id="input-table-3", type="text", placeholder="dbo.TABLO3",
+                              className="form-control",
+                              style={"fontSize": "0.82rem"}),
+                    dbc.Button("×", id="btn-remove-sql-3", color="link",
+                               style={"color": "#ef4444", "fontSize": "1rem",
+                                      "padding": "0 0.5rem"}),
+                ], className="mb-1"),
+            ]),
+            dbc.Button("+ Tablo Ekle", id="btn-add-sql-table", size="sm",
+                       color="link", n_clicks=0,
+                       style={"fontSize": "0.75rem", "color": "#4F8EF7",
+                              "padding": "0", "marginBottom": "0.5rem"}),
+
+            # Join Key — sadece 2+ tablo varsa gösterilir
+            html.Div(id="div-sql-join-key", style={"display": "none"}, children=[
+                dbc.Label("Join Key (virgülle ayır)", className="form-label"),
+                dbc.Input(id="input-sql-join-key", type="text",
+                          placeholder="UNIQUE_ID, CUSTOMER_NO",
+                          className="form-control mb-2",
+                          style={"fontSize": "0.82rem"}),
+            ]),
+
             dbc.Button("Veriyi Yükle", id="btn-load", className="btn-load mb-1", n_clicks=0),
+
+            # State: kaç tablo görünür
+            dcc.Store(id="store-sql-table-count", data=1),
         ]),
 
         # CSV paneli
         html.Div(id="source-csv-div", style={"display": "none"}, children=[
+            # Dosya 1 — master, her zaman görünür
+            dbc.Label("Dosyalar", className="form-label"),
             dcc.Upload(
                 id="upload-csv",
                 children=html.Div([
-                    html.Span("CSV dosyasını buraya sürükleyin", style={"color": "#a8b2c2", "fontSize": "0.82rem"}),
-                    html.Br(),
-                    html.Span("veya tıklayın", style={"color": "#7e8fa4", "fontSize": "0.75rem"}),
+                    html.Span("Dosya 1 — sürükle veya tıkla",
+                              style={"color": "#a8b2c2", "fontSize": "0.8rem"}),
                 ]),
                 accept=".csv",
-                style={
-                    "width": "100%", "borderWidth": "1px",
-                    "borderStyle": "dashed", "borderRadius": "6px",
-                    "borderColor": "#2d3a4f", "textAlign": "center",
-                    "backgroundColor": "#0e1117", "padding": "1rem 0.5rem",
-                    "cursor": "pointer", "marginBottom": "0.5rem",
-                },
-                style_active={
-                    "borderColor": "#4F8EF7", "backgroundColor": "#111f35",
-                },
+                style={"width": "100%", "borderWidth": "1px", "borderStyle": "dashed",
+                       "borderRadius": "6px", "borderColor": "#2d3a4f",
+                       "textAlign": "center", "backgroundColor": "#0e1117",
+                       "padding": "0.6rem 0.5rem", "cursor": "pointer",
+                       "marginBottom": "0.25rem"},
+                style_active={"borderColor": "#4F8EF7", "backgroundColor": "#111f35"},
             ),
             html.Div(id="csv-filename-display",
-                     style={"color": "#7e8fa4", "fontSize": "0.72rem",
+                     style={"color": "#a78bfa", "fontSize": "0.72rem",
                             "marginBottom": "0.4rem", "fontStyle": "italic"}),
+
+            # Dosya 2 — gizli başlar
+            html.Div(id="csv-file-row-2", style={"display": "none"}, children=[
+                dcc.Upload(
+                    id="upload-csv-2",
+                    children=html.Div([
+                        html.Span("Dosya 2 — sürükle veya tıkla",
+                                  style={"color": "#a8b2c2", "fontSize": "0.8rem"}),
+                    ]),
+                    accept=".csv",
+                    style={"width": "100%", "borderWidth": "1px", "borderStyle": "dashed",
+                           "borderRadius": "6px", "borderColor": "#2d3a4f",
+                           "textAlign": "center", "backgroundColor": "#0e1117",
+                           "padding": "0.6rem 0.5rem", "cursor": "pointer",
+                           "marginBottom": "0.25rem"},
+                    style_active={"borderColor": "#4F8EF7", "backgroundColor": "#111f35"},
+                ),
+                dbc.Row([
+                    dbc.Col(html.Div(id="csv-filename-display-2",
+                                    style={"color": "#a78bfa", "fontSize": "0.72rem",
+                                           "fontStyle": "italic"}), width=10),
+                    dbc.Col(dbc.Button("×", id="btn-remove-csv-2", color="link",
+                                       style={"color": "#ef4444", "fontSize": "1rem",
+                                              "padding": "0"}), width=2),
+                ], className="mb-2 g-0"),
+            ]),
+
+            # Dosya 3 — gizli başlar
+            html.Div(id="csv-file-row-3", style={"display": "none"}, children=[
+                dcc.Upload(
+                    id="upload-csv-3",
+                    children=html.Div([
+                        html.Span("Dosya 3 — sürükle veya tıkla",
+                                  style={"color": "#a8b2c2", "fontSize": "0.8rem"}),
+                    ]),
+                    accept=".csv",
+                    style={"width": "100%", "borderWidth": "1px", "borderStyle": "dashed",
+                           "borderRadius": "6px", "borderColor": "#2d3a4f",
+                           "textAlign": "center", "backgroundColor": "#0e1117",
+                           "padding": "0.6rem 0.5rem", "cursor": "pointer",
+                           "marginBottom": "0.25rem"},
+                    style_active={"borderColor": "#4F8EF7", "backgroundColor": "#111f35"},
+                ),
+                dbc.Row([
+                    dbc.Col(html.Div(id="csv-filename-display-3",
+                                    style={"color": "#a78bfa", "fontSize": "0.72rem",
+                                           "fontStyle": "italic"}), width=10),
+                    dbc.Col(dbc.Button("×", id="btn-remove-csv-3", color="link",
+                                       style={"color": "#ef4444", "fontSize": "1rem",
+                                              "padding": "0"}), width=2),
+                ], className="mb-2 g-0"),
+            ]),
+
+            dbc.Button("+ Dosya Ekle", id="btn-add-csv-file", size="sm",
+                       color="link", n_clicks=0,
+                       style={"fontSize": "0.75rem", "color": "#4F8EF7",
+                              "padding": "0", "marginBottom": "0.5rem"}),
+
+            # Join Key — sadece 2+ dosya varsa gösterilir
+            html.Div(id="div-csv-join-key", style={"display": "none"}, children=[
+                dbc.Label("Join Key (virgülle ayır)", className="form-label"),
+                dbc.Input(id="input-csv-join-key", type="text",
+                          placeholder="UNIQUE_ID, CUSTOMER_NO",
+                          className="form-control mb-2",
+                          style={"fontSize": "0.82rem"}),
+            ]),
+
             dbc.Row([
                 dbc.Col(
                     dbc.Select(
                         id="csv-separator",
                         options=[
-                            {"label": "Virgül  (,)",    "value": ","},
+                            {"label": "Virgül  (,)",        "value": ","},
                             {"label": "Noktalı virgül (;)", "value": ";"},
-                            {"label": "Tab (\\t)",       "value": "\t"},
-                            {"label": "Pipe  (|)",       "value": "|"},
+                            {"label": "Tab (\\t)",          "value": "\t"},
+                            {"label": "Pipe  (|)",          "value": "|"},
                         ],
                         value=",",
                         className="dark-select",
@@ -113,6 +251,9 @@ def build_sidebar():
                     width=4, className="d-flex align-items-center",
                 ),
             ], className="g-1"),
+
+            # State: kaç dosya görünür
+            dcc.Store(id="store-csv-file-count", data=1),
         ]),
 
         html.Div(id="load-status", style={"marginTop": "0.5rem", "fontSize": "0.8rem"}),
