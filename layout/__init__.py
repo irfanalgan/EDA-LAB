@@ -28,7 +28,30 @@ def build_navbar():
                 html.Span("EDA", className="navbar-logo-text"),
                 html.Span("LAB", className="navbar-brand-title"),
             ], style={"display": "flex", "alignItems": "baseline", "gap": "0.4rem"}),
-            html.Div("Keşifsel Veri Analizi", className="navbar-subtitle"),
+            html.Div([
+                html.Span("Keşifsel Veri Analizi", className="navbar-subtitle"),
+                html.Button(
+                    "?",
+                    id="btn-help-open",
+                    n_clicks=0,
+                    style={
+                        "marginLeft": "1rem",
+                        "background": "none",
+                        "border": "1px solid #4F8EF7",
+                        "borderRadius": "50%",
+                        "color": "#4F8EF7",
+                        "cursor": "pointer",
+                        "fontWeight": "700",
+                        "fontSize": "0.8rem",
+                        "width": "22px",
+                        "height": "22px",
+                        "lineHeight": "1",
+                        "padding": "0",
+                        "verticalAlign": "middle",
+                    },
+                    title="Yardım & Referans",
+                ),
+            ], style={"display": "flex", "alignItems": "center"}),
         ], fluid=True, style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
         color="#111827",
         dark=True,
@@ -509,6 +532,32 @@ def build_sidebar():
 
 def build_main():
     return html.Div([
+        # ── Yardım Overlay ────────────────────────────────────────────────────
+        html.Div(
+            id="help-overlay",
+            style={"display": "none", "position": "absolute", "inset": "0",
+                   "zIndex": "500", "backgroundColor": "#0E1117",
+                   "overflowY": "auto", "padding": "0"},
+            children=[
+                html.Div([
+                    html.Div([
+                        html.Button(
+                            "✕",
+                            id="btn-help-close",
+                            n_clicks=0,
+                            style={
+                                "background": "none", "border": "none",
+                                "color": "#8892a4", "cursor": "pointer",
+                                "fontSize": "1.2rem", "lineHeight": "1",
+                                "padding": "0.25rem 0.5rem",
+                            },
+                        ),
+                    ], style={"display": "flex", "justifyContent": "flex-end",
+                              "padding": "0.75rem 1rem 0"}),
+                    _build_help_tab(),
+                ]),
+            ],
+        ),
         html.Div(id="config-banner"),
         html.Div(id="metrics-row", style={"marginBottom": "1.5rem"}),
         dbc.Tabs([
@@ -1044,8 +1093,6 @@ def build_main():
                 dcc.Store(id="store-pg-model-vars", storage_type="memory"),
             ]), label="Playground", tab_id="tab-playground",
                className="tab-content-area"),
-            dbc.Tab(_build_help_tab(), label="Yardım", tab_id="tab-help",
-                    className="tab-content-area"),
         ], id="main-tabs", active_tab="tab-preview", className="main-tabs"),
     ], id="main-content")
 
@@ -1061,7 +1108,8 @@ def build_layout():
                 ]),
                 id="col-sidebar", width=3, style=_COL_SIDEBAR_OPEN,
             ),
-            dbc.Col(build_main(), id="col-main", width=9, style=_COL_MAIN_OPEN),
+            dbc.Col(build_main(), id="col-main", width=9,
+                    style={**_COL_MAIN_OPEN, "position": "relative"}),
         ], style={"margin": "0"}),
         dcc.Store(id="store-key", storage_type="memory"),
         dcc.Store(id="store-config", storage_type="memory"),

@@ -10,4 +10,5 @@ from callbacks import (
     stat_tests,
     var_summary,
     playground,
+    help_overlay,
 )

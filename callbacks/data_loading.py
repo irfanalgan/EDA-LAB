@@ -179,6 +179,7 @@ def load_csv(n_clicks,
         result, converted = coerce_numeric_columns(result)
         key = str(uuid.uuid4())
         _SERVER_STORE[key] = result
+        _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
 
         files_str = " + ".join(filenames)
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
@@ -232,6 +233,7 @@ def load_data(n_clicks,
         df, converted = coerce_numeric_columns(df)
         key = str(uuid.uuid4())
         _SERVER_STORE[key] = df
+        _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
         return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}")
 

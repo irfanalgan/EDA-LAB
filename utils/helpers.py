@@ -1,55 +1,129 @@
+import re
 import numpy as np
 import pandas as pd
 
 
-# Temizlenebilecek formatlama karakterleri (sıralı olarak denenir)
-_STRIP_PATTERNS = [
-    ('%',  ''),   # yüzde: '1.49%' → '1.49'
-    (',',  ''),   # binlik ayracı: '1,234' → '1234'
-    ('$',  ''),   # dolar
-    ('€',  ''),   # euro
-    ('£',  ''),   # sterlin
-    (' ',  ''),   # boşluk
-]
+# Türkçe sayı formatı kalıpları
+# "10.000,50" veya "1.234.567" — nokta binlik, virgül ondalık
+_TR_FULL = re.compile(r'^-?\d{1,3}(\.\d{3})+(,\d*)?$')
+# "1234,56" veya "100,5" — virgül ondalık, en fazla 2 basamak
+_TR_DEC  = re.compile(r'^-?\d+,\d{1,2}$')
+
+# Diğer formatlama karakterleri (virgül & nokta hariç)
+_SYMBOL_STRIP = ['%', '$', '€', '£', ' ', '\xa0']
 
 
-def coerce_numeric_columns(df: pd.DataFrame, threshold: float = 0.95) -> tuple[pd.DataFrame, list[str]]:
+def _turkish_fraction(series_clean: pd.Series) -> float:
+    """Kolondaki değerlerin Türkçe sayı formatına uyma oranını döndürür."""
+    sample = series_clean.head(300)
+    if len(sample) == 0:
+        return 0.0
+    hits = sum(1 for v in sample
+               if _TR_FULL.match(v) or _TR_DEC.match(v))
+    return hits / len(sample)
+
+
+def _apply_turkish(s_str: pd.Series) -> pd.Series:
+    """Türkçe formatı temizler: nokta binlik sil, virgül → nokta."""
+    c = s_str.str.replace('.', '', regex=False)
+    c = c.str.replace(',', '.', regex=False)
+    return pd.to_numeric(c, errors="coerce")
+
+
+def coerce_numeric_columns(
+    df: pd.DataFrame,
+    threshold: float = 0.90,
+) -> tuple[pd.DataFrame, list[dict]]:
     """
-    Tüm object kolonları tara; formatlama karakterleri temizlenince ≥threshold
-    oranında numerik dönüşüm başarılıysa kolonu numeric'e çevir.
+    Tüm object kolonları tara; çeşitli temizleme stratejileri uygulayarak
+    ≥threshold oranında numerik dönüşüm başarılıysa kolonu numeric'e çevir.
+
+    Dönüşüm sırası:
+      1. Ham parse (zaten numeric-like)
+      2. Türkçe format  — "10.000,50" veya "1234,56"
+      3. Sembol temizleme — %, $, €, boşluk vb.
+      4. İngiliz binlik virgülü — "1,234" → 1234
 
     Returns:
-        (df_cleaned, converted_cols)  — converted_cols değiştirilenlerin listesi
+        (df_cleaned, converted)
+        converted: [{"col", "fix", "sample_before", "sample_after", "n_converted"}, ...]
     """
-    converted = []
-    changes: dict[str, pd.Series] = {}
+    converted: list[dict] = []
+    changes:   dict[str, pd.Series] = {}
 
     for col in df.select_dtypes(include="object").columns:
-        s = df[col]
+        s        = df[col]
         non_null = s.dropna()
         if len(non_null) == 0:
             continue
 
-        # Önce ham haliyle dene
-        candidate = pd.to_numeric(non_null, errors="coerce")
-        success = candidate.notna().sum() / len(non_null)
+        sample_before = str(non_null.iloc[0])
 
-        if success < threshold:
-            # Formatlama karakterlerini sırayla soy, en iyi adayı bul
-            cleaned = non_null.astype(str).str.strip()
-            for char, repl in _STRIP_PATTERNS:
-                cleaned = cleaned.str.replace(char, repl, regex=False)
-            candidate = pd.to_numeric(cleaned, errors="coerce")
-            success = candidate.notna().sum() / len(non_null)
+        # ── 1. Ham parse ──────────────────────────────────────────────────────
+        cand = pd.to_numeric(non_null, errors="coerce")
+        if cand.notna().sum() / len(non_null) >= threshold:
+            # Sessizce dönüştür; kullanıcıya raporlama gerektirmez
+            changes[col] = pd.to_numeric(s, errors="coerce")
+            continue
 
-        if success >= threshold:
-            # Tüm seri (null'lar dahil) için dönüştür
-            full_cleaned = s.astype(str).str.strip()
-            for char, repl in _STRIP_PATTERNS:
-                full_cleaned = full_cleaned.str.replace(char, repl, regex=False)
-            full_cleaned = full_cleaned.where(s.notna(), other=None)
-            changes[col] = pd.to_numeric(full_cleaned, errors="coerce")
-            converted.append(col)
+        cleaned = non_null.astype(str).str.strip()
+
+        # ── 2. Türkçe format ─────────────────────────────────────────────────
+        if _turkish_fraction(cleaned) >= 0.70:
+            full_str = s.astype(str).str.strip().where(s.notna(), other=None)
+            result   = _apply_turkish(full_str.fillna(''))
+            result   = result.where(s.notna(), other=pd.NA)
+            n_ok     = result.notna().sum()
+            if n_ok / len(non_null) >= threshold:
+                changes[col] = result
+                sample_after = str(_apply_turkish(
+                    pd.Series([sample_before])).iloc[0])
+                converted.append({
+                    "col": col, "fix": "turkish_decimal",
+                    "sample_before": sample_before,
+                    "sample_after":  sample_after,
+                    "n_converted":   int(n_ok),
+                })
+                continue
+
+        # ── 3. Sembol temizleme (%  $  €  £  boşluk) ─────────────────────────
+        stripped = cleaned.copy()
+        for ch in _SYMBOL_STRIP:
+            stripped = stripped.str.replace(ch, '', regex=False)
+        cand = pd.to_numeric(stripped, errors="coerce")
+        n_ok = cand.notna().sum()
+        if n_ok / len(non_null) >= threshold:
+            full_str = s.astype(str).str.strip()
+            for ch in _SYMBOL_STRIP:
+                full_str = full_str.str.replace(ch, '', regex=False)
+            full_str = full_str.where(s.notna(), other=None)
+            changes[col] = pd.to_numeric(full_str, errors="coerce")
+            sample_after = str(cand.dropna().iloc[0]) if len(cand.dropna()) else ""
+            converted.append({
+                "col": col, "fix": "symbol_strip",
+                "sample_before": sample_before,
+                "sample_after":  sample_after,
+                "n_converted":   int(n_ok),
+            })
+            continue
+
+        # ── 4. İngiliz binlik virgülü "1,234" → 1234 ─────────────────────────
+        stripped_comma = stripped.str.replace(',', '', regex=False)
+        cand = pd.to_numeric(stripped_comma, errors="coerce")
+        n_ok = cand.notna().sum()
+        if n_ok / len(non_null) >= threshold:
+            full_str = s.astype(str).str.strip()
+            for ch in _SYMBOL_STRIP + [',']:
+                full_str = full_str.str.replace(ch, '', regex=False)
+            full_str = full_str.where(s.notna(), other=None)
+            changes[col] = pd.to_numeric(full_str, errors="coerce")
+            sample_after = str(cand.dropna().iloc[0]) if len(cand.dropna()) else ""
+            converted.append({
+                "col": col, "fix": "thousands_comma",
+                "sample_before": sample_before,
+                "sample_after":  sample_after,
+                "n_converted":   int(n_ok),
+            })
 
     if changes:
         df = df.assign(**changes)

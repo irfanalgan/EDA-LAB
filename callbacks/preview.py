@@ -6,6 +6,7 @@ import pandas as pd
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter
+from utils.anomaly_hints import _hint_card
 from utils.chart_helpers import _tab_info
 from modules.screening import screen_columns
 from layout import (
@@ -305,6 +306,81 @@ def _build_screen_report(key, df_active, config, expert_excluded=None):
     ])
 
 
+# ── Yardımcı: Veri Kalitesi Uyarıları ────────────────────────────────────────
+_FIX_LABELS = {
+    "turkish_decimal": "Türkçe ondalık virgül",
+    "symbol_strip":    "Sembol temizleme (%, $, €…)",
+    "thousands_comma": "İngiliz binlik virgülü",
+}
+
+def _build_quality_section(key: str, df: pd.DataFrame) -> html.Div:
+    """
+    Yükleme sırasında tespit edilen dönüşümleri ve yüksek null oranlarını
+    önizleme sayfasının üstünde gösterir.
+    """
+    quality   = _SERVER_STORE.get(f"{key}_quality", {})
+    converted = quality.get("converted", [])
+
+    cards = []
+
+    # ── Tip dönüşümü uyarıları ────────────────────────────────────────────────
+    if converted:
+        rows = []
+        for item in converted:
+            col    = item.get("col", "?")
+            fix    = _FIX_LABELS.get(item.get("fix", ""), item.get("fix", ""))
+            before = item.get("sample_before", "")
+            after  = item.get("sample_after",  "")
+            n      = item.get("n_converted",   0)
+            rows.append(
+                f"{col}  →  {fix}  "
+                f"(örnek: \"{before}\" → {after},  {n:,} satır)"
+            )
+        cards.append(_hint_card(
+            "warning",
+            f"{len(converted)} kolon string→numeric otomatik dönüştürüldü",
+            rows,
+        ))
+
+    # ── Null oranı uyarıları ──────────────────────────────────────────────────
+    if len(df) > 0:
+        null_pct = (df.isnull().sum() / len(df) * 100).sort_values(ascending=False)
+
+        high_null = null_pct[(null_pct >= 20) & (null_pct < 80)]
+        if not high_null.empty:
+            bullets = [
+                f"{col}  —  %{pct:.1f} eksik ({int(len(df) * pct / 100):,} satır)"
+                for col, pct in high_null.items()
+            ]
+            cards.append(_hint_card(
+                "warning",
+                f"{len(high_null)} kolonda yüksek eksik veri (≥%20)",
+                bullets[:15],   # en fazla 15 kolon göster
+            ))
+
+        mid_null = null_pct[(null_pct >= 5) & (null_pct < 20)]
+        if not mid_null.empty:
+            bullets = [
+                f"{col}  —  %{pct:.1f} eksik"
+                for col, pct in mid_null.items()
+            ]
+            cards.append(_hint_card(
+                "info",
+                f"{len(mid_null)} kolonda orta düzey eksik veri (%5–%20)",
+                bullets[:10],
+            ))
+
+    if not cards:
+        return html.Div()
+
+    return html.Div([
+        html.Div(style={"borderTop": "1px solid #232d3f",
+                        "marginBottom": "1rem"}),
+        html.P("Veri Kalitesi", className="section-title"),
+        *cards,
+    ], style={"marginBottom": "0.5rem"})
+
+
 # ── Callback: Veri Önizleme ───────────────────────────────────────────────────
 @app.callback(
     Output("data-preview", "children"),
@@ -372,6 +448,8 @@ def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
         current_exclusion_display,
     ])
 
+    quality_section = _build_quality_section(key, df_orig)
+
     preview_tsv = preview.to_csv(sep="\t", index=False)
     return html.Div([
         _tab_info("Önizleme", "Ham Veri & Uzman Eleme",
@@ -379,6 +457,7 @@ def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
                   "analiz kapsamından çıkarabilirsiniz; bu seçim tüm sekmelere yansır ve orijinal "
                   "veriyi değiştirmez.",
                   "#4F8EF7"),
+        quality_section,
         html.P("Veri Önizleme", className="section-title"),
         html.Div(
             dcc.Clipboard(target_id="preview-tsv", title="Kopyala",
