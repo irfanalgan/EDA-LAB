@@ -104,14 +104,24 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
 
     # ── 1. Heatmap ────────────────────────────────────────────────────────────
     show_text = len(cols) <= 18
+    # Dark-theme uyumlu colorscale: 0 → plot arka planı, negatif → kırmızı, pozitif → mavi
+    _dark_corr_scale = [
+        [0.00, "#b91c1c"],  # -1.0  koyu kırmızı
+        [0.35, "#ef4444"],  # -0.3  açık kırmızı
+        [0.45, "#2d3a4f"],  # -0.1  arka plana yakın
+        [0.50, "#0E1117"],  # 0.0   plot arka planı
+        [0.55, "#1e3a5f"],  # +0.1  arka plana yakın
+        [0.65, "#4F8EF7"],  # +0.3  açık mavi
+        [1.00, "#1d4ed8"],  # +1.0  koyu mavi
+    ]
     fig_heat = go.Figure(go.Heatmap(
         z=corr_df.values,
         x=cols, y=cols,
-        colorscale="RdBu",
+        colorscale=_dark_corr_scale,
         zmid=0, zmin=-1, zmax=1,
         text=corr_df.round(2).values if show_text else None,
         texttemplate="%{text}" if show_text else None,
-        textfont=dict(size=9, color="black"),
+        textfont=dict(size=9, color="#E8EAF0"),
         colorbar=dict(
             title=dict(text="r", font=dict(color="#8892a4", size=11)),
             thickness=12, len=0.8,
