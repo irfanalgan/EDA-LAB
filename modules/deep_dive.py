@@ -254,6 +254,84 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
     return result, iv_total, _bin_edges
 
 
+def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
+                           woe_df: pd.DataFrame, bin_edges) -> pd.DataFrame:
+    """
+    Train WOE binlerini yeni bir df'ye (test/OOT) uygulayarak her bin için
+    bad rate hesaplar.
+
+    Returns DataFrame with columns [Bin, Toplam, Bad, Bad Rate %] aligned
+    with woe_df bins.
+    """
+    local = df[[col, target]].copy()
+    local[target] = pd.to_numeric(local[target], errors="coerce")
+    local = local.dropna(subset=[target])
+    if local.empty:
+        return pd.DataFrame()
+
+    is_numeric = pd.api.types.is_numeric_dtype(local[col])
+    train_bins = [b for b in woe_df["Bin"].tolist()
+                  if b not in ("TOPLAM",) and not b.startswith("Special")]
+
+    if is_numeric and bin_edges is not None and len(bin_edges) >= 2:
+        special_mask = local[col].isin(SPECIAL_VALUES)
+        special_data = local[special_mask]
+        main_data    = local[~special_mask]
+        present      = main_data[main_data[col].notna()]
+        missing      = main_data[main_data[col].isna()]
+
+        _cut = pd.cut(present[col], bins=bin_edges, include_lowest=False)
+        present = present.copy()
+        present["bin_label"] = _cut.astype(str).replace("nan", "Eksik")
+
+        rows = []
+        for lbl in train_bins:
+            if lbl == "Eksik":
+                continue
+            grp = present[present["bin_label"] == lbl]
+            total = len(grp)
+            bad   = grp[target].sum()
+            rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
+                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
+
+        # Special bins
+        for sv in SPECIAL_VALUES:
+            sv_grp = special_data[special_data[col] == sv]
+            if len(sv_grp):
+                lbl = f"Special ({int(sv)})"
+                total = len(sv_grp)
+                bad   = sv_grp[target].sum()
+                rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
+                             "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
+        # Eksik bin
+        if len(missing):
+            total = len(missing)
+            bad   = missing[target].sum()
+            rows.append({"Bin": "Eksik", "Toplam": total, "Bad": bad,
+                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
+    else:
+        # Kategorik: match by value
+        local["bin_label"] = local[col].fillna("Eksik").astype(str)
+        rows = []
+        for lbl in train_bins:
+            grp   = local[local["bin_label"] == lbl]
+            total = len(grp)
+            bad   = grp[target].sum()
+            rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
+                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0})
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+    total_all = result["Toplam"].sum()
+    total_bad = result["Bad"].sum()
+    total_row = pd.DataFrame([{
+        "Bin": "TOPLAM", "Toplam": int(total_all), "Bad": int(total_bad),
+        "Bad Rate %": round(total_bad / total_all * 100, 2) if total_all > 0 else 0.0,
+    }])
+    return pd.concat([result, total_row], ignore_index=True)
+
+
 def compute_iv_ranking_optimal(df: pd.DataFrame, target: str,
                                 max_n_bins: int = 4) -> pd.DataFrame:
     """Tüm değişkenler için IV hesaplar (tam veri)."""

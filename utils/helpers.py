@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -90,6 +91,54 @@ def detect_target_type(s: pd.Series) -> str:
             return "multiclass"
         return "continuous"
     return "categorical"
+
+
+def get_splits(df: pd.DataFrame, config: dict) -> tuple:
+    """
+    df'yi config'e göre (df_train, df_test, df_oot) üçlüsüne böler.
+
+    Kurallar:
+    - oot_date varsa: oot_date öncesi = train havuzu, oot_date sonrası = df_oot
+      - has_test_split True ise train havuzunu rastgele train/test'e böl
+      - Aksi hâlde df_test = None
+    - oot_date yoksa: df_oot = None, tüm veriyi rastgele train/test böl
+    """
+    from sklearn.model_selection import train_test_split as _tts
+
+    date_col  = config.get("date_col")
+    oot_date  = config.get("oot_date")
+    has_test  = bool(config.get("has_test_split"))
+    test_pct  = float(config.get("test_size") or 20) / 100
+    target    = config.get("target_col")
+
+    def _random_split(df_pool):
+        indices = np.arange(len(df_pool))
+        y = df_pool[target] if target and target in df_pool.columns else None
+        try:
+            stratify = y.values if y is not None and y.nunique() <= 10 else None
+            tr_idx, te_idx = _tts(indices, test_size=test_pct, random_state=42,
+                                  stratify=stratify)
+        except Exception:
+            tr_idx, te_idx = _tts(indices, test_size=test_pct, random_state=42)
+        return df_pool.iloc[tr_idx].copy(), df_pool.iloc[te_idx].copy()
+
+    if oot_date and date_col and date_col in df.columns:
+        dates = pd.to_datetime(df[date_col], errors="coerce")
+        pool_mask = dates < pd.to_datetime(oot_date)
+        df_pool = df[pool_mask].copy()
+        df_oot  = df[~pool_mask].copy()
+        if has_test and len(df_pool) >= 20:
+            df_train, df_test = _random_split(df_pool)
+        else:
+            df_train, df_test = df_pool, None
+    else:
+        df_oot = None
+        if len(df) >= 20:
+            df_train, df_test = _random_split(df)
+        else:
+            df_train, df_test = df.copy(), None
+
+    return df_train, df_test, df_oot
 
 
 def get_categorical_columns(df: pd.DataFrame, max_unique: int = 50) -> list[str]:

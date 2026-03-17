@@ -11,7 +11,8 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (roc_auc_score, roc_curve, confusion_matrix,
                              f1_score, precision_score, recall_score,
-                             r2_score, mean_squared_error, mean_absolute_error)
+                             r2_score, mean_squared_error, mean_absolute_error,
+                             accuracy_score)
 from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
 import xgboost as xgb
@@ -24,7 +25,7 @@ import matplotlib.pyplot as plt
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _PLOT_LAYOUT, _AXIS_STYLE, _build_woe_dataset
 
 
@@ -414,6 +415,50 @@ def render_pg_model_list(model_vars):
     ), count_txt
 
 
+# ── Playground: Model dropdown'ı target_type'a göre güncelle ─────────────────
+@app.callback(
+    Output("pg-model-type", "options"),
+    Output("pg-model-type", "value"),
+    Input("store-config", "data"),
+)
+def update_model_type_options(config):
+    if not config:
+        return dash.no_update, dash.no_update
+    target_type = config.get("target_type", "binary")
+    if target_type == "continuous":
+        options = [
+            {"label": "Ridge Regression",       "value": "ridge"},
+            {"label": "LightGBM Regressor",     "value": "lgbm"},
+            {"label": "XGBoost Regressor",      "value": "xgb"},
+            {"label": "Random Forest Regressor","value": "rf"},
+        ]
+        default = "ridge"
+    else:
+        options = [
+            {"label": "Logistic Regression", "value": "lr"},
+            {"label": "LightGBM",            "value": "lgbm"},
+            {"label": "XGBoost",             "value": "xgb"},
+            {"label": "Random Forest",       "value": "rf"},
+        ]
+        default = "lr"
+    return options, default
+
+
+# ── Playground: C ve eşik kontrollerini gizle/göster ─────────────────────────
+@app.callback(
+    Output("pg-col-c-value",       "style"),
+    Output("pg-col-threshold",     "style"),
+    Output("pg-col-threshold-val", "style"),
+    Input("store-config", "data"),
+)
+def toggle_classification_controls(config):
+    target_type = (config or {}).get("target_type", "binary")
+    if target_type == "continuous":
+        hidden = {"display": "none"}
+        return hidden, hidden, hidden
+    return {}, {}, {}
+
+
 # ── Playground: Değişken ekle ──────────────────────────────────────────────────
 @app.callback(
     Output("store-pg-model-vars", "data"),
@@ -478,10 +523,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
 
     target      = target_sel or config["target_col"]
     seg_col     = config.get("segment_col") or (seg_col_input or None)
-    date_col    = config.get("date_col")
     target_type = config.get("target_type", "binary")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
-    test_size   = float(test_size_pct or 30) / 100
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val).reset_index(drop=True)
     C           = float(c_val or 1.0)
     is_regression = (target_type == "continuous")
 
@@ -490,34 +533,25 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                         className="alert-info-custom")
     y_all = pd.to_numeric(df_active[target], errors='coerce')
 
-    # ── Train/Test split maskesi ───────────────────────────────────────────────
-    if split_method == "date" and date_col and split_date and date_col in df_active.columns:
-        dates = pd.to_datetime(df_active[date_col], errors="coerce")
-        cutoff = pd.to_datetime(split_date)
-        train_mask = (dates < cutoff).values
-        test_mask  = ~train_mask
-        split_info = (f"Tarih kesimi: {split_date}  ·  "
-                      f"Train: {train_mask.sum():,}  /  Test: {test_mask.sum():,}")
-        if train_mask.sum() < 30 or test_mask.sum() < 30:
-            return html.Div(
-                f"Yetersiz veri: Train={train_mask.sum():,}, Test={test_mask.sum():,}. "
-                "Farklı bir kesim tarihi seçin.",
-                className="alert-info-custom")
-    else:
-        indices = np.arange(len(df_active))
-        try:
-            # Continuous target: stratify olmadan split
-            stratify = y_all.values if not is_regression else None
-            tr_idx, te_idx = train_test_split(
-                indices, test_size=test_size, random_state=42, stratify=stratify)
-        except Exception:
-            tr_idx, te_idx = train_test_split(
-                indices, test_size=test_size, random_state=42)
-        train_mask = np.zeros(len(df_active), dtype=bool)
-        train_mask[tr_idx] = True
-        test_mask = ~train_mask
-        split_info = (f"Rastgele split  ·  "
-                      f"Train: {train_mask.sum():,}  /  Test: {test_mask.sum():,}")
+    # ── Train / Test / OOT split ───────────────────────────────────────────────
+    _split_cfg = {**config, "test_size": int(test_size_pct or 30)}
+    _df_tr, _df_te, _df_oot = get_splits(df_active, _split_cfg)
+
+    train_mask = df_active.index.isin(_df_tr.index)
+    test_mask  = (df_active.index.isin(_df_te.index)
+                  if _df_te is not None else np.zeros(len(df_active), dtype=bool))
+    oot_mask   = (df_active.index.isin(_df_oot.index)
+                  if _df_oot is not None else np.zeros(len(df_active), dtype=bool))
+
+    n_tr, n_te, n_oot = train_mask.sum(), test_mask.sum(), oot_mask.sum()
+    split_parts = [f"Train: {n_tr:,}"]
+    if n_te  > 0: split_parts.append(f"Test: {n_te:,}")
+    if n_oot > 0: split_parts.append(f"OOT: {n_oot:,}")
+    split_info = "  /  ".join(split_parts)
+
+    if n_tr < 30:
+        return html.Div(f"Yetersiz train verisi: {n_tr:,} satır.",
+                        className="alert-info-custom")
 
     # ── Base parametreler ─────────────────────────────────────────────────────
     _MODEL_PARAMS = {
@@ -534,7 +568,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     algo = model_type or ("ridge" if is_regression else "lr")
 
     def _fit_and_render(X_df, disp_names, label, accent):
-        """Modeli kur, train+test sonuçlarını döndür."""
+        """Modeli kur, train+test+oot sonuçlarını döndür."""
         X = X_df.copy()
         for col in X.columns:
             if X[col].isna().any():
@@ -545,18 +579,28 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         X_te = X.iloc[test_mask]
         y_tr = y_all.iloc[train_mask]
         y_te = y_all.iloc[test_mask]
-        if len(X_tr) == 0 or len(X_te) == 0:
+        has_test = len(X_te) > 0
+        has_oot  = oot_mask.any()
+        if has_oot:
+            X_oot = X.iloc[oot_mask]
+            y_oot = y_all.iloc[oot_mask]
+        else:
+            X_oot = None
+            y_oot = None
+        if len(X_tr) == 0:
             return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom")
 
         # Scaling: sadece LR için anlamlı; tree modeller scale'e duyarsız
         is_tree = algo in ("lgbm", "xgb", "rf")
         if not is_tree:
             scaler = StandardScaler()
-            X_tr_s = scaler.fit_transform(X_tr)
-            X_te_s = scaler.transform(X_te)
+            X_tr_s  = scaler.fit_transform(X_tr)
+            X_te_s  = scaler.transform(X_te)  if has_test else np.empty((0, X_tr.shape[1]))
+            X_oot_s = scaler.transform(X_oot) if has_oot  else None
         else:
-            X_tr_s = X_tr.values
-            X_te_s = X_te.values
+            X_tr_s  = X_tr.values
+            X_te_s  = X_te.values  if has_test else np.empty((0, X_tr.shape[1]))
+            X_oot_s = X_oot.values if has_oot  else None
 
         try:
             if is_regression:
@@ -586,7 +630,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         # ── Regression çıkışı ─────────────────────────────────────────────────
         if is_regression:
             tr_pred = mdl.predict(X_tr_s)
-            te_pred = mdl.predict(X_te_s)
+            te_pred = mdl.predict(X_te_s) if has_test else None
 
             def _reg_metrics(y_true, y_pred):
                 r2   = r2_score(y_true, y_pred)
@@ -595,7 +639,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 return dict(r2=r2, rmse=rmse, mae=mae, n=len(y_true))
 
             tr_rm = _reg_metrics(y_tr, tr_pred)
-            te_rm = _reg_metrics(y_te, te_pred)
+            te_rm = _reg_metrics(y_te, te_pred) if has_test and te_pred is not None else None
 
             def mc_r(v, l, c="#4F8EF7", w=2):
                 return dbc.Col(html.Div([
@@ -620,20 +664,27 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 ], style={"backgroundColor": bg, "borderRadius": "6px",
                           "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
 
-            metric_panel = html.Div([
-                _reg_row(tr_rm, "Train", "#0d1520"),
-                _reg_row(te_rm, "Test",  "#0e1624"),
-            ], className="mb-3")
+            reg_rows = [_reg_row(tr_rm, "Train", "#0d1520")]
+            if te_rm:
+                reg_rows.append(_reg_row(te_rm, "Test", "#0e1624"))
+            if has_oot and X_oot_s is not None:
+                oot_pred_r = mdl.predict(X_oot_s)
+                oot_rm     = _reg_metrics(y_oot, oot_pred_r)
+                reg_rows.append(_reg_row(oot_rm, "OOT", "#131c30"))
+            metric_panel = html.Div(reg_rows, className="mb-3")
 
-            # Scatter: actual vs predicted
+            # Scatter: actual vs predicted (test if exists, else oot)
+            _scatter_y   = y_te   if (has_test and te_pred is not None) else (y_oot   if has_oot else y_tr)
+            _scatter_p   = te_pred if (has_test and te_pred is not None) else (mdl.predict(X_oot_s) if has_oot else tr_pred)
+            _scatter_lbl = "Test"  if (has_test and te_pred is not None) else ("OOT" if has_oot else "Train")
             fig_scatter = go.Figure()
             fig_scatter.add_trace(go.Scatter(
-                x=y_te.values, y=te_pred, mode="markers",
+                x=_scatter_y.values, y=_scatter_p, mode="markers",
                 marker=dict(color=accent, size=4, opacity=0.5),
-                name="Test",
+                name=_scatter_lbl,
             ))
-            mn = min(float(y_te.min()), float(te_pred.min()))
-            mx = max(float(y_te.max()), float(te_pred.max()))
+            mn = min(float(_scatter_y.min()), float(_scatter_p.min()))
+            mx = max(float(_scatter_y.max()), float(_scatter_p.max()))
             fig_scatter.add_trace(go.Scatter(
                 x=[mn, mx], y=[mn, mx], mode="lines",
                 line=dict(color="#4a5568", dash="dash", width=1),
@@ -641,7 +692,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             ))
             fig_scatter.update_layout(
                 **_PLOT_LAYOUT,
-                title=dict(text="Actual vs Predicted — Test",
+                title=dict(text=f"Actual vs Predicted — {_scatter_lbl}",
                            font=dict(color="#E8EAF0", size=13)),
                 xaxis=dict(**_AXIS_STYLE, title="Gerçek"),
                 yaxis=dict(**_AXIS_STYLE, title="Tahmin"),
@@ -649,7 +700,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             )
 
             # Residuals histogram
-            residuals = y_te.values - te_pred
+            residuals = _scatter_y.values - _scatter_p
             fig_resid = go.Figure(go.Histogram(
                 x=residuals, nbinsx=40,
                 marker_color=accent, opacity=0.8,
@@ -657,7 +708,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             ))
             fig_resid.update_layout(
                 **_PLOT_LAYOUT,
-                title=dict(text="Artık (Residual) Dağılımı — Test",
+                title=dict(text=f"Artık (Residual) Dağılımı — {_scatter_lbl}",
                            font=dict(color="#E8EAF0", size=13)),
                 xaxis=dict(**_AXIS_STYLE, title="Artık"),
                 yaxis=dict(**_AXIS_STYLE, title="Frekans"),
@@ -706,13 +757,15 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             shap_section = None
             if is_tree_r:
                 try:
+                    _X_shap_r  = (X_te if has_test and len(X_te) > 0
+                                  else (X_oot if has_oot and X_oot is not None else X_tr))
                     explainer  = shap.TreeExplainer(mdl)
-                    shap_vals  = explainer.shap_values(X_te.values)
+                    shap_vals  = explainer.shap_values(_X_shap_r.values)
                     shap_names = [disp_names.get(c, c) for c in X.columns]
                     fig_shap, ax_shap = plt.subplots(figsize=(8, max(4, len(shap_names) * 0.3)))
                     fig_shap.patch.set_facecolor("#0e1117")
                     ax_shap.set_facecolor("#0e1117")
-                    shap.summary_plot(shap_vals, X_te.values, feature_names=shap_names,
+                    shap.summary_plot(shap_vals, _X_shap_r.values, feature_names=shap_names,
                                       show=False, plot_size=None)
                     buf = io.BytesIO()
                     plt.savefig(buf, format="png", dpi=90, bbox_inches="tight",
@@ -745,20 +798,118 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 shap_section or html.Div(),
             ])
 
-        # ── Classification çıkışı ─────────────────────────────────────────────
-        tr_prob = mdl.predict_proba(X_tr_s)[:, 1]
-        te_prob = mdl.predict_proba(X_te_s)[:, 1]
+        # ── Multiclass çıkışı ─────────────────────────────────────────────────
+        is_multiclass = (target_type == "multiclass")
+        if is_multiclass:
+            tr_pred_cls  = mdl.predict(X_tr_s)
+            te_pred_cls  = mdl.predict(X_te_s) if has_test else None
+            oot_pred_cls = mdl.predict(X_oot_s) if has_oot and X_oot_s is not None else None
 
-        # ── Eşik belirleme ────────────────────────────────────────────────────
+            def _mc_metrics(y_t, y_p):
+                return dict(
+                    acc = accuracy_score(y_t, y_p),
+                    f1m = f1_score(y_t, y_p, average="macro",    zero_division=0),
+                    f1w = f1_score(y_t, y_p, average="weighted", zero_division=0),
+                    n   = len(y_t),
+                )
+            tr_mmc  = _mc_metrics(y_tr,  tr_pred_cls)
+            te_mmc  = _mc_metrics(y_te,  te_pred_cls)  if has_test and te_pred_cls is not None  else None
+            oot_mmc = _mc_metrics(y_oot, oot_pred_cls) if has_oot  and oot_pred_cls is not None else None
+
+            def mc_m(v, l, c="#4F8EF7", w=2):
+                return dbc.Col(html.Div([
+                    html.Div(str(v), className="metric-value",
+                             style={"color": c, "fontSize": "1.25rem"}),
+                    html.Div(l, className="metric-label"),
+                ], className="metric-card"), width=w)
+
+            def _mc_row(m, title, bg):
+                acc_c = "#10b981" if m["acc"] >= 0.8 else "#f59e0b" if m["acc"] >= 0.6 else "#ef4444"
+                return html.Div([
+                    html.Div(title, style={"color": "#a8b2c2", "fontSize": "0.72rem",
+                                           "fontWeight": "600", "letterSpacing": "0.06em",
+                                           "textTransform": "uppercase",
+                                           "marginBottom": "0.4rem", "paddingLeft": "0.25rem"}),
+                    dbc.Row([
+                        mc_m(f"{m['acc']:.4f}",  "Accuracy",    acc_c),
+                        mc_m(f"{m['f1m']:.4f}",  "F1 Macro",    "#4F8EF7"),
+                        mc_m(f"{m['f1w']:.4f}",  "F1 Weighted", "#a78bfa"),
+                        mc_m(f"{m['n']:,}",       "N",           "#556070"),
+                    ], className="g-2"),
+                ], style={"backgroundColor": bg, "borderRadius": "6px",
+                          "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
+
+            mc_rows = [_mc_row(tr_mmc, "Train", "#0d1520")]
+            if te_mmc:
+                mc_rows.append(_mc_row(te_mmc,  "Test", "#0e1624"))
+            if oot_mmc:
+                mc_rows.append(_mc_row(oot_mmc, "OOT",  "#131c30"))
+            metric_panel = html.Div(mc_rows, className="mb-3")
+
+            # Feature importance / coefficients
+            is_tree_mc = algo in ("lgbm", "xgb", "rf")
+            if not is_tree_mc:
+                coef_rows_mc = []
+                for i, cls in enumerate(mdl.classes_):
+                    coef_arr = mdl.coef_[i] if len(mdl.coef_) > 1 else mdl.coef_[0]
+                    for c, v in zip(X.columns, coef_arr):
+                        coef_rows_mc.append({"Sınıf": str(int(float(cls))),
+                                             "Değişken": disp_names.get(c, c),
+                                             "Katsayı": round(float(v), 4)})
+                imp_df_mc = pd.DataFrame(coef_rows_mc)
+                tbl_title_mc = "Katsayı Tablosu (Sınıf Bazlı)"
+            else:
+                raw_imp_mc = mdl.feature_importances_
+                total_mc   = raw_imp_mc.sum() or 1.0
+                imp_df_mc  = pd.DataFrame([
+                    {"Değişken": disp_names.get(c, c),
+                     "Önem (%)": round(float(v / total_mc * 100), 2)}
+                    for c, v in zip(X.columns, raw_imp_mc)
+                ]).sort_values("Önem (%)", ascending=False)
+                tbl_title_mc = "Feature Importance"
+
+            _tbl_style_mc = dict(
+                sort_action="native", page_size=15,
+                style_table={"overflowX": "auto"},
+                style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
+                              "fontWeight": "600", "fontSize": "0.7rem",
+                              "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
+                style_cell={"backgroundColor": "#111827", "color": "#d1d5db",
+                            "fontSize": "0.78rem", "border": "1px solid #1f2a3c",
+                            "padding": "5px 8px", "textAlign": "left"},
+                style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
+            )
+
+            return html.Div([
+                html.Div(f"{label}  ·  {split_info}",
+                         style={"color": "#7e8fa4", "fontSize": "0.78rem",
+                                "marginBottom": "0.75rem"}),
+                metric_panel,
+                html.P(tbl_title_mc, className="section-title"),
+                dash_table.DataTable(
+                    data=imp_df_mc.to_dict("records"),
+                    columns=[{"name": c, "id": c} for c in imp_df_mc.columns],
+                    **_tbl_style_mc,
+                ),
+            ])
+
+        # ── Binary classification çıkışı ──────────────────────────────────────
+        tr_prob  = mdl.predict_proba(X_tr_s)[:, 1]
+        te_prob  = mdl.predict_proba(X_te_s)[:, 1]  if has_test else None
+        oot_prob = mdl.predict_proba(X_oot_s)[:, 1] if has_oot and X_oot_s is not None else None
+
+        # ── Eşik belirleme (test üzerinden, yoksa train) ──────────────────────
         thr_method = threshold_method or "fixed"
+        _ref_prob  = te_prob if te_prob is not None else tr_prob
+        _ref_y     = y_te   if te_prob is not None else y_tr
         if thr_method == "f1":
             _thrs = np.linspace(0.01, 0.99, 99)
-            _f1s  = [f1_score(y_te, (te_prob >= t).astype(int), zero_division=0)
+            _f1s  = [f1_score(_ref_y, (_ref_prob >= t).astype(int), zero_division=0)
                      for t in _thrs]
             opt_thr = float(_thrs[int(np.argmax(_f1s))])
             thr_label = f"F1 Maks. eşiği: {opt_thr:.2f}"
         elif thr_method == "ks":
-            _fpr, _tpr, _thrs_roc = roc_curve(y_te, te_prob)
+            _fpr, _tpr, _thrs_roc = roc_curve(_ref_y, _ref_prob)
             opt_thr = float(_thrs_roc[int(np.argmax(_tpr - _fpr))])
             opt_thr = min(max(opt_thr, 0.01), 0.99)
             thr_label = f"KS noktası eşiği: {opt_thr:.2f}"
@@ -783,8 +934,9 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                         prec=prec_, rec=rec_, cm=cm__,
                         fpr=fpr_, tpr=tpr_, n=len(y_true))
 
-        tr_m = _metrics(y_tr, tr_prob)
-        te_m = _metrics(y_te, te_prob)
+        tr_m  = _metrics(y_tr,  tr_prob)
+        te_m  = _metrics(y_te,  te_prob)  if te_prob  is not None else None
+        oot_m = _metrics(y_oot, oot_prob) if oot_prob is not None else None
 
         # ── Metrik rengi ──────────────────────────────────────────────────────
         def _gc(g): return "#10b981" if g >= 0.4 else "#f59e0b" if g >= 0.2 else "#ef4444"
@@ -816,18 +968,22 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             ], style={"backgroundColor": bg, "borderRadius": "6px",
                       "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
 
-        metric_panel = html.Div([
-            _metric_row(tr_m, "Train", "#0d1520"),
-            _metric_row(te_m, "Test",  "#0e1624"),
-        ], className="mb-3")
+        bin_rows = [_metric_row(tr_m, "Train", "#0d1520")]
+        if te_m:
+            bin_rows.append(_metric_row(te_m,  "Test", "#0e1624"))
+        if oot_m:
+            bin_rows.append(_metric_row(oot_m, "OOT",  "#131c30"))
+        metric_panel = html.Div(bin_rows, className="mb-3")
 
-        # ── ROC (train + test) ────────────────────────────────────────────────
+        # ── ROC (train + test + oot) ───────────────────────────────────────────
         accent_tr = "#556070"
         fig_roc = go.Figure()
-        for m, col_, nm in [
-            (tr_m, accent_tr, f"Train (AUC={tr_m['auc']:.3f})"),
-            (te_m, accent,    f"Test  (AUC={te_m['auc']:.3f})"),
-        ]:
+        roc_traces = [(tr_m, accent_tr, f"Train (AUC={tr_m['auc']:.3f})")]
+        if te_m:
+            roc_traces.append((te_m,  accent,     f"Test  (AUC={te_m['auc']:.3f})"))
+        if oot_m:
+            roc_traces.append((oot_m, "#a78bfa",  f"OOT   (AUC={oot_m['auc']:.3f})"))
+        for m, col_, nm in roc_traces:
             fig_roc.add_trace(go.Scatter(
                 x=m["fpr"], y=m["tpr"], mode="lines",
                 line=dict(color=col_, width=2), name=nm,
@@ -846,8 +1002,10 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#8892a4", size=10)),
         )
 
-        # ── Confusion matrix (test) ───────────────────────────────────────────
-        tn, fp, fn, tp_ = te_m["cm"].ravel()
+        # ── Confusion matrix (test if available, else oot, else train) ────────
+        _cm_src = te_m if te_m else (oot_m if oot_m else tr_m)
+        _cm_lbl = "Test" if te_m else ("OOT" if oot_m else "Train")
+        tn, fp, fn, tp_ = _cm_src["cm"].ravel()
         fig_cm = go.Figure(go.Heatmap(
             z=[[tn, fp], [fn, tp_]],
             x=["Pred: 0", "Pred: 1"], y=["Actual: 0", "Actual: 1"],
@@ -857,7 +1015,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         ))
         fig_cm.update_layout(
             **_PLOT_LAYOUT,
-            title=dict(text=f"Confusion Matrix — Test ({thr_label})",
+            title=dict(text=f"Confusion Matrix — {_cm_lbl} ({thr_label})",
                        font=dict(color="#E8EAF0", size=13)),
             height=260, xaxis=dict(side="top"),
         )
@@ -936,8 +1094,10 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         shap_section = None
         if is_tree:
             try:
-                _shap_n   = len(X_te)
-                _X_shap   = X_te.values
+                # Use test for SHAP if available, else oot, else train
+                _X_shap_df = X_te if has_test and len(X_te) > 0 else (X_oot if has_oot and X_oot is not None else X_tr)
+                _shap_n    = len(_X_shap_df)
+                _X_shap    = _X_shap_df.values
                 explainer = shap.TreeExplainer(mdl)
                 shap_vals = explainer.shap_values(_X_shap)
                 if isinstance(shap_vals, list):

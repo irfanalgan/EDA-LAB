@@ -181,11 +181,15 @@ _FOOTER_DONE    = (_BTN_HIDDEN, {"fontSize": "0.85rem", "padding": "0.4rem 1.2re
     Input("btn-confirm", "n_clicks"),
     State("dd-target-col", "value"),
     State("dd-date-col", "value"),
+    State("dd-oot-date", "value"),
     State("dd-segment-col", "value"),
+    State("chk-train-test-split", "value"),
+    State("input-test-size", "value"),
     State("store-key", "data"),
     prevent_initial_call=True,
 )
-def confirm_config(n_clicks, target_col, date_col, segment_col, key):
+def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
+                   train_test_val, test_size_cfg, key):
     no_modal = (dash.no_update,) * 6  # modal, interval, body, close-style, done-style
     if not target_col or target_col == "":
         return (dash.no_update, dbc.Alert(
@@ -197,10 +201,13 @@ def confirm_config(n_clicks, target_col, date_col, segment_col, key):
     target_type = detect_target_type(df_orig[target_col]) if df_orig is not None else "binary"
 
     config = {
-        "target_col":  target_col,
-        "date_col":    date_col or None,
-        "segment_col": segment_col or None,
-        "target_type": target_type,
+        "target_col":      target_col,
+        "date_col":        date_col or None,
+        "oot_date":        oot_date or None,
+        "segment_col":     segment_col or None,
+        "target_type":     target_type,
+        "has_test_split":  bool(train_test_val),
+        "test_size":       int(test_size_cfg or 20),
     }
 
     prog_key = f"{key}_precompute"
@@ -209,6 +216,10 @@ def confirm_config(n_clicks, target_col, date_col, segment_col, key):
     parts = [html.Strong("✓ Onaylandı")]
     if date_col:
         parts += [f"  ·  Tarih: {date_col}"]
+    if oot_date:
+        parts += [f"  ·  OOT: ≥ {oot_date}"]
+        if bool(train_test_val):
+            parts += [f"  ·  Test: %{test_size_cfg or 20}"]
     if segment_col:
         parts += [f"  ·  Segment: {segment_col}"]
 

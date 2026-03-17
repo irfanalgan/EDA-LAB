@@ -159,3 +159,38 @@ def open_config_section(key):
     )
 
     return True, all_opts, date_opts, seg_opts
+
+
+# ── Callback: OOT Tarih Dropdown'ını Doldur ───────────────────────────────────
+@app.callback(
+    Output("collapse-oot-date", "is_open"),
+    Output("dd-oot-date", "options"),
+    Output("dd-oot-date", "value"),
+    Input("dd-date-col", "value"),
+    State("store-key", "data"),
+)
+def populate_oot_date(date_col, key):
+    """Tarih kolonu seçilince OOT dropdown'ını distinct aylarla doldur."""
+    if not date_col or not key:
+        return False, [{"label": "— opsiyonel —", "value": ""}], ""
+    df = _get_df(key)
+    if df is None or date_col not in df.columns:
+        return False, [{"label": "— opsiyonel —", "value": ""}], ""
+    raw_dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
+    distinct = sorted(raw_dates.dt.to_period("M").unique().astype(str))
+    if not distinct:
+        return False, [{"label": "— opsiyonel —", "value": ""}], ""
+    opts = [{"label": "— opsiyonel —", "value": ""}] + [{"label": d, "value": d} for d in distinct]
+    # Varsayılan: ~%80 noktası (train büyük, OOT küçük)
+    default_idx = max(0, int(len(distinct) * 0.8))
+    default = distinct[default_idx]
+    return True, opts, default
+
+
+# ── Callback: Train/Test Collapse (config paneli) ─────────────────────────────
+@app.callback(
+    Output("collapse-test-size-cfg", "is_open"),
+    Input("chk-train-test-split", "value"),
+)
+def toggle_test_size_cfg(val):
+    return bool(val)

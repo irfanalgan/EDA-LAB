@@ -144,6 +144,43 @@ def build_sidebar():
                     className="dark-select mb-3",
                 ),
 
+                # OOT tarihi — tarih kolonu seçilince açılır
+                dbc.Collapse(
+                    html.Div([
+                        dbc.Label("OOT Başlangıç Tarihi", className="form-label"),
+                        html.Div("Train = öncesi  ·  OOT = sonrası", className="form-hint"),
+                        dbc.Select(
+                            id="dd-oot-date",
+                            options=[{"label": "— opsiyonel —", "value": ""}],
+                            value="",
+                            className="dark-select mb-2",
+                        ),
+                        dbc.Checklist(
+                            id="chk-train-test-split",
+                            options=[{"label": " Train / Test bölünmesi", "value": "split"}],
+                            value=[],
+                            className="mb-1",
+                            style={"color": "#c8cdd8", "fontSize": "0.82rem"},
+                            inputStyle={"marginRight": "5px"},
+                        ),
+                        dbc.Collapse(
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Test Oranı (%)", className="form-label",
+                                              style={"fontSize": "0.78rem", "marginBottom": "2px"}),
+                                    dbc.Input(id="input-test-size", type="number",
+                                              value=20, min=10, max=50, step=5,
+                                              style={"maxWidth": "90px", "fontSize": "0.82rem"}),
+                                ]),
+                            ], className="mb-2"),
+                            id="collapse-test-size-cfg",
+                            is_open=False,
+                        ),
+                    ]),
+                    id="collapse-oot-date",
+                    is_open=False,
+                ),
+
                 dbc.Label("Segment Kolonu", className="form-label"),
                 html.Div("opsiyonel", className="form-hint"),
                 dbc.Select(
@@ -645,7 +682,7 @@ def build_main():
                 html.Div(dbc.Checklist(id="chk-use-woe", options=[], value=[]),
                          style={"display": "none"}),
 
-                # Model parametreleri — satır 1: target + split
+                # Model parametreleri — satır 1: target + test oranı
                 dbc.Row([
                     dbc.Col([
                         dbc.Label("Target Kolonu", className="form-label"),
@@ -653,29 +690,19 @@ def build_main():
                         dbc.Select(id="pg-target-col", className="dark-select"),
                     ], width=3),
                     dbc.Col([
-                        dbc.Label("Train/Test Bölünmesi", className="form-label"),
-                        html.Div("\u00a0", className="form-hint"),
-                        dbc.Select(id="pg-split-method", className="dark-select",
-                                   options=[
-                                       {"label": "Rastgele (%)",  "value": "random"},
-                                       {"label": "Tarihe Göre",   "value": "date"},
-                                   ], value="random"),
-                    ], width=3),
-                    dbc.Col([
                         dbc.Label("Test Oranı (%)", className="form-label"),
-                        html.Div("Rastgele bölünmede geçerlidir.",
+                        html.Div("OOT tarihi yoksa rastgele split için geçerlidir.",
                                  className="form-hint"),
                         dbc.Input(id="pg-test-size", type="number",
                                   value=30, min=10, max=50, step=5,
                                   style={"maxWidth": "110px"}),
-                    ], width=2),
-                    dbc.Col([
-                        dbc.Label("Kesim Tarihi", className="form-label"),
-                        html.Div("Öncesi = Train  ·  Sonrası = Test",
-                                 className="form-hint"),
-                        dbc.Select(id="pg-split-date", className="dark-select",
-                                   placeholder="Tarihe Göre seçiliyse"),
                     ], width=3),
+                    # Gizli — eski callback'ler için tutulur
+                    html.Div([
+                        dbc.Select(id="pg-split-method", value="random",
+                                   options=[{"label": "Rastgele", "value": "random"}]),
+                        dbc.Select(id="pg-split-date", value=""),
+                    ], style={"display": "none"}),
                 ], className="mb-2"),
 
                 # Model parametreleri — satır 2: model tipi + LR-C + eşik + kur
@@ -699,7 +726,7 @@ def build_main():
                         dbc.Input(id="pg-c-value", type="number",
                                   value=1.0, min=0.001, step=0.1,
                                   style={"maxWidth": "110px"}),
-                    ], width=2),
+                    ], id="pg-col-c-value", width=2),
                     dbc.Col([
                         dbc.Label("Karar Eşiği", className="form-label"),
                         html.Div("Sınıflandırma kesim noktası", className="form-hint"),
@@ -712,14 +739,14 @@ def build_main():
                                    ],
                                    value="fixed",
                                    style={"maxWidth": "180px"}),
-                    ], width=3),
+                    ], id="pg-col-threshold", width=3),
                     dbc.Col([
                         dbc.Label("Özel Eşik", className="form-label"),
                         html.Div("'Özel' seçiliyse geçerlidir", className="form-hint"),
                         dbc.Input(id="pg-threshold-val", type="number",
                                   value=0.50, min=0.01, max=0.99, step=0.01,
                                   style={"maxWidth": "100px"}),
-                    ], width=2),
+                    ], id="pg-col-threshold-val", width=2),
                     dbc.Col([
                         html.Div("\u00a0", className="form-label"),
                         html.Div("\u00a0", className="form-hint"),
