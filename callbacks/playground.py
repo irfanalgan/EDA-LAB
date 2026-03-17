@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
+import statsmodels.api as sm
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (roc_auc_score, roc_curve, confusion_matrix,
@@ -590,9 +591,10 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         if len(X_tr) == 0:
             return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom")
 
-        # Scaling: sadece LR için anlamlı; tree modeller scale'e duyarsız
+        # Scaling: Ridge için gerekli; statsmodels Logit (binary LR) ve tree'ler için gerekmez
         is_tree = algo in ("lgbm", "xgb", "rf")
-        if not is_tree:
+        _use_sm_logit = (algo == "lr" and not is_regression)
+        if not is_tree and not _use_sm_logit:
             scaler = StandardScaler()
             X_tr_s  = scaler.fit_transform(X_tr)
             X_te_s  = scaler.transform(X_te)  if has_test else np.empty((0, X_tr.shape[1]))
@@ -601,6 +603,21 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             X_tr_s  = X_tr.values
             X_te_s  = X_te.values  if has_test else np.empty((0, X_tr.shape[1]))
             X_oot_s = X_oot.values if has_oot  else None
+
+        # statsmodels Logit için sklearn-uyumlu ince sarmalayıcı
+        class _SmLogitWrapper:
+            """sm.Logit sonucunu sklearn predict_proba arayüzüne sarar."""
+            def __init__(self, result):
+                self._r      = result
+                self.pvalues = result.pvalues   # const dahil
+                self.params  = result.params    # const dahil
+                non_const    = [k for k in result.params.index if k != "const"]
+                self.coef_   = [result.params[non_const].values]
+
+            def predict_proba(self, X):
+                X_c = np.column_stack([np.ones(X.shape[0]), X])
+                probs = self._r.predict(exog=X_c)
+                return np.column_stack([1 - probs, probs])
 
         try:
             if is_regression:
@@ -613,8 +630,11 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 else:  # rf
                     mdl = RandomForestRegressor(**_MODEL_PARAMS["rf"])
             else:
-                if algo == "lr":
-                    mdl = LogisticRegression(C=C, max_iter=1000, random_state=42)
+                if _use_sm_logit:
+                    # statsmodels Logit — WOE + const, BFGS
+                    X_tr_const = sm.add_constant(X_tr, has_constant="add")
+                    sm_res = sm.Logit(y_tr, X_tr_const).fit(disp=0, method="bfgs")
+                    mdl = _SmLogitWrapper(sm_res)
                 elif algo == "lgbm":
                     mdl = lgb.LGBMClassifier(**_MODEL_PARAMS["lgbm"])
                 elif algo == "xgb":
@@ -623,7 +643,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                                             scale_pos_weight=pos_w)
                 else:  # rf
                     mdl = RandomForestClassifier(**_MODEL_PARAMS["rf"])
-            mdl.fit(X_tr_s, y_tr)
+            if not _use_sm_logit:
+                mdl.fit(X_tr_s, y_tr)
         except Exception as e:
             return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom")
 
@@ -1036,20 +1057,46 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             ],
         )
         if not is_tree:
-            # Logistic Regression: katsayı + odds ratio
-            coef_rows = [{"Değişken": disp_names.get(c, c),
-                          "Katsayı":    round(float(v), 4),
-                          "Odds Ratio": round(float(np.exp(v)), 4),
-                          "Etki": "↑ Bad" if v > 0 else "↓ Bad"}
-                         for c, v in zip(X.columns, mdl.coef_[0])]
-            imp_df = pd.DataFrame(coef_rows).sort_values("Katsayı", key=abs, ascending=False)
-            imp_df_cond = [
-                {"if": {"filter_query": '{Etki} = "↑ Bad"', "column_id": "Etki"},
-                 "color": "#ef4444", "fontWeight": "600"},
-                {"if": {"filter_query": '{Etki} = "↓ Bad"', "column_id": "Etki"},
-                 "color": "#10b981", "fontWeight": "600"},
-                {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
-            ]
+            # Logistic Regression: katsayı + p-value (statsmodels), const dahil
+            has_pvalues = _use_sm_logit and hasattr(mdl, "pvalues")
+            # const satırı
+            if has_pvalues:
+                const_coef = float(mdl.params.get("const", 0.0))
+                const_pv   = float(mdl.pvalues.get("const", np.nan))
+                coef_rows = [{"Değişken": "const",
+                              "Katsayı": round(const_coef, 4),
+                              "P-Value": round(const_pv, 4)}]
+            else:
+                coef_rows = []
+            # değişken satırları
+            for c, v in zip(X.columns, mdl.coef_[0]):
+                row = {"Değişken": disp_names.get(c, c),
+                       "Katsayı":  round(float(v), 4)}
+                if has_pvalues:
+                    row["P-Value"] = round(float(mdl.pvalues.get(c, np.nan)), 4)
+                coef_rows.append(row)
+            imp_df = pd.DataFrame(coef_rows)
+            # const sabit üstte, geri kalan abs(katsayı) sıralı
+            if has_pvalues:
+                const_part = imp_df.iloc[:1]
+                var_part   = imp_df.iloc[1:].sort_values("Katsayı", key=abs, ascending=False)
+                imp_df = pd.concat([const_part, var_part], ignore_index=True)
+            else:
+                imp_df = imp_df.sort_values("Katsayı", key=abs, ascending=False)
+
+            # P-Value renk kodlaması
+            pv_cond = []
+            if has_pvalues:
+                pv_cond = [
+                    {"if": {"filter_query": "{P-Value} < 0.05", "column_id": "P-Value"},
+                     "color": "#10b981", "fontWeight": "600"},
+                    {"if": {"filter_query": "{P-Value} >= 0.05 && {P-Value} < 0.10",
+                            "column_id": "P-Value"},
+                     "color": "#f59e0b", "fontWeight": "600"},
+                    {"if": {"filter_query": "{P-Value} >= 0.10", "column_id": "P-Value"},
+                     "color": "#ef4444"},
+                ]
+            imp_df_cond = pv_cond + [{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}]
             tbl_title = "Katsayı Tablosu"
             imp_table = dash_table.DataTable(
                 data=imp_df.to_dict("records"),
