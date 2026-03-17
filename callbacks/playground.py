@@ -591,10 +591,11 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         if len(X_tr) == 0:
             return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom")
 
-        # Scaling: Ridge için gerekli; statsmodels Logit (binary LR) ve tree'ler için gerekmez
+        # Scaling: tree'ler hariç tüm modeller için (statsmodels dahil)
+        # Ölçeksiz ham değişkenler BFGS'de exp overflow'a yol açar
         is_tree = algo in ("lgbm", "xgb", "rf")
         _use_sm_logit = (algo == "lr" and not is_regression)
-        if not is_tree and not _use_sm_logit:
+        if not is_tree:
             scaler = StandardScaler()
             X_tr_s  = scaler.fit_transform(X_tr)
             X_te_s  = scaler.transform(X_te)  if has_test else np.empty((0, X_tr.shape[1]))
@@ -631,8 +632,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                     mdl = RandomForestRegressor(**_MODEL_PARAMS["rf"])
             else:
                 if _use_sm_logit:
-                    # statsmodels Logit — WOE + const, BFGS
-                    X_tr_const = sm.add_constant(X_tr, has_constant="add")
+                    # statsmodels Logit — scale edilmiş features + const, BFGS
+                    X_tr_const = sm.add_constant(X_tr_s, has_constant="add")
                     sm_res = sm.Logit(y_tr, X_tr_const).fit(disp=0, method="bfgs")
                     mdl = _SmLogitWrapper(sm_res)
                 elif algo == "lgbm":
