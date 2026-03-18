@@ -134,15 +134,20 @@ def coerce_numeric_columns(
 def apply_segment_filter(
     df: pd.DataFrame,
     segment_col: str | None,
-    segment_val: str | None,
+    segment_val: str | list | None,
 ) -> pd.DataFrame:
     """
     df_original'e dokunmadan segment maskesi uygular ve kopya döndürür.
-    Seçim yoksa df'nin kendisini döndürür.
+    segment_val tek değer veya liste olabilir.
+    Seçim yoksa veya "Tümü" içeriyorsa df'nin kendisini döndürür.
     """
-    if segment_col and segment_val and segment_val != "Tümü":
-        return df[df[segment_col].astype(str) == segment_val].copy()
-    return df
+    if not segment_col or not segment_val:
+        return df
+    # Tekil değeri listeye çevir
+    vals = segment_val if isinstance(segment_val, list) else [segment_val]
+    if "Tümü" in vals:
+        return df
+    return df[df[segment_col].astype(str).isin(vals)].copy()
 
 
 def detect_target_type(s: pd.Series) -> str:

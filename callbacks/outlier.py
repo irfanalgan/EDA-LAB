@@ -41,9 +41,9 @@ def render_outlier_tab(config, key):
             dbc.Col([
                 dbc.Label("Müşteri No Kolonu", className="form-label"),
                 html.Div("Zorunlu — müşteri bazında analiz", className="form-hint"),
-                dbc.Select(id="out-id-col", className="dark-select",
-                           options=[{"label": c, "value": c} for c in df.columns],
-                           value=df.columns[0]),
+                dcc.Dropdown(id="out-id-col", className="dark-select",
+                             options=[{"label": c, "value": c} for c in df.columns],
+                             value=df.columns[0], searchable=True, placeholder="Kolon ara\u2026"),
             ], width=4),
             dbc.Col([
                 dbc.Label("Yöntem", className="form-label"),
@@ -78,8 +78,8 @@ def render_outlier_tab(config, key):
         dbc.Row([
             dbc.Col([
                 dbc.Label("Görselleştir", className="form-label"),
-                dbc.Select(id="out-var-sel", className="dark-select",
-                           options=col_opts, value=num_cols[0]),
+                dcc.Dropdown(id="out-var-sel", className="dark-select",
+                             options=col_opts, value=num_cols[0], searchable=True, placeholder="Kolon ara\u2026"),
             ], width=4),
             dbc.Col(
                 dbc.Button("Tara", id="btn-outlier-run", color="primary", size="sm",

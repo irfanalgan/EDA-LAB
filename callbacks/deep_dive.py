@@ -49,8 +49,8 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
                  html.Span(f"≥ {oot_date}", style={"color": "#a78bfa", "fontSize": "0.80rem", "fontWeight": "700"})],
                 className="form-hint",
             ),
-            dbc.Select(id="dd-psi-split", options=[{"label": oot_date, "value": oot_date}],
-                       value=oot_date, className="dark-select", disabled=True),
+            dcc.Dropdown(id="dd-psi-split", options=[{"label": oot_date, "value": oot_date}],
+                         value=oot_date, className="dark-select", disabled=True, searchable=True, placeholder="Kolon ara\u2026"),
         ], width=3)
     elif date_col and date_col in df.columns:
         raw_dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
@@ -59,17 +59,17 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
         psi_date_col = dbc.Col([
             dbc.Label("PSI Kesim Tarihi", className="form-label"),
             html.Div("Öncesi = Baseline  ·  Sonrası = Karşılaştırma", className="form-hint"),
-            dbc.Select(id="dd-psi-split", options=date_opts,
-                       value=distinct[len(distinct)//2] if distinct else None,
-                       className="dark-select"),
+            dcc.Dropdown(id="dd-psi-split", options=date_opts,
+                         value=distinct[len(distinct)//2] if distinct else None,
+                         className="dark-select", searchable=True, placeholder="Tarih ara\u2026"),
         ], width=3)
     else:
         psi_date_col = dbc.Col([
             dbc.Label("PSI Kesim Tarihi", className="form-label"),
             html.Div("\u00a0", className="form-hint"),
-            dbc.Select(id="dd-psi-split", options=[], value=None,
-                       className="dark-select", disabled=True,
-                       placeholder="Tarih kolonu seçilmedi"),
+            dcc.Dropdown(id="dd-psi-split", options=[], value=None,
+                         className="dark-select", disabled=True,
+                         placeholder="Tarih kolonu se\u00e7ilmedi"),
         ], width=3)
 
     return html.Div([
@@ -83,9 +83,9 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
                 dbc.Col([
                     dbc.Label("Değişken Seç", className="form-label"),
                     html.Div("\u00a0", className="form-hint"),
-                    dbc.Select(id="dd-deepdive-col", options=col_options,
-                               value=cols[0] if cols else None,
-                               className="dark-select"),
+                    dcc.Dropdown(id="dd-deepdive-col", options=col_options,
+                                 value=cols[0] if cols else None,
+                                 className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                     html.Div([
                         html.Span("Kolon tipi: ",
                                   style={"color": "#7e8fa4", "fontSize": "0.72rem",

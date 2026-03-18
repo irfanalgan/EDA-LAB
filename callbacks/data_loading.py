@@ -254,10 +254,7 @@ def open_config_section(key):
     if df is None:
         return False, [], [], []
 
-    all_opts = (
-        [{"label": "Kolon seçiniz...", "value": "", "disabled": True}]
-        + [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in df.columns]
-    )
+    all_opts = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in df.columns]
 
     date_keywords = {"date", "tarih", "dt", "time", "zaman"}
     date_cols = sorted(
@@ -268,19 +265,13 @@ def open_config_section(key):
             else 2
         ),
     )
-    date_opts = (
-        [{"label": "—", "value": ""}]
-        + [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in date_cols]
-    )
+    date_opts = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in date_cols]
 
     seg_cols = [
         c for c in df.columns
         if df[c].dtype == object or df[c].nunique() <= 50
     ]
-    seg_opts = (
-        [{"label": "—", "value": ""}]
-        + [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in seg_cols]
-    )
+    seg_opts = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in seg_cols]
 
     return True, all_opts, date_opts, seg_opts
 

@@ -300,13 +300,13 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
         dbc.Row([
             dbc.Col([
                 dbc.Label("Değişken 1", className="form-label"),
-                dbc.Select(id="corr-var1", options=var_opts, value=cols[0],
-                           className="dark-select"),
+                dcc.Dropdown(id="corr-var1", options=var_opts, value=cols[0],
+                             className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
             ], width=5),
             dbc.Col([
                 dbc.Label("Değişken 2", className="form-label"),
-                dbc.Select(id="corr-var2", options=var_opts, value=default2,
-                           className="dark-select"),
+                dcc.Dropdown(id="corr-var2", options=var_opts, value=default2,
+                             className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
             ], width=5),
             dbc.Col([
                 dbc.Label("\u00a0", className="form-label"),

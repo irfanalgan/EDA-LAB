@@ -157,6 +157,8 @@ body {
     font-size: 0.83rem !important;
     border-radius: 6px !important;
     transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+select.dark-select {
     height: 36px !important;
 }
 .dark-select:focus {
@@ -180,15 +182,17 @@ body {
 
 /* ── Genel container ────────────────────────────────────────────────────── */
 .dark-dd,
-.dark-dd .dash-dropdown {
+.dark-dd.dash-dropdown,
+.dark-select,
+.dark-select .dash-dropdown {
     font-size: 0.83rem;
 }
 
 /* ── Kontrol kutusu (kapalı durum) ─────────────────────────────────────── */
-.dark-dd .Select__control,
-.dark-dd .Select-control,
-.dark-dd [class*="-control"],
-.dark-dd [class*="__control"] {
+.dark-dd.Select__control,
+.dark-dd.Select-control,
+.dark-dd[class*="-control"],
+.dark-dd[class*="__control"] {
     background-color: #1a2035 !important;
     border: 1px solid #2d3a4f !important;
     border-radius: 6px !important;
@@ -197,72 +201,72 @@ body {
     cursor: pointer !important;
     transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
 }
-.dark-dd .Select__control:hover,
-.dark-dd .Select-control:hover,
-.dark-dd [class*="-control"]:hover,
-.dark-dd [class*="__control"]:hover,
-.dark-dd [class*="__control--is-focused"],
-.dark-dd [class*="-control"]:focus-within,
-.dark-dd .Select.is-focused .Select-control {
+.dark-dd.Select__control:hover,
+.dark-dd.Select-control:hover,
+.dark-dd[class*="-control"]:hover,
+.dark-dd[class*="__control"]:hover,
+.dark-dd[class*="__control--is-focused"],
+.dark-dd[class*="-control"]:focus-within,
+.dark-dd.Select.is-focused .Select-control {
     border-color: #4F8EF7 !important;
     box-shadow: 0 0 0 2px rgba(79,142,247,0.15) !important;
 }
 
 /* ── Seçili değer & placeholder ─────────────────────────────────────────── */
-.dark-dd .Select__single-value,
-.dark-dd .Select-value-label,
-.dark-dd [class*="__single-value"],
-.dark-dd [class*="-singleValue"] {
+.dark-dd.Select__single-value,
+.dark-dd.Select-value-label,
+.dark-dd[class*="__single-value"],
+.dark-dd[class*="-singleValue"] {
     color: #E8EAF0 !important;
     font-size: 0.83rem !important;
 }
-.dark-dd .Select__placeholder,
-.dark-dd .Select-placeholder,
-.dark-dd [class*="__placeholder"],
-.dark-dd [class*="-placeholder"] {
+.dark-dd.Select__placeholder,
+.dark-dd.Select-placeholder,
+.dark-dd[class*="__placeholder"],
+.dark-dd[class*="-placeholder"] {
     color: #4a5568 !important;
     font-size: 0.83rem !important;
 }
 
 /* ── Value container & indicators ──────────────────────────────────────── */
-.dark-dd .Select__value-container,
-.dark-dd [class*="__value-container"] {
+.dark-dd.Select__value-container,
+.dark-dd[class*="__value-container"] {
     background-color: transparent !important;
     padding: 2px 8px !important;
 }
-.dark-dd .Select__indicators,
-.dark-dd [class*="__indicators"] {
+.dark-dd.Select__indicators,
+.dark-dd[class*="__indicators"] {
     background-color: transparent !important;
 }
-.dark-dd .Select__indicator,
-.dark-dd [class*="__indicator"] {
+.dark-dd.Select__indicator,
+.dark-dd[class*="__indicator"] {
     color: #556070 !important;
     padding: 6px !important;
     background-color: transparent !important;
     transition: color 0.15s ease !important;
 }
-.dark-dd .Select__indicator:hover,
-.dark-dd [class*="__indicator"]:hover {
+.dark-dd.Select__indicator:hover,
+.dark-dd[class*="__indicator"]:hover {
     color: #8892a4 !important;
 }
-.dark-dd .Select__indicator-separator,
-.dark-dd [class*="__indicator-separator"] {
+.dark-dd.Select__indicator-separator,
+.dark-dd[class*="__indicator-separator"] {
     background-color: #2d3a4f !important;
 }
 
 /* ── Arama input'u ──────────────────────────────────────────────────────── */
-.dark-dd .Select__input-container,
-.dark-dd [class*="__input-container"],
-.dark-dd [class*="-Input"],
-.dark-dd .Select-input {
+.dark-dd.Select__input-container,
+.dark-dd[class*="__input-container"],
+.dark-dd[class*="-Input"],
+.dark-dd.Select-input {
     color: #E8EAF0 !important;
     background-color: transparent !important;
 }
-.dark-dd .Select__input-container input,
-.dark-dd [class*="__input-container"] input,
-.dark-dd [class*="-Input"] input,
-.dark-dd .Select-input input,
-.dark-dd input {
+.dark-dd.Select__input-container input,
+.dark-dd[class*="__input-container"] input,
+.dark-dd[class*="-Input"] input,
+.dark-dd.Select-input input,
+.dark-ddinput {
     color: #E8EAF0 !important;
     background-color: transparent !important;
     font-size: 0.83rem !important;
@@ -270,19 +274,19 @@ body {
 }
 
 /* ── Ok ikonu (eski react-select) ──────────────────────────────────────── */
-.dark-dd .Select-arrow { border-top-color: #556070 !important; }
-.dark-dd .is-open .Select-arrow { border-bottom-color: #556070 !important; }
+.dark-dd.Select-arrow { border-top-color: #556070 !important; }
+.dark-dd.is-open .Select-arrow { border-bottom-color: #556070 !important; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    Açılan menü — hem scoped (normal) hem global (portal fallback)
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Menü container */
-.dark-dd .Select__menu,
-.dark-dd .Select-menu-outer,
-.dark-dd [class*="__menu"],
-.dark-dd [class*="-menu"],
-.dark-dd [role="listbox"],
+.dark-dd.Select__menu,
+.dark-dd.Select-menu-outer,
+.dark-dd[class*="__menu"],
+.dark-dd[class*="-menu"],
+.dark-dd[role="listbox"],
 /* Portal fallback — body seviyesinde render edilirse */
 .Select__menu,
 .dash-dropdown .Select-menu-outer,
@@ -298,10 +302,10 @@ body {
 }
 
 /* Menü scroll listesi */
-.dark-dd .Select__menu-list,
-.dark-dd .Select-menu,
-.dark-dd [class*="__menu-list"],
-.dark-dd [class*="-MenuList"],
+.dark-dd.Select__menu-list,
+.dark-dd.Select-menu,
+.dark-dd[class*="__menu-list"],
+.dark-dd[class*="-MenuList"],
 .Select__menu-list,
 .dash-dropdown [class*="__menu-list"] {
     background-color: #1a2035 !important;
@@ -309,19 +313,19 @@ body {
     scrollbar-width: thin;
     scrollbar-color: #2d3a4f #1a2035;
 }
-.dark-dd [class*="__menu-list"]::-webkit-scrollbar,
-.dark-dd [class*="-MenuList"]::-webkit-scrollbar { width: 5px; }
-.dark-dd [class*="__menu-list"]::-webkit-scrollbar-track,
-.dark-dd [class*="-MenuList"]::-webkit-scrollbar-track { background: #1a2035; }
-.dark-dd [class*="__menu-list"]::-webkit-scrollbar-thumb,
-.dark-dd [class*="-MenuList"]::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 3px; }
+.dark-dd[class*="__menu-list"]::-webkit-scrollbar,
+.dark-dd[class*="-MenuList"]::-webkit-scrollbar { width: 5px; }
+.dark-dd[class*="__menu-list"]::-webkit-scrollbar-track,
+.dark-dd[class*="-MenuList"]::-webkit-scrollbar-track { background: #1a2035; }
+.dark-dd[class*="__menu-list"]::-webkit-scrollbar-thumb,
+.dark-dd[class*="-MenuList"]::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 3px; }
 
 /* Seçenek satırları */
-.dark-dd .Select__option,
-.dark-dd .Select-option,
-.dark-dd [class*="__option"],
-.dark-dd [class*="-option"],
-.dark-dd [role="option"],
+.dark-dd.Select__option,
+.dark-dd.Select-option,
+.dark-dd[class*="__option"],
+.dark-dd[class*="-option"],
+.dark-dd[role="option"],
 .Select__option,
 .dash-dropdown [class*="__option"],
 .dash-dropdown [class*="-option"] {
@@ -334,12 +338,12 @@ body {
 }
 
 /* Hover / focused seçenek */
-.dark-dd .Select__option--is-focused,
-.dark-dd .Select-option.is-focused,
-.dark-dd .Select-option:hover,
-.dark-dd [class*="__option--is-focused"],
-.dark-dd [class*="-option"]:hover,
-.dark-dd [role="option"]:hover,
+.dark-dd.Select__option--is-focused,
+.dark-dd.Select-option.is-focused,
+.dark-dd.Select-option:hover,
+.dark-dd[class*="__option--is-focused"],
+.dark-dd[class*="-option"]:hover,
+.dark-dd[role="option"]:hover,
 .Select__option--is-focused,
 [role="option"]:hover,
 [role="option"]:focus {
@@ -348,10 +352,10 @@ body {
 }
 
 /* Seçilmiş seçenek */
-.dark-dd .Select__option--is-selected,
-.dark-dd .Select-option.is-selected,
-.dark-dd [class*="__option--is-selected"],
-.dark-dd [class*="option--is-selected"],
+.dark-dd.Select__option--is-selected,
+.dark-dd.Select-option.is-selected,
+.dark-dd[class*="__option--is-selected"],
+.dark-dd[class*="option--is-selected"],
 .Select__option--is-selected,
 [role="option"][aria-selected="true"] {
     background-color: #1a3a6e !important;
@@ -374,6 +378,108 @@ body {
 [role="combobox"] input {
     background-color: transparent !important;
     color: #E8EAF0 !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   .dark-select alias — dcc.Dropdown className="dark-select" desteği
+   .dark-dd kurallarının aynısını .dark-select altında da uygular.
+   ══════════════════════════════════════════════════════════════════════════ */
+.dark-select [class*="-control"],
+.dark-select [class*="__control"] {
+    background-color: #1a2035 !important;
+    border: 1px solid #2d3a4f !important;
+    border-radius: 6px !important;
+    min-height: 36px !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+}
+.dark-select [class*="-control"]:hover,
+.dark-select [class*="__control"]:hover,
+.dark-select [class*="__control--is-focused"],
+.dark-select [class*="-control"]:focus-within {
+    border-color: #4F8EF7 !important;
+    box-shadow: 0 0 0 2px rgba(79,142,247,0.15) !important;
+}
+.dark-select [class*="__single-value"],
+.dark-select [class*="-singleValue"] {
+    color: #E8EAF0 !important;
+    font-size: 0.83rem !important;
+}
+.dark-select [class*="__placeholder"],
+.dark-select [class*="-placeholder"] {
+    color: #4a5568 !important;
+    font-size: 0.83rem !important;
+}
+.dark-select [class*="__value-container"] {
+    background-color: transparent !important;
+    padding: 2px 8px !important;
+}
+.dark-select [class*="__indicators"] {
+    background-color: transparent !important;
+}
+.dark-select [class*="__indicator"] {
+    color: #556070 !important;
+    padding: 6px !important;
+    background-color: transparent !important;
+}
+.dark-select [class*="__indicator"]:hover {
+    color: #8892a4 !important;
+}
+.dark-select [class*="__indicator-separator"] {
+    background-color: #2d3a4f !important;
+}
+.dark-select [class*="__input-container"],
+.dark-select [class*="__input-container"] input,
+.dark-select input {
+    color: #E8EAF0 !important;
+    background-color: transparent !important;
+    font-size: 0.83rem !important;
+    caret-color: #4F8EF7 !important;
+}
+.dark-select [class*="__menu"] {
+    background-color: #1a2035 !important;
+    border: 1px solid #2d3a4f !important;
+    border-radius: 6px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55) !important;
+    z-index: 9999 !important;
+}
+.dark-select [class*="__menu-list"] {
+    background-color: #1a2035 !important;
+    padding: 4px 0 !important;
+    scrollbar-width: thin;
+    scrollbar-color: #2d3a4f #1a2035;
+}
+.dark-select [class*="__option"] {
+    background-color: #1a2035 !important;
+    color: #c8cdd8 !important;
+    font-size: 0.83rem !important;
+    padding: 7px 12px !important;
+    cursor: pointer !important;
+}
+.dark-select [class*="__option--is-focused"],
+.dark-select [class*="__option"]:hover {
+    background-color: #1e2c4a !important;
+    color: #E8EAF0 !important;
+}
+.dark-select [class*="__option--is-selected"] {
+    background-color: #1a3a6e !important;
+    color: #4F8EF7 !important;
+}
+/* Multi-select tag'leri */
+.dark-select [class*="__multi-value"] {
+    background-color: #1e2c4a !important;
+    border-radius: 4px !important;
+}
+.dark-select [class*="__multi-value__label"] {
+    color: #E8EAF0 !important;
+    font-size: 0.78rem !important;
+}
+.dark-select [class*="__multi-value__remove"] {
+    color: #7e8fa4 !important;
+}
+.dark-select [class*="__multi-value__remove"]:hover {
+    background-color: #ef4444 !important;
+    color: #fff !important;
 }
 
 /* ── Metrik Kartları ───────────────────────────────────────────────────── */

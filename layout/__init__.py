@@ -435,20 +435,24 @@ def build_sidebar():
                     "Target Kolonu",
                     html.Span("*", style={"color": "#ef4444", "marginLeft": "3px"}),
                 ], className="form-label"),
-                dbc.Select(
+                dcc.Dropdown(
                     id="dd-target-col",
-                    options=[{"label": "Kolon seçiniz...", "value": "", "disabled": True}],
-                    value="",
-                    className="dark-select mb-3",
+                    options=[],
+                    value=None,
+                    placeholder="Kolon ara…",
+                    searchable=True,
+                    className="dark-dd mb-3",
                 ),
 
                 dbc.Label("Tarih Kolonu", className="form-label"),
                 html.Div("opsiyonel", className="form-hint"),
-                dbc.Select(
+                dcc.Dropdown(
                     id="dd-date-col",
-                    options=[{"label": "—", "value": ""}],
-                    value="",
-                    className="dark-select mb-3",
+                    options=[],
+                    value=None,
+                    placeholder="Kolon ara…",
+                    searchable=True,
+                    className="dark-dd mb-3",
                 ),
 
                 # OOT tarihi — tarih kolonu seçilince açılır
@@ -490,11 +494,13 @@ def build_sidebar():
 
                 dbc.Label("Segment Kolonu", className="form-label"),
                 html.Div("opsiyonel", className="form-hint"),
-                dbc.Select(
+                dcc.Dropdown(
                     id="dd-segment-col",
-                    options=[{"label": "—", "value": ""}],
-                    value="",
-                    className="dark-select mb-3",
+                    options=[],
+                    value=None,
+                    placeholder="Kolon ara…",
+                    searchable=True,
+                    className="dark-dd mb-3",
                 ),
 
                 dbc.Button(
@@ -515,10 +521,12 @@ def build_sidebar():
                 html.Hr(className="sidebar-divider"),
                 html.P("Segment Filtresi", className="sidebar-section-title"),
                 dbc.Label(id="segment-val-label", className="form-label"),
-                dbc.Select(
+                dcc.Dropdown(
                     id="dd-segment-val",
                     options=[],
-                    value="Tümü",
+                    value=["Tümü"],
+                    multi=True,
+                    placeholder="Segment seçin…",
                     className="dark-select",
                 ),
                 html.Div(id="segment-badge-area", style={"marginTop": "0.5rem"}),
@@ -666,12 +674,12 @@ def build_main():
                         dbc.Col([
                             dbc.Label("Değişken 1", className="form-label"),
                             html.Div("Kategorik veya sayısal", className="form-hint"),
-                            dbc.Select(id="chi-var1", className="dark-select"),
+                            dcc.Dropdown(id="chi-var1", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                         ], width=3),
                         dbc.Col([
                             dbc.Label("Değişken 2", className="form-label"),
                             html.Div("Kategorik veya sayısal", className="form-hint"),
-                            dbc.Select(id="chi-var2", className="dark-select"),
+                            dcc.Dropdown(id="chi-var2", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                         ], width=3),
                         dbc.Col([
                             dbc.Label("Maks. Kategori", className="form-label"),
@@ -720,7 +728,7 @@ def build_main():
                         dbc.Col([
                             dbc.Label("Sayısal Değişken", className="form-label"),
                             html.Div("Target gruplarına göre F-testi uygulanır", className="form-hint"),
-                            dbc.Select(id="anova-var", className="dark-select"),
+                            dcc.Dropdown(id="anova-var", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                         ], width=4),
                         dbc.Col([
                             dbc.Label("\u00a0", className="form-label"),
@@ -759,7 +767,7 @@ def build_main():
                         dbc.Col([
                             dbc.Label("Değişken", className="form-label"),
                             html.Div("Target=0 ile Target=1 grupları karşılaştırılır", className="form-hint"),
-                            dbc.Select(id="ks-var", className="dark-select"),
+                            dcc.Dropdown(id="ks-var", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                         ], width=4),
                         dbc.Col([
                             dbc.Label("\u00a0", className="form-label"),
@@ -868,18 +876,18 @@ def build_main():
                     dbc.Col([
                         dbc.Label("X Ekseni", className="form-label"),
                         html.Div("\u00a0", className="form-hint"),
-                        dbc.Select(id="pg-x-col", className="dark-select"),
+                        dcc.Dropdown(id="pg-x-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                     ], width=3),
                     dbc.Col([
                         dbc.Label("Y Ekseni (Sol)", className="form-label"),
                         html.Div("\u00a0", className="form-hint"),
-                        dbc.Select(id="pg-y-col", className="dark-select"),
+                        dcc.Dropdown(id="pg-y-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                     ], width=3),
                     dbc.Col([
                         dbc.Label("Y2 Ekseni (Sağ)", className="form-label"),
                         html.Div("Seçilirse sağ eksende çizgi olarak eklenir.",
                                  className="form-hint"),
-                        dbc.Select(id="pg-y2-col", className="dark-select", value=""),
+                        dcc.Dropdown(id="pg-y2-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026", value=None),
                     ], width=3),
                     dbc.Col([
                         dbc.Label("Grafik Tipi", className="form-label"),
@@ -922,7 +930,7 @@ def build_main():
                         dbc.Label("Grupla (renk)", className="form-label"),
                         html.Div("Y2 seçiliyken devre dışıdır.",
                                  className="form-hint"),
-                        dbc.Select(id="pg-color-col", className="dark-select", value=""),
+                        dcc.Dropdown(id="pg-color-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026", value=None),
                     ], width=3),
                     dbc.Col([
                         html.Div("\u00a0", className="form-label"),
@@ -1020,7 +1028,7 @@ def build_main():
                     dbc.Col([
                         dbc.Label("Target Kolonu", className="form-label"),
                         html.Div("\u00a0", className="form-hint"),
-                        dbc.Select(id="pg-target-col", className="dark-select"),
+                        dcc.Dropdown(id="pg-target-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                     ], width=3),
                     dbc.Col([
                         dbc.Label("Test Oranı (%)", className="form-label"),
@@ -1114,6 +1122,7 @@ def build_layout():
         dcc.Store(id="store-key", storage_type="memory"),
         dcc.Store(id="store-config", storage_type="memory"),
         dcc.Store(id="store-expert-exclude", storage_type="memory"),
+        dcc.Store(id="store-expert-thresholds", storage_type="memory"),
         dcc.Store(id="store-precompute-state", storage_type="memory"),
         dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
 

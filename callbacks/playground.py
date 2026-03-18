@@ -386,8 +386,11 @@ def render_pg_source(config, expert_excluded, model_vars, search, key):
     if not base:
         msg = "Eşleşme yok." if search else "Tüm değişkenler model listesinde."
         return html.Div(msg, className="form-hint"), count_txt
+    # key: model_vars değişince Dash eski seçimleri atmaya zorlanır
+    ck = len(model_vars or [])
     return dbc.Checklist(
         id="chk-pg-source",
+        key=f"src-{ck}-{len(base)}",
         options=[{"label": c, "value": c} for c in base],
         value=[],
         inline=False,
@@ -408,6 +411,7 @@ def render_pg_model_list(model_vars):
     count_txt = f"{len(model_vars)} değişken"
     return dbc.Checklist(
         id="chk-pg-model",
+        key=f"mdl-{len(model_vars)}",
         options=[{"label": c, "value": c} for c in model_vars],
         value=[],
         inline=False,
@@ -463,6 +467,7 @@ def toggle_classification_controls(config):
 # ── Playground: Değişken ekle ──────────────────────────────────────────────────
 @app.callback(
     Output("store-pg-model-vars", "data"),
+    Output("pg-source-search",   "value"),
     Input("btn-pg-add", "n_clicks"),
     State("chk-pg-source",       "value"),
     State("store-pg-model-vars", "data"),
@@ -470,10 +475,10 @@ def toggle_classification_controls(config):
 )
 def pg_add_vars(_, selected, current):
     if not selected:
-        return dash.no_update
+        return dash.no_update, dash.no_update
     current = current or []
     new = [c for c in selected if c not in set(current)]
-    return current + new
+    return current + new, ""
 
 
 # ── Playground: Değişken kaldır ───────────────────────────────────────────────

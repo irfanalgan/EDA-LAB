@@ -18,5 +18,5 @@ import callbacks  # noqa: F401 — tüm @app.callback dekoratörlerini kaydeder
 app.layout = build_layout()
 
 if __name__ == "__main__":
-    threading.Timer(1.2, lambda: webbrowser.open("http://localhost:8050")).start()
-    app.run(debug=False, port=8050)
+    threading.Timer(1.2, lambda: webbrowser.open("http://localhost:8060")).start()
+    app.run(debug=False, port=8060)

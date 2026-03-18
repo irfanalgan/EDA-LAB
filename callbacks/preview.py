@@ -30,17 +30,17 @@ def open_segment_filter(config, seg_col_input, key):
     # Kolon: onaylanmış config'den veya seçili dropdown'dan
     seg_col = (config or {}).get("segment_col") or (seg_col_input or None)
     if not seg_col:
-        return False, [], None, "Segment Değeri"
+        return False, [], [], "Segment Değeri"
     df = _get_df(key)
     if df is None or seg_col not in df.columns:
-        return False, [], None, "Segment Değeri"
+        return False, [], [], "Segment Değeri"
 
     unique_vals = sorted(df[seg_col].dropna().astype(str).unique().tolist())
     options = [{"label": "Tümü", "value": "Tümü"}] + [
         {"label": v, "value": v} for v in unique_vals
     ]
     label = f"{seg_col}  ({len(unique_vals)} değer)"
-    return True, options, "Tümü", label
+    return True, options, ["Tümü"], label
 
 
 # ── Callback: Config Banner (onaylandıktan sonra üstte özetle) ─────────────────
@@ -66,7 +66,11 @@ def update_config_banner(config, seg_val, seg_col_input):
 
     seg_col = config.get("segment_col") or (seg_col_input or None)
     if seg_col:
-        seg_display = seg_val if (seg_val and seg_val != "Tümü") else seg_col
+        vals = seg_val if isinstance(seg_val, list) else [seg_val] if seg_val else []
+        if not vals or "Tümü" in vals:
+            seg_display = seg_col
+        else:
+            seg_display = ", ".join(str(v) for v in vals)
         items.append(badge("SEGMENT", seg_display, "#f59e0b"))
 
     return html.Div(items, className="config-banner")
@@ -170,7 +174,8 @@ def update_metrics(config, seg_val, key, seg_col_input):
 
 
 # ── Yardımcı: Ön Eleme Raporu ────────────────────────────────────────────────
-def _build_screen_report(key, df_active, config, expert_excluded=None):
+def _build_screen_report(key, df_active, config, expert_excluded=None,
+                         thresholds=None, seg_val=None):
     # Aktif (segment filtrelenmiş) veri üzerinde canlı hesapla
     target_col  = config.get("target_col")
     date_col    = config.get("date_col")
@@ -179,9 +184,35 @@ def _build_screen_report(key, df_active, config, expert_excluded=None):
         df_active, target_col, date_col, segment_col
     )
 
+    # ── Modüler eşik elemeleri ────────────────────────────────────────────────
+    thresholds = thresholds or {}
+    already = set(report["Kolon"].tolist()) if not report.empty else set()
+
+    # IV eşiği — precompute'dan cache'lenmiş IV değerlerini kullan
+    iv_thr = thresholds.get("iv")
+    if iv_thr is not None and iv_thr > 0:
+        # Segment-aware cache key dene
+        seg_col_cfg = config.get("segment_col")
+        iv_df = None
+        for sv in [seg_val, None, "Tümü"]:
+            iv_df = _SERVER_STORE.get(f"{key}_iv_{seg_col_cfg}_{sv}")
+            if iv_df is not None:
+                break
+        if iv_df is not None and "IV" in iv_df.columns and "Değişken" in iv_df.columns:
+            low_iv = iv_df[iv_df["IV"] < iv_thr]
+            new_rows = [
+                {"Kolon": row["Değişken"], "Kural": "Düşük IV",
+                 "Detay": f"IV = {row['IV']:.4f}  (eşik: {iv_thr})"}
+                for _, row in low_iv.iterrows()
+                if row["Değişken"] not in already and row["Değişken"] in df_active.columns
+            ]
+            if new_rows:
+                report = pd.concat([report, pd.DataFrame(new_rows)], ignore_index=True)
+                already.update(r["Kolon"] for r in new_rows)
+                passed = [c for c in passed if c not in {r["Kolon"] for r in new_rows}]
+
     # Uzman görüşü elemeleri ekle
     if expert_excluded:
-        already = set(report["Kolon"].tolist()) if not report.empty else set()
         new_rows = [
             {"Kolon": c, "Kural": "Uzman Görüşü", "Detay": "El ile elindi"}
             for c in expert_excluded if c not in already and c in df_active.columns
@@ -260,6 +291,9 @@ def _build_screen_report(key, df_active, config, expert_excluded=None):
             {"if": {"filter_query": '{Kural} = "Uzman Görüşü"',
                     "column_id": "Kural"},
              "color": "#a78bfa", "fontWeight": "600"},
+            {"if": {"filter_query": '{Kural} = "Düşük IV"',
+                    "column_id": "Kural"},
+             "color": "#38bdf8", "fontWeight": "600"},
             {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
         ]
         body = dash_table.DataTable(
@@ -284,7 +318,8 @@ def _build_screen_report(key, df_active, config, expert_excluded=None):
                   "rule": "color: #c8cdd8 !important;"}],
         )
 
-    criteria = html.Div([
+    iv_thr_val = (thresholds or {}).get("iv")
+    criteria_items = [
         html.Span("Elenme kriterleri — ",
                   style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
         html.Span("> %80 eksik",
@@ -293,7 +328,13 @@ def _build_screen_report(key, df_active, config, expert_excluded=None):
         html.Span("  ·  sabit değişken (1 tekil değer)",
                   style={"color": "#ef4444", "fontSize": "0.72rem",
                          "fontWeight": "600"}),
-    ], style={"marginTop": "0.5rem"})
+    ]
+    if iv_thr_val:
+        criteria_items.append(
+            html.Span(f"  ·  IV < {iv_thr_val}",
+                      style={"color": "#38bdf8", "fontSize": "0.72rem",
+                             "fontWeight": "600"}))
+    criteria = html.Div(criteria_items, style={"marginTop": "0.5rem"})
 
     return html.Div([
         html.Div(style={"borderTop": "1px solid #232d3f",
@@ -387,10 +428,11 @@ def _build_quality_section(key: str, df: pd.DataFrame) -> html.Div:
     Input("store-config", "data"),
     Input("dd-segment-val", "value"),
     Input("store-expert-exclude", "data"),
+    Input("store-expert-thresholds", "data"),
     State("store-key", "data"),
     State("dd-segment-col", "value"),
 )
-def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
+def update_preview(config, seg_val, expert_excluded, thresholds, key, seg_col_input):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
@@ -417,9 +459,46 @@ def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
         "Henüz el ile elinen değişken yok.", className="form-hint",
     )
 
-    expert_panel = html.Div([
+    # ── Eşik bazlı eleme paneli ──────────────────────────────────────────────
+    current_thresholds = thresholds or {}
+    iv_thr_current = current_thresholds.get("iv", "")
+
+    threshold_panel = html.Div([
         html.Div(style={"borderTop": "1px solid #232d3f",
                         "marginTop": "2rem", "marginBottom": "1.25rem"}),
+        html.P("Eşik Bazlı Eleme", className="section-title"),
+        html.Div("Belirlenen eşik değerlerinin altında kalan değişkenler otomatik "
+                 "olarak tüm analizlerden çıkarılır. IV eşiği için önce precompute "
+                 "tamamlanmış olmalıdır.",
+                 className="form-hint", style={"marginBottom": "0.75rem"}),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label("Min. IV Değeri", className="form-label",
+                          style={"fontSize": "0.78rem"}),
+                dbc.Input(
+                    id="input-thr-iv",
+                    type="number", min=0, max=1, step=0.01,
+                    value=iv_thr_current if iv_thr_current else None,
+                    placeholder="örn: 0.10",
+                    size="sm",
+                    style={"backgroundColor": "#0e1117", "color": "#c8cdd8",
+                           "border": "1px solid #2d3a4f", "borderRadius": "4px",
+                           "maxWidth": "130px", "fontSize": "0.8rem"},
+                ),
+            ], width="auto"),
+            # ileride buraya korelasyon eşiği vb. eklenebilir
+            dbc.Col([
+                html.Div("\u00a0", className="form-label",
+                         style={"fontSize": "0.78rem"}),
+                dbc.Button("Eşikleri Uygula", id="btn-apply-thresholds",
+                           color="info", size="sm"),
+            ], width="auto"),
+        ], className="g-3 mb-2"),
+    ])
+
+    expert_panel = html.Div([
+        html.Div(style={"borderTop": "1px solid #232d3f",
+                        "marginTop": "1.5rem", "marginBottom": "1.25rem"}),
         html.P("Uzman Görüşü: El ile Eleme", className="section-title"),
         html.Div("Analiz dışında tutmak istediğiniz değişkenleri seçip "
                  "\"Listeye Ekle\" butonuna tıklayın. Seçilen değişkenler "
@@ -507,9 +586,25 @@ def update_preview(config, seg_val, expert_excluded, key, seg_col_input):
             f"İlk 50 satır gösteriliyor  ·  Toplam aktif kayıt: {len(df_active):,}",
             style={"fontSize": "0.75rem", "color": "#7e8fa4", "marginTop": "0.5rem"},
         ),
+        threshold_panel,
         expert_panel,
-        _build_screen_report(key, df_active, config, expert_excluded),
+        _build_screen_report(key, df_active, config, expert_excluded,
+                             thresholds=current_thresholds, seg_val=seg_val),
     ])
+
+
+# ── Callback: Eşikleri Uygula ──────────────────────────────────────────────────
+@app.callback(
+    Output("store-expert-thresholds", "data"),
+    Input("btn-apply-thresholds", "n_clicks"),
+    State("input-thr-iv", "value"),
+    prevent_initial_call=True,
+)
+def apply_thresholds(_, iv_val):
+    thresholds = {}
+    if iv_val is not None and iv_val > 0:
+        thresholds["iv"] = float(iv_val)
+    return thresholds
 
 
 # ── Callback: Uzman Görüşü — Listeye Ekle ─────────────────────────────────────
@@ -545,9 +640,11 @@ def clear_expert_exclusions(_):
     State("store-config", "data"),
 )
 def update_segment_badge(val, config):
-    if config and config.get("segment_col") and val and val != "Tümü":
+    vals = val if isinstance(val, list) else [val] if val else []
+    if config and config.get("segment_col") and vals and "Tümü" not in vals:
+        display = ", ".join(str(v) for v in vals)
         return html.Span(
-            f"{config['segment_col']}: {val}",
+            f"{config['segment_col']}: {display}",
             className="segment-badge",
         )
     return html.Div()
