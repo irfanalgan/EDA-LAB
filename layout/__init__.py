@@ -266,6 +266,12 @@ def build_sidebar():
             dbc.Input(id="input-table-1", type="text", placeholder="dbo.TABLO1",
                       className="form-control mb-1",
                       style={"fontSize": "0.82rem"}),
+            html.Div(id="div-sql-jk-1", style={"display": "none"}, children=[
+                dbc.Input(id="input-sql-jk-1", type="text",
+                          placeholder="Join key: must_no, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
+            ]),
             # Tablo 2 — gizli başlar
             html.Div(id="sql-table-row-2", style={"display": "none"}, children=[
                 dbc.InputGroup([
@@ -276,6 +282,10 @@ def build_sidebar():
                                style={"color": "#ef4444", "fontSize": "1rem",
                                       "padding": "0 0.5rem"}),
                 ], className="mb-1"),
+                dbc.Input(id="input-sql-jk-2", type="text",
+                          placeholder="Join key: bd_must_no, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
             ]),
             # Tablo 3 — gizli başlar
             html.Div(id="sql-table-row-3", style={"display": "none"}, children=[
@@ -287,20 +297,15 @@ def build_sidebar():
                                style={"color": "#ef4444", "fontSize": "1rem",
                                       "padding": "0 0.5rem"}),
                 ], className="mb-1"),
+                dbc.Input(id="input-sql-jk-3", type="text",
+                          placeholder="Join key: musteri_id, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
             ]),
             dbc.Button("+ Tablo Ekle", id="btn-add-sql-table", size="sm",
                        color="link", n_clicks=0,
                        style={"fontSize": "0.75rem", "color": "#4F8EF7",
                               "padding": "0", "marginBottom": "0.5rem"}),
-
-            # Join Key — sadece 2+ tablo varsa gösterilir
-            html.Div(id="div-sql-join-key", style={"display": "none"}, children=[
-                dbc.Label("Join Key (virgülle ayır)", className="form-label"),
-                dbc.Input(id="input-sql-join-key", type="text",
-                          placeholder="UNIQUE_ID, CUSTOMER_NO",
-                          className="form-control mb-2",
-                          style={"fontSize": "0.82rem"}),
-            ]),
 
             dbc.Button("Veriyi Yükle", id="btn-load", className="btn-load mb-1", n_clicks=0),
 
@@ -329,6 +334,12 @@ def build_sidebar():
             html.Div(id="csv-filename-display",
                      style={"color": "#a78bfa", "fontSize": "0.72rem",
                             "marginBottom": "0.4rem", "fontStyle": "italic"}),
+            html.Div(id="div-csv-jk-1", style={"display": "none"}, children=[
+                dbc.Input(id="input-csv-jk-1", type="text",
+                          placeholder="Join key: must_no, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
+            ]),
 
             # Dosya 2 — gizli başlar
             html.Div(id="csv-file-row-2", style={"display": "none"}, children=[
@@ -353,7 +364,11 @@ def build_sidebar():
                     dbc.Col(dbc.Button("×", id="btn-remove-csv-2", color="link",
                                        style={"color": "#ef4444", "fontSize": "1rem",
                                               "padding": "0"}), width=2),
-                ], className="mb-2 g-0"),
+                ], className="mb-1 g-0"),
+                dbc.Input(id="input-csv-jk-2", type="text",
+                          placeholder="Join key: bd_must_no, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
             ]),
 
             # Dosya 3 — gizli başlar
@@ -379,22 +394,17 @@ def build_sidebar():
                     dbc.Col(dbc.Button("×", id="btn-remove-csv-3", color="link",
                                        style={"color": "#ef4444", "fontSize": "1rem",
                                               "padding": "0"}), width=2),
-                ], className="mb-2 g-0"),
+                ], className="mb-1 g-0"),
+                dbc.Input(id="input-csv-jk-3", type="text",
+                          placeholder="Join key: musteri_id, sube_kodu",
+                          className="form-control mb-1",
+                          style={"fontSize": "0.75rem", "color": "#a78bfa"}),
             ]),
 
             dbc.Button("+ Dosya Ekle", id="btn-add-csv-file", size="sm",
                        color="link", n_clicks=0,
                        style={"fontSize": "0.75rem", "color": "#4F8EF7",
                               "padding": "0", "marginBottom": "0.5rem"}),
-
-            # Join Key — sadece 2+ dosya varsa gösterilir
-            html.Div(id="div-csv-join-key", style={"display": "none"}, children=[
-                dbc.Label("Join Key (virgülle ayır)", className="form-label"),
-                dbc.Input(id="input-csv-join-key", type="text",
-                          placeholder="UNIQUE_ID, CUSTOMER_NO",
-                          className="form-control mb-2",
-                          style={"fontSize": "0.82rem"}),
-            ]),
 
             dbc.Row([
                 dbc.Col(
@@ -957,67 +967,47 @@ def build_main():
                 ], className="mb-3"),
 
                 dbc.Row([
-                    # Sol — kaynak liste
                     dbc.Col([
                         html.Div([
-                            dbc.Label("Mevcut Değişkenler", className="form-label",
-                                      style={"marginBottom": "0"}),
-                            html.Span(id="pg-source-count",
-                                      className="form-hint",
-                                      style={"marginLeft": "0.5rem"}),
-                        ], style={"display": "flex", "alignItems": "baseline",
-                                  "marginBottom": "0.2rem"}),
-                        dbc.Input(
-                            id="pg-source-search",
-                            placeholder="Filtrele…",
-                            debounce=False, size="sm",
-                            style={"backgroundColor": "#0e1117", "color": "#c8cdd8",
-                                   "border": "1px solid #2d3a4f", "borderRadius": "4px",
-                                   "marginBottom": "0.35rem", "fontSize": "0.78rem"},
-                        ),
-                        html.Div(id="pg-source-container",
-                                 style={"maxHeight": "260px", "overflowY": "auto",
-                                        "backgroundColor": "#0e1117",
-                                        "border": "1px solid #2d3a4f",
-                                        "borderRadius": "6px",
-                                        "padding": "0.4rem 0.6rem",
-                                        "minHeight": "60px"}),
-                    ], width=5),
-                    # Orta — ok butonları
-                    dbc.Col([
-                        html.Div([
-                            dbc.Button("►", id="btn-pg-add",
-                                       color="primary", size="sm",
-                                       className="mb-2",
-                                       style={"width": "40px"}),
-                            html.Br(),
-                            dbc.Button("◄", id="btn-pg-remove",
-                                       color="secondary", size="sm",
-                                       outline=True,
-                                       style={"width": "40px"}),
-                        ], style={"textAlign": "center", "paddingTop": "2rem"}),
-                    ], width=1,
-                       className="d-flex align-items-center justify-content-center"),
-                    # Sağ — model listesi
-                    dbc.Col([
-                        html.Div([
-                            dbc.Label("Model Listesi", className="form-label",
+                            dbc.Label("Model Değişkenleri", className="form-label",
                                       style={"marginBottom": "0"}),
                             html.Span(id="pg-model-count",
                                       className="form-hint",
                                       style={"marginLeft": "0.5rem"}),
                         ], style={"display": "flex", "alignItems": "baseline",
-                                  "marginBottom": "0.2rem"}),
-                        html.Div(style={"height": "2rem"}),  # arama kutusu yüksekliği kadar boşluk
-                        html.Div(id="pg-model-container",
-                                 style={"maxHeight": "260px", "overflowY": "auto",
-                                        "backgroundColor": "#0e1117",
-                                        "border": "1px solid #2d3a4f",
-                                        "borderRadius": "6px",
-                                        "padding": "0.4rem 0.6rem",
-                                        "minHeight": "60px"}),
-                    ], width=5),
+                                  "marginBottom": "0.35rem"}),
+                        dcc.Dropdown(
+                            id="pg-var-dropdown",
+                            multi=True,
+                            searchable=True,
+                            placeholder="Değişken ara ve seç…",
+                            className="dark-dd",
+                            style={"minHeight": "42px"},
+                        ),
+                    ], width=10),
+                    dbc.Col([
+                        html.Div([
+                            dbc.Button("Tümünü Ekle", id="btn-pg-add-all",
+                                       color="primary", size="sm",
+                                       className="mb-2",
+                                       style={"width": "100%", "fontSize": "0.75rem"}),
+                            dbc.Button("Temizle", id="btn-pg-remove-all",
+                                       color="secondary", size="sm",
+                                       outline=True,
+                                       style={"width": "100%", "fontSize": "0.75rem"}),
+                        ], style={"paddingTop": "1.5rem"}),
+                    ], width=2),
                 ], className="mb-3"),
+
+                # Eski callback'ler için gizli elemanlar (ID uyumluluğu)
+                html.Div([
+                    html.Div(id="pg-source-container"),
+                    html.Span(id="pg-source-count"),
+                    dbc.Input(id="pg-source-search", style={"display": "none"}),
+                    html.Div(id="pg-model-container"),
+                    dbc.Button(id="btn-pg-add", style={"display": "none"}),
+                    dbc.Button(id="btn-pg-remove", style={"display": "none"}),
+                ], style={"display": "none"}),
 
                 # WoE toggle (gizli — arka planda her zaman her ikisi de hesaplanır)
                 html.Div(dbc.Checklist(id="chk-use-woe", options=[], value=[]),

@@ -42,7 +42,7 @@ def toggle_source(source):
     Output("store-sql-table-count", "data"),
     Output("sql-table-row-2",       "style"),
     Output("sql-table-row-3",       "style"),
-    Output("div-sql-join-key",      "style"),
+    Output("div-sql-jk-1",          "style"),
     Input("btn-add-sql-table",  "n_clicks"),
     Input("btn-remove-sql-2",   "n_clicks"),
     Input("btn-remove-sql-3",   "n_clicks"),
@@ -62,8 +62,8 @@ def manage_sql_tables(add, rem2, rem3, count):
     hide  = {"display": "none"}
     row2  = show if count >= 2 else hide
     row3  = show if count >= 3 else hide
-    jk    = show if count >= 2 else hide
-    return count, row2, row3, jk
+    jk1   = show if count >= 2 else hide
+    return count, row2, row3, jk1
 
 
 # ── Callback: CSV — dosya satırı ekle/kaldır ─────────────────────────────────
@@ -71,7 +71,7 @@ def manage_sql_tables(add, rem2, rem3, count):
     Output("store-csv-file-count", "data"),
     Output("csv-file-row-2",       "style"),
     Output("csv-file-row-3",       "style"),
-    Output("div-csv-join-key",     "style"),
+    Output("div-csv-jk-1",         "style"),
     Input("btn-add-csv-file",  "n_clicks"),
     Input("btn-remove-csv-2",  "n_clicks"),
     Input("btn-remove-csv-3",  "n_clicks"),
@@ -91,8 +91,8 @@ def manage_csv_files(add, rem2, rem3, count):
     hide = {"display": "none"}
     row2 = show if count >= 2 else hide
     row3 = show if count >= 3 else hide
-    jk   = show if count >= 2 else hide
-    return count, row2, row3, jk
+    jk1  = show if count >= 2 else hide
+    return count, row2, row3, jk1
 
 
 # ── Callback: CSV Dosya Adı Göster ────────────────────────────────────────────
@@ -122,21 +122,31 @@ def _read_csv_content(contents, filename, sep):
     return df, filename
 
 
-def _join_dataframes(dfs: list[pd.DataFrame], join_key: list[str]) -> pd.DataFrame:
-    """Master + ek DataFrame'leri join_key üzerinde axis=1 birleştirir."""
+def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str]]) -> pd.DataFrame:
+    """Master + ek DataFrame'leri her tablonun kendi key'i üzerinde birleştirir.
+
+    join_keys_per_table[0] → master (left_on)
+    join_keys_per_table[i] → i. dosya (right_on)
+    """
     result = dfs[0]
-    jk = [k.strip() for k in join_key if k.strip()]
-    if jk:
-        result = result.set_index(jk)
-    for df in dfs[1:]:
-        if jk:
-            df = df.set_index(jk)
-        drop_cols = [c for c in df.columns if c in result.columns]
+    left_keys = join_keys_per_table[0] if join_keys_per_table else []
+
+    if not left_keys:
+        return result
+
+    for i, df in enumerate(dfs[1:], start=1):
+        right_keys = join_keys_per_table[i] if i < len(join_keys_per_table) and join_keys_per_table[i] else left_keys
+        all_keys = set(left_keys) | set(right_keys)
+        drop_cols = [c for c in df.columns if c in result.columns and c not in all_keys]
         if drop_cols:
             df = df.drop(columns=drop_cols)
-        result = pd.concat([result, df], axis=1)
-    if jk:
-        result = result.reset_index()
+        if left_keys == right_keys:
+            result = pd.merge(result, df, on=left_keys, how="left")
+        else:
+            result = pd.merge(result, df, left_on=left_keys, right_on=right_keys, how="left")
+            extra = [rk for lk, rk in zip(left_keys, right_keys) if lk != rk and rk in result.columns]
+            if extra:
+                result = result.drop(columns=extra)
     return result
 
 
@@ -149,18 +159,25 @@ def _join_dataframes(dfs: list[pd.DataFrame], join_key: list[str]) -> pd.DataFra
     State("upload-csv-2", "contents"), State("upload-csv-2", "filename"),
     State("upload-csv-3", "contents"), State("upload-csv-3", "filename"),
     State("csv-separator",        "value"),
-    State("input-csv-join-key",   "value"),
+    State("input-csv-jk-1",      "value"),
+    State("input-csv-jk-2",      "value"),
+    State("input-csv-jk-3",      "value"),
     State("store-csv-file-count", "data"),
     prevent_initial_call=True,
 )
 def load_csv(n_clicks,
              c1, fn1, c2, fn2, c3, fn3,
-             sep, join_key_raw, file_count):
+             sep, jk1_raw, jk2_raw, jk3_raw, file_count):
     if not c1 or not fn1:
         return dash.no_update, _warn("Önce bir CSV dosyası seçin.")
 
     sep = sep or ","
-    join_key = [k.strip() for k in (join_key_raw or "").split(",") if k.strip()]
+    jk_per_table = []
+    for raw in [jk1_raw, jk2_raw, jk3_raw]:
+        keys = [k.strip() for k in (raw or "").split(",") if k.strip()]
+        jk_per_table.append(keys)
+
+    master_keys = jk_per_table[0]
 
     try:
         dfs = []
@@ -171,8 +188,8 @@ def load_csv(n_clicks,
                 dfs.append(df)
                 filenames.append(fn)
 
-        if len(dfs) > 1 and join_key:
-            result = _join_dataframes(dfs, join_key)
+        if len(dfs) > 1 and master_keys:
+            result = _join_dataframes(dfs, jk_per_table[:len(dfs)])
         else:
             result = dfs[0]
 
@@ -198,7 +215,9 @@ def load_csv(n_clicks,
     State("input-table-1",        "value"),
     State("input-table-2",        "value"),
     State("input-table-3",        "value"),
-    State("input-sql-join-key",   "value"),
+    State("input-sql-jk-1",      "value"),
+    State("input-sql-jk-2",      "value"),
+    State("input-sql-jk-3",      "value"),
     State("store-sql-table-count","data"),
     State("input-sql-server",     "value"),
     State("input-sql-database",   "value"),
@@ -207,19 +226,27 @@ def load_csv(n_clicks,
 )
 def load_data(n_clicks,
               t1, t2, t3,
-              join_key_raw, table_count,
+              jk1_raw, jk2_raw, jk3_raw,
+              table_count,
               server, database, driver):
     if not t1 or not t1.strip():
         return dash.no_update, _warn("Lütfen bir tablo adı girin.")
 
-    join_key = [k.strip() for k in (join_key_raw or "").split(",") if k.strip()]
-    tables   = [t for t in [t1, t2, t3] if t and t.strip()]
+    tables = [t for t in [t1, t2, t3] if t and t.strip()]
+    jk_raws = [jk1_raw, jk2_raw, jk3_raw]
+    # Her tablonun key listesini ayrı ayrı parse et
+    jk_per_table = []
+    for raw in jk_raws:
+        keys = [k.strip() for k in (raw or "").split(",") if k.strip()]
+        jk_per_table.append(keys)
+
+    master_keys = jk_per_table[0]  # Tablo 1'in key'leri = left_on
 
     try:
-        if len(tables) > 1 and join_key:
+        if len(tables) > 1 and master_keys:
             df = get_data_from_sql_multi(
                 tables=tables,
-                join_key=join_key,
+                join_keys_per_table=jk_per_table[:len(tables)],
                 server=server, database=database, driver=driver,
             )
             join_note = f"  ·  {len(tables)} tablo birleştirildi"

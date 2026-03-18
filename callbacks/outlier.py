@@ -312,15 +312,18 @@ def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
             ], width=8),
             dbc.Col([
                 html.P("Outlier Dağılımı (Kaç Değişkende?)", className="section-title"),
-                dash_table.DataTable(
-                    data=dist_df.to_dict("records"),
-                    columns=[{"name": c, "id": c} for c in dist_df.columns],
-                    sort_action="native",
-                    style_data_conditional=[
-                        {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
-                    ],
-                    **{k2: v2 for k2, v2 in _TABLE_STYLE.items()
-                       if k2 != "style_data_conditional"},
+                html.Div(
+                    dash_table.DataTable(
+                        data=dist_df.to_dict("records"),
+                        columns=[{"name": c, "id": c} for c in dist_df.columns],
+                        sort_action="native",
+                        style_data_conditional=[
+                            {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+                        ],
+                        **{k2: v2 for k2, v2 in _TABLE_STYLE.items()
+                           if k2 != "style_data_conditional"},
+                    ),
+                    style={"maxHeight": "480px", "overflowY": "auto"},
                 ),
             ], width=4),
         ], className="mb-3"),

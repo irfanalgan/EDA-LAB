@@ -353,71 +353,69 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, key, seg_
     return html.Div([source_note, tbl] if source_note else [tbl])
 
 
-# ── Playground: Kaynak listeyi doldur ─────────────────────────────────────────
+# ── Playground: Dropdown seçeneklerini doldur ─────────────────────────────────
 @app.callback(
+    Output("pg-var-dropdown", "options"),
     Output("pg-source-container", "children"),
     Output("pg-source-count",     "children"),
+    Output("pg-model-container",  "children"),
     Input("store-config",         "data"),
     Input("store-expert-exclude", "data"),
-    Input("store-pg-model-vars",  "data"),
-    Input("pg-source-search",     "value"),
     State("store-key", "data"),
 )
-def render_pg_source(config, expert_excluded, model_vars, search, key):
+def populate_pg_var_dropdown(config, expert_excluded, key):
     df = _get_df(key)
+    empty_div = html.Div()
     if df is None or not config or not config.get("target_col"):
-        return html.Div("Önce veri yükleyin.", className="form-hint"), ""
+        return [], empty_div, "", empty_div
     excluded = set(expert_excluded or [])
-    in_model = set(model_vars or [])
     screen_result = _SERVER_STORE.get(f"{key}_screen")
     if screen_result:
         base = [c for c in screen_result[0]
-                if c != config["target_col"] and c not in excluded and c not in in_model]
+                if c != config["target_col"] and c not in excluded]
     else:
         cfg = {c for c in [config.get("target_col"), config.get("date_col"),
                             config.get("segment_col")] if c}
-        base = [c for c in df.columns
-                if c not in cfg and c not in excluded and c not in in_model]
-    total = len(base)
-    if search:
-        q = search.strip().lower()
-        base = [c for c in base if q in c.lower()]
-    count_txt = f"{len(base)}/{total}" if search else f"{total} değişken"
-    if not base:
-        msg = "Eşleşme yok." if search else "Tüm değişkenler model listesinde."
-        return html.Div(msg, className="form-hint"), count_txt
-    # key: model_vars değişince Dash eski seçimleri atmaya zorlanır
-    ck = len(model_vars or [])
-    return dbc.Checklist(
-        id="chk-pg-source",
-        key=f"src-{ck}-{len(base)}",
-        options=[{"label": c, "value": c} for c in base],
-        value=[],
-        inline=False,
-        className="expert-checklist",
-        style={"fontSize": "0.8rem", "lineHeight": "1.7"},
-    ), count_txt
+        base = [c for c in df.columns if c not in cfg and c not in excluded]
+    opts = [{"label": c, "value": c} for c in base]
+    return opts, empty_div, "", empty_div
 
 
-# ── Playground: Model listesini doldur ────────────────────────────────────────
+# ── Playground: Dropdown → Store senkronizasyonu ──────────────────────────────
 @app.callback(
-    Output("pg-model-container", "children"),
-    Output("pg-model-count",     "children"),
-    Input("store-pg-model-vars", "data"),
+    Output("store-pg-model-vars", "data"),
+    Output("pg-model-count",      "children"),
+    Output("pg-source-search",    "value"),
+    Input("pg-var-dropdown", "value"),
+    prevent_initial_call=True,
 )
-def render_pg_model_list(model_vars):
-    if not model_vars:
-        return html.Div("Model listesi boş.", className="form-hint"), ""
-    count_txt = f"{len(model_vars)} değişken"
-    return dbc.Checklist(
-        id="chk-pg-model",
-        key=f"mdl-{len(model_vars)}",
-        options=[{"label": c, "value": c} for c in model_vars],
-        value=[],
-        inline=False,
-        className="expert-checklist",
-        style={"fontSize": "0.8rem", "lineHeight": "1.7"},
-    ), count_txt
+def sync_dropdown_to_store(selected):
+    selected = selected or []
+    count_txt = f"{len(selected)} değişken" if selected else ""
+    return selected, count_txt, ""
+
+
+# ── Playground: Tümünü Ekle ──────────────────────────────────────────────────
+@app.callback(
+    Output("pg-var-dropdown", "value"),
+    Input("btn-pg-add-all", "n_clicks"),
+    State("pg-var-dropdown", "options"),
+    prevent_initial_call=True,
+)
+def pg_add_all(_, options):
+    if not options:
+        return dash.no_update
+    return [o["value"] for o in options]
+
+
+# ── Playground: Tümünü Temizle ───────────────────────────────────────────────
+@app.callback(
+    Output("pg-var-dropdown", "value", allow_duplicate=True),
+    Input("btn-pg-remove-all", "n_clicks"),
+    prevent_initial_call=True,
+)
+def pg_remove_all(_):
+    return []
 
 
 # ── Playground: Model dropdown'ı target_type'a göre güncelle ─────────────────
@@ -464,36 +462,6 @@ def toggle_classification_controls(config):
     return {}, {}, {}
 
 
-# ── Playground: Değişken ekle ──────────────────────────────────────────────────
-@app.callback(
-    Output("store-pg-model-vars", "data"),
-    Output("pg-source-search",   "value"),
-    Input("btn-pg-add", "n_clicks"),
-    State("chk-pg-source",       "value"),
-    State("store-pg-model-vars", "data"),
-    prevent_initial_call=True,
-)
-def pg_add_vars(_, selected, current):
-    if not selected:
-        return dash.no_update, dash.no_update
-    current = current or []
-    new = [c for c in selected if c not in set(current)]
-    return current + new, ""
-
-
-# ── Playground: Değişken kaldır ───────────────────────────────────────────────
-@app.callback(
-    Output("store-pg-model-vars", "data", allow_duplicate=True),
-    Input("btn-pg-remove", "n_clicks"),
-    State("chk-pg-model",        "value"),
-    State("store-pg-model-vars", "data"),
-    prevent_initial_call=True,
-)
-def pg_remove_vars(_, selected, current):
-    if not selected or not current:
-        return dash.no_update
-    remove_set = set(selected)
-    return [c for c in current if c not in remove_set]
 
 
 # ── Playground: Model kur ─────────────────────────────────────────────────────

@@ -69,7 +69,7 @@ def get_data_from_sql(
 
 def get_data_from_sql_multi(
     tables:   list[str],
-    join_key: list[str],
+    join_keys_per_table: list[list[str]],
     server:   str | None = None,
     database: str | None = None,
     driver:   str | None = None,
@@ -77,7 +77,11 @@ def get_data_from_sql_multi(
     """
     Birden fazla tabloyu LEFT JOIN mantığıyla birleştirir (pd.merge).
     tables[0] master kabul edilir; diğerlerinden tekrar eden kolonlar çıkarılır.
-    join_key boşsa sadece tables[0] döndürülür.
+
+    join_keys_per_table: Her tablonun kendi key listesi.
+      join_keys_per_table[0] → master (left_on)
+      join_keys_per_table[i] → i. tablo (right_on)
+    Aynı isimse aynı değeri yaz, farklıysa her tabloya kendi key'ini yaz.
     """
     cfg = _get_config().get("database", {})
     server   = server   or cfg.get("server",   "")
@@ -85,20 +89,29 @@ def get_data_from_sql_multi(
     driver   = driver   or cfg.get("driver",   _DRIVER_OPTIONS[0])
 
     conn_str = _build_conn_str(server, database, driver)
-    jk = [k.strip() for k in join_key if k.strip()]
+    left_keys = join_keys_per_table[0] if join_keys_per_table else []
 
     with pyodbc.connect(conn_str) as conn:
         result = pd.read_sql(f"SELECT * FROM {_quote_table(tables[0])}", conn)
 
-        if not jk or len(tables) < 2:
+        if not left_keys or len(tables) < 2:
             return result
 
-        for tbl in tables[1:]:
+        for i, tbl in enumerate(tables[1:], start=1):
             df = pd.read_sql(f"SELECT * FROM {_quote_table(tbl)}", conn)
+            right_keys = join_keys_per_table[i] if i < len(join_keys_per_table) and join_keys_per_table[i] else left_keys
             # Tekrar eden kolonları düşür (join key hariç)
-            drop_cols = [c for c in df.columns if c in result.columns and c not in jk]
+            all_keys = set(left_keys) | set(right_keys)
+            drop_cols = [c for c in df.columns if c in result.columns and c not in all_keys]
             if drop_cols:
                 df = df.drop(columns=drop_cols)
-            result = pd.merge(result, df, on=jk, how="left")
+            if left_keys == right_keys:
+                result = pd.merge(result, df, on=left_keys, how="left")
+            else:
+                result = pd.merge(result, df, left_on=left_keys, right_on=right_keys, how="left")
+                # Sağ taraftaki key kolonunu düşür (duplicate olmaması için)
+                extra = [rk for lk, rk in zip(left_keys, right_keys) if lk != rk and rk in result.columns]
+                if extra:
+                    result = result.drop(columns=extra)
 
     return result
