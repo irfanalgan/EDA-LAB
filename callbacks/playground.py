@@ -508,7 +508,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     y_all = pd.to_numeric(df_active[target], errors='coerce')
 
     # ── Train / Test / OOT split ───────────────────────────────────────────────
-    _split_cfg = {**config, "test_size": int(test_size_pct or 30)}
+    _split_cfg = {**config, "test_size": int(config.get("test_size", 20))}
     _df_tr, _df_te, _df_oot = get_splits(df_active, _split_cfg)
 
     train_mask = df_active.index.isin(_df_tr.index)
@@ -564,17 +564,20 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         if len(X_tr) == 0:
             return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom")
 
-        # Scaling: tree'ler hariç tüm modeller için (statsmodels dahil)
-        # Ölçeksiz ham değişkenler BFGS'de exp overflow'a yol açar
+        # Scaling: tree modelleri ve sm.Logit hariç
+        # sm.Logit + WoE: değerler zaten dar aralıkta, scaling yapılmaz
+        # Ham (non-WoE) LR'de BFGS overflow riski var → sadece orada scale
         is_tree = algo in ("lgbm", "xgb", "rf")
         _use_sm_logit = (algo == "lr" and not is_regression)
-        if not is_tree:
+        _is_woe = all(c.endswith("_woe") for c in X_tr.columns)
+        _skip_scale = is_tree or (_use_sm_logit and _is_woe)
+        if not _skip_scale:
             scaler = StandardScaler()
             X_tr_s  = scaler.fit_transform(X_tr)
             X_te_s  = scaler.transform(X_te)  if has_test else np.empty((0, X_tr.shape[1]))
             X_oot_s = scaler.transform(X_oot) if has_oot  else None
         else:
-            X_tr_s  = X_tr.values
+            X_tr_s  = X_tr.values if hasattr(X_tr, 'values') else X_tr
             X_te_s  = X_te.values  if has_test else np.empty((0, X_tr.shape[1]))
             X_oot_s = X_oot.values if has_oot  else None
 

@@ -201,6 +201,10 @@ def get_splits(df: pd.DataFrame, config: dict) -> tuple:
             tr_idx, te_idx = _tts(indices, test_size=test_pct, random_state=42)
         return df_pool.iloc[tr_idx].copy(), df_pool.iloc[te_idx].copy()
 
+    # Tarih kolonuna göre sırala — OOT/train/test tutarlılığı için
+    if date_col and date_col in df.columns:
+        df = df.sort_values(date_col, na_position="last").reset_index(drop=True)
+
     if oot_date and date_col and date_col in df.columns:
         dates = pd.to_datetime(df[date_col], errors="coerce")
         pool_mask = dates < pd.to_datetime(oot_date)

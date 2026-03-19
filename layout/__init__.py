@@ -31,23 +31,26 @@ def build_navbar():
             html.Div([
                 html.Span("Keşifsel Veri Analizi", className="navbar-subtitle"),
                 html.Button(
-                    "?",
+                    html.I(className="bi bi-question-circle"),
                     id="btn-help-open",
                     n_clicks=0,
                     style={
                         "marginLeft": "1rem",
                         "background": "none",
-                        "border": "1px solid #4F8EF7",
+                        "border": "1px solid rgba(79,142,247,0.4)",
                         "borderRadius": "50%",
                         "color": "#4F8EF7",
                         "cursor": "pointer",
-                        "fontWeight": "700",
-                        "fontSize": "0.8rem",
-                        "width": "22px",
-                        "height": "22px",
+                        "fontSize": "0.85rem",
+                        "width": "26px",
+                        "height": "26px",
                         "lineHeight": "1",
                         "padding": "0",
                         "verticalAlign": "middle",
+                        "display": "inline-flex",
+                        "alignItems": "center",
+                        "justifyContent": "center",
+                        "transition": "all 0.15s ease",
                     },
                     title="Yardım & Referans",
                 ),
@@ -627,15 +630,15 @@ def build_main():
                         ], style={"marginBottom": "0.45rem"}),
                         html.Div([
                             html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("İki sayısal değişken arasındaki doğrusal ilişkinin yönünü ve şiddetini ölçer.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("İki sayısal değişken arasındaki doğrusal ilişkinin yönünü ve şiddetini ölçer. Modele birlikte girecek değişkenlerin birbirini tekrar edip etmediğini anlamak için kullanılır.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
                             html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Pearson r katsayısı −1 ile +1 arasında değer alır. Değişken sayısı eşiği aşarsa en yüksek varyanslılar seçilir, ardından tam matris hesaplanır.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Pearson r katsayısı −1 ile +1 arasında değer alır. +1 tam pozitif, −1 tam negatif doğrusal ilişki, 0 ilişki yok demektir. Heatmap'te koyu renkler güçlü ilişkiyi gösterir. Değişken sayısı eşiği aşarsa en yüksek varyanslılar seçilir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
-                            html.Span("Yorum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("|r| < 0.5 düşük  ·  0.5–0.75 orta  ·  > 0.75 yüksek korelasyon. Yüksek korelasyon çiftleri model için çoklu doğrusallık riski taşır — bu değişkenlerden biri modelden çıkarılabilir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
+                            html.Span("|r| < 0.50 → düşük (sorun yok)  ·  0.50–0.75 → orta (dikkat)  ·  > 0.75 → yüksek (çoklu doğrusallık riski). Eşiği aşan çiftler tabloda listelenir — bu çiftlerden IV'ü düşük olanı modelden çıkarın.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ]),
                     ], style={
                         "backgroundColor": "#111827", "borderLeft": "3px solid #4F8EF7",
@@ -673,15 +676,15 @@ def build_main():
                         ], style={"marginBottom": "0.45rem"}),
                         html.Div([
                             html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("İki değişkenin birbirinden istatistiksel olarak bağımsız olup olmadığını test eder. Kategorik × Kategorik ilişkiler için uygundur; sayısal kolonlar otomatik bin'lenir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("İki kategorik değişken arasında istatistiksel olarak anlamlı bir ilişki olup olmadığını test eder. Örneğin \"meslek\" ile \"temerrüt\" arasında bağımlılık var mı? Sayısal kolonlar otomatik bin'lenir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
                             html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Gözlenen frekanslar ile bağımsızlık varsayımı altında beklenen frekanslar karşılaştırılır. 5M+ satır için önce pd.crosstab ile aggregate edilir, χ² scipy üzerinden kontenjans tablosu üzerinde hesaplanır.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("İki değişkenin çapraz tablosu (crosstab) oluşturulur. Her hücredeki gözlenen frekans, \"iki değişken bağımsız olsaydı beklenen frekans\" ile karşılaştırılır. Fark büyükse χ² yükselir ve p-değeri düşer.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
-                            html.Span("Yorum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("p < 0.05 → değişkenler bağımlı (ilişki var).  Cramér's V etki büyüklüğünü verir: < 0.10 önemsiz  ·  0.10–0.30 zayıf  ·  0.30–0.50 orta  ·  ≥ 0.50 güçlü ilişki.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
+                            html.Span("p < 0.05 → değişkenler arasında anlamlı ilişki var (bağımsız değil). p ≥ 0.05 → ilişki istatistiksel olarak kanıtlanamadı. Cramér's V ilişkinin gücünü verir: < 0.10 önemsiz · 0.10–0.30 zayıf · 0.30–0.50 orta · ≥ 0.50 güçlü.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ]),
                     ], style={
                         "backgroundColor": "#111827", "borderLeft": "3px solid #a78bfa",
@@ -727,15 +730,15 @@ def build_main():
                         ], style={"marginBottom": "0.45rem"}),
                         html.Div([
                             html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Bir sayısal değişkenin target grupları (Good=0 / Bad=1) arasında istatistiksel olarak anlamlı farklılık gösterip göstermediğini test eder. Değişkenin ayırıcı güç taşıyıp taşımadığına dair güçlü bir ipucu verir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Bir sayısal değişkenin Good (target=0) ve Bad (target=1) grupları arasında gerçekten farklı davranıp davranmadığını test eder. Örneğin \"gelir\" değişkeni bad müşterilerde anlamlı şekilde düşük mü?", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
                             html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Gruplar arası varyans ile gruplar içi varyans oranlanır (F istatistiği). Büyük veri için her gruptan en fazla 200.000 satır örneklenerek hesap yapılır; grup istatistikleri tüm veri üzerinden alınır.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Gruplar arası varyans (ortalamalar arası fark) ile grup içi varyans (her grubun kendi dağılımı) oranlanır → F istatistiği. F büyükse gruplar arası fark, grup içi değişkenlikten belirgin şekilde fazladır.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
-                            html.Span("Yorum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Yüksek F + düşük p (< 0.05) → grupların ortalamaları birbirinden anlamlı biçimde farklı, değişken ayırıcı güç taşıyor. p ≥ 0.05 → grup ortalamaları benzer, değişkenin tek başına katkısı sınırlı.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
+                            html.Span("F yüksek + p < 0.05 → grupların ortalamaları anlamlı şekilde farklı, değişken ayırıcı güç taşıyor. p ≥ 0.05 → ortalamalar benzer, değişken tek başına grupları ayıramıyor. Grup istatistikleri tablosunda ortalama ve standart sapmayı karşılaştırın.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ]),
                     ], style={
                         "backgroundColor": "#111827", "borderLeft": "3px solid #10b981",
@@ -766,15 +769,15 @@ def build_main():
                         ], style={"marginBottom": "0.45rem"}),
                         html.Div([
                             html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Good (target=0) ve Bad (target=1) gruplarının bir değişken üzerindeki kümülatif dağılımlarının ne kadar farklı olduğunu ölçer. Kredi risk modellemesinde temel ayırıcılık metriğidir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Bir değişkenin Good ve Bad gruplarını ne kadar iyi ayırabildiğini ölçer. Kredi risk skorlamalarında modelin ayırıcılık gücünü değerlendiren temel metriktir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
                             html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("İki grubun ampirik CDF'leri arasındaki maksimum dikey mesafe KS istatistiğini verir. İstatistik tüm veri üzerinden hesaplanır; CDF grafiği görselleştirme için 20.000 örnekle çizilir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Good ve Bad gruplarının kümülatif dağılım eğrileri (CDF) ayrı ayrı çizilir. İki eğri arasındaki en büyük dikey mesafe KS istatistiğini verir. Mesafe büyükse değişken iki grubu net şekilde ayırıyor demektir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
-                            html.Span("Yorum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("KS < 0.20 zayıf  ·  0.20–0.30 orta  ·  0.30–0.50 iyi  ·  > 0.50 çok iyi ayırıcılık.  p < 0.05 → dağılımlar istatistiksel olarak farklı. Grafikteki sarı noktalı çizgi KS mesafesinin konumunu gösterir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
+                            html.Span("KS < 0.20 → zayıf ayırıcılık · 0.20–0.30 → orta · 0.30–0.50 → iyi · > 0.50 → çok iyi. p < 0.05 → iki grubun dağılımı istatistiksel olarak farklı. Grafikteki sarı noktalı çizgi en büyük ayrışma noktasını gösterir — değişkenin en etkili olduğu bölgedir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ]),
                     ], style={
                         "backgroundColor": "#111827", "borderLeft": "3px solid #f59e0b",
@@ -805,15 +808,15 @@ def build_main():
                         ], style={"marginBottom": "0.45rem"}),
                         html.Div([
                             html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Bağımsız değişkenler arasındaki çoklu doğrusallığı (multicollinearity) saptar. Bir değişkenin diğerleri tarafından ne kadar açıklanabildiğini gösterir. Lojistik regresyon başta olmak üzere doğrusal modellerde kritik öneme sahiptir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Modeldeki bağımsız değişkenlerin birbirini ne kadar tekrar ettiğini ölçer. Yüksek VIF, bir değişkenin diğerlerinin kombinasyonuyla neredeyse tamamen açıklanabildiğini gösterir — bu durumda katsayılar güvenilmez olur.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
                             html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Her değişken diğerlerine regresse edilir; elde edilen R² üzerinden VIF = 1 / (1 − R²) formülüyle hesaplanır. IV ≥ 0.10 filtresi seçilirse önce bilgi değeri yüksek değişkenler seçilir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Her değişken sırayla diğer tüm değişkenlere regresse edilir. Elde edilen R²'den VIF = 1/(1−R²) hesaplanır. R² yüksekse (değişken diğerlerince açıklanıyorsa) VIF büyük çıkar.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ], style={"marginBottom": "0.25rem"}),
                         html.Div([
-                            html.Span("Yorum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("VIF < 5 → normal, sorun yok  ·  5–10 → orta risk, dikkat  ·  > 10 → yüksek çoklu doğrusallık, bu değişkenlerden biri veya birkaçı modelden çıkarılmalı ya da PCA/WoE dönüşümü uygulanmalı.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
+                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
+                            html.Span("VIF < 5 → sorun yok · 5–10 → dikkat, korelasyon tablosunu kontrol edin · > 10 → bu değişken diğerleriyle çok ilişkili, modelden çıkarılmalı veya WoE dönüşümü uygulanmalı. En yüksek VIF'li değişkeni çıkarıp tekrar hesaplayın — diğer VIF'ler de düşecektir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
                         ]),
                     ], style={
                         "backgroundColor": "#111827", "borderLeft": "3px solid #ef4444",
@@ -1028,16 +1031,9 @@ def build_main():
                         html.Div("\u00a0", className="form-hint"),
                         dcc.Dropdown(id="pg-target-col", className="dark-select", searchable=True, placeholder="Kolon ara\u2026"),
                     ], width=3),
-                    dbc.Col([
-                        dbc.Label("Test Oranı (%)", className="form-label"),
-                        html.Div("OOT tarihi yoksa rastgele split için geçerlidir.",
-                                 className="form-hint"),
-                        dbc.Input(id="pg-test-size", type="number",
-                                  value=30, min=10, max=50, step=5,
-                                  style={"maxWidth": "110px"}),
-                    ], width=3),
-                    # Gizli — eski callback'ler için tutulur
+                    # Gizli — callback uyumluluğu için korunur
                     html.Div([
+                        dbc.Input(id="pg-test-size", type="number", value=30),
                         dbc.Select(id="pg-split-method", value="random",
                                    options=[{"label": "Rastgele", "value": "random"}]),
                         dbc.Select(id="pg-split-date", value=""),
@@ -1103,6 +1099,212 @@ def build_main():
     ], id="main-content")
 
 
+def _build_slideshow_modal():
+    """Veri yüklenirken gösterilen eğitim slayt gösterisi modalı."""
+    slides = [
+        # Slide 0 — EDA Lab nedir?
+        html.Div([
+            html.H4("EDA Lab Nedir?", className="slide-title"),
+            html.P(
+                "EDA Lab, veri bilimciler ve analistler için tasarlanmış "
+                "interaktif bir keşifsel veri analizi platformudur. "
+                "Verilerinizi yükleyin, otomatik profilleme ile hızlıca tanıyın "
+                "ve model kurmadan önce değişkenlerinizi derinlemesine inceleyin.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Span("Otomatik Profilleme", className="slide-chip"),
+                html.Span("IV / WoE Analizi", className="slide-chip"),
+                html.Span("Hızlı Model Kurma", className="slide-chip"),
+            ], className="slide-chips"),
+        ], className="slide-content"),
+
+        # Slide 1 — Veri Yükleme
+        html.Div([
+            html.H4("Veri Yükleme & Yapılandırma", className="slide-title"),
+            html.P(
+                "SQL Server veya CSV dosyalarından veri çekin. "
+                "Birden fazla tabloyu join key ile birleştirin. "
+                "Target, tarih ve segment kolonlarını belirleyin — "
+                "sistem geri kalanını otomatik yapılandırsın.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Div([
+                    html.Span("1", className="slide-step-num"),
+                    html.Span("Veri Kaynağı Seç", className="slide-step-label"),
+                ], className="slide-step"),
+                html.Div([
+                    html.Span("2", className="slide-step-num"),
+                    html.Span("Kolonları Yapılandır", className="slide-step-label"),
+                ], className="slide-step"),
+                html.Div([
+                    html.Span("3", className="slide-step-num"),
+                    html.Span("Analiz Et", className="slide-step-label"),
+                ], className="slide-step"),
+            ], className="slide-steps"),
+        ], className="slide-content"),
+
+        # Slide 2 — Önizleme & Screening
+        html.Div([
+            html.H4("Önizleme & Ön Eleme", className="slide-title"),
+            html.P(
+                "Verinin genel profilini görün: satır/kolon sayısı, eksik veri oranları, "
+                "veri tipleri ve temel istatistikler. Yüksek eksiklik veya düşük varyans "
+                "gösteren kolonları tespit edin, gerekirse eleyin.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Span("Eksik Veri Haritası", className="slide-chip"),
+                html.Span("Tip Dağılımı", className="slide-chip"),
+                html.Span("Otomatik Dönüşüm", className="slide-chip"),
+            ], className="slide-chips"),
+        ], className="slide-content"),
+
+        # Slide 3 — Target & IV
+        html.Div([
+            html.H4("Target & IV Analizi", className="slide-title"),
+            html.P(
+                "Target değişkeninin dağılımını inceleyin. "
+                "Her bağımsız değişkenin Information Value (IV) skorunu görün — "
+                "değişken seçiminin ilk adımı. Düşük IV'li değişkenleri "
+                "eşik değeriyle otomatik eleyin.",
+                className="slide-text",
+            ),
+            html.Div("IV > 0.02 → Zayıf  |  IV > 0.1 → Orta  |  IV > 0.3 → Güçlü",
+                      className="slide-highlight"),
+        ], className="slide-content"),
+
+        # Slide 4 — Deep Dive & WoE
+        html.Div([
+            html.H4("Değişken Analizi & WoE", className="slide-title"),
+            html.P(
+                "Her değişkeni tek tek inceleyin: dağılım, kutu grafik, "
+                "bad rate eğrisi ve WoE (Weight of Evidence) grafikleri. "
+                "Binning detaylarını görün, outlier tespiti yapın "
+                "ve değişken bazında karar verin.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Span("Histogram", className="slide-chip"),
+                html.Span("WoE Grafiği", className="slide-chip"),
+                html.Span("Bad Rate", className="slide-chip"),
+                html.Span("Outlier Tespiti", className="slide-chip"),
+            ], className="slide-chips"),
+        ], className="slide-content"),
+
+        # Slide 5 — İstatistiksel Testler
+        html.Div([
+            html.H4("İstatistiksel Testler", className="slide-title"),
+            html.P(
+                "Korelasyon matrisi, Chi-kare bağımsızlık testi, "
+                "ANOVA (grup farklılığı), KS testi (dağılım karşılaştırma) "
+                "ve VIF (çoklu doğrusal bağımlılık) analizlerini tek tıkla çalıştırın.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Span("Korelasyon", className="slide-chip"),
+                html.Span("Chi²", className="slide-chip"),
+                html.Span("ANOVA", className="slide-chip"),
+                html.Span("KS Testi", className="slide-chip"),
+                html.Span("VIF", className="slide-chip"),
+            ], className="slide-chips"),
+        ], className="slide-content"),
+
+        # Slide 6 — Değişken Özeti
+        html.Div([
+            html.H4("Değişken Özeti — Tek Bakışta Karar", className="slide-title"),
+            html.P(
+                "Tüm değişkenlerin IV, eksiklik, korelasyon ve "
+                "istatistiksel test sonuçlarını tek bir tabloda görün. "
+                "Hangi değişkeni modele alacağınıza bu özet tabloyla karar verin.",
+                className="slide-text",
+            ),
+            html.Div("Her değişken için ✓ / ✗ karar kolonu ile hızlı seçim",
+                      className="slide-highlight"),
+        ], className="slide-content"),
+
+        # Slide 7 — Playground
+        html.Div([
+            html.H4("Playground — Hızlı Model", className="slide-title"),
+            html.P(
+                "Seçtiğiniz değişkenlerle hızlıca Logistic Regression, "
+                "LightGBM, XGBoost veya Random Forest modeli kurun. "
+                "Gini, AUC ve katsayıları anında görün. "
+                "Train / Test / OOT performansını karşılaştırın.",
+                className="slide-text",
+            ),
+            html.Div([
+                html.Span("Logistic Reg.", className="slide-chip"),
+                html.Span("LightGBM", className="slide-chip"),
+                html.Span("XGBoost", className="slide-chip"),
+                html.Span("Random Forest", className="slide-chip"),
+            ], className="slide-chips"),
+        ], className="slide-content"),
+    ]
+
+    # Her slayta index attribute ekle, sadece ilki görünür başlasın
+    slide_divs = []
+    for i, slide in enumerate(slides):
+        slide_divs.append(
+            html.Div(
+                slide,
+                className="slideshow-slide" + (" slide-active" if i == 0 else ""),
+                id=f"slide-{i}",
+                style={"display": "block" if i == 0 else "none"},
+            )
+        )
+
+    n_slides = len(slides)
+
+    # Navigasyon noktaları
+    dots = html.Div(
+        [html.Span(
+            "",
+            className="slide-dot" + (" dot-active" if i == 0 else ""),
+            id=f"slide-dot-{i}",
+            n_clicks=0,
+        ) for i in range(n_slides)],
+        className="slide-dots",
+    )
+
+    # Progress bar
+    progress = html.Div(
+        html.Div(className="slide-progress-fill", id="slide-progress-fill",
+                 style={"width": f"{100 / n_slides}%"}),
+        className="slide-progress-bar",
+    )
+
+    return dbc.Modal([
+        dbc.ModalHeader(
+            html.Div([
+                html.Span("Veri Yükleniyor", style={
+                    "fontWeight": "700", "fontSize": "1.05rem", "color": "#c8cdd8",
+                }),
+                html.Span(" — ", style={"color": "#3B4A63"}),
+                html.Span(id="slideshow-elapsed", children="0:00", style={
+                    "fontSize": "0.85rem", "color": "#6b7a99", "fontVariantNumeric": "tabular-nums",
+                }),
+            ]),
+            close_button=False,
+            style={"backgroundColor": "#0e1117", "borderBottom": "1px solid #1e2a3a"},
+        ),
+        dbc.ModalBody([
+            html.Div(slide_divs, className="slideshow-container"),
+            dots,
+            progress,
+        ], style={"backgroundColor": "#0e1117", "padding": "1.5rem 2rem 1rem"}),
+    ],
+        id="modal-slideshow",
+        is_open=False,
+        backdrop="static",
+        keyboard=False,
+        centered=True,
+        size="lg",
+        style={"zIndex": 9998},
+    )
+
+
 def build_layout():
     return html.Div([
         build_navbar(),
@@ -1123,6 +1325,11 @@ def build_layout():
         dcc.Store(id="store-expert-thresholds", storage_type="memory"),
         dcc.Store(id="store-precompute-state", storage_type="memory"),
         dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
+
+        # ── Loading Slideshow ────────────────────────────────────────────────────
+        dcc.Store(id="store-slide-index", data=0),
+        dcc.Interval(id="interval-slideshow", interval=8000, disabled=True, n_intervals=0),
+        _build_slideshow_modal(),
 
         # ── Precompute Modal ──────────────────────────────────────────────────────
         dbc.Modal([

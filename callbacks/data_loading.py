@@ -3,7 +3,7 @@ import base64
 import io
 
 import dash
-from dash import html, Input, Output, State
+from dash import html, dcc, Input, Output, State, clientside_callback, ALL, MATCH
 import dash_bootstrap_components as dbc
 import pandas as pd
 
@@ -11,6 +11,8 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from data.loader import get_data_from_sql, get_data_from_sql_multi, get_config_defaults
 from utils.helpers import coerce_numeric_columns
+
+_N_SLIDES = 8  # layout'taki slayt sayısı
 
 
 # ── Callback: SQL bağlantı alanlarını config.toml'dan doldur ─────────────────
@@ -352,3 +354,130 @@ def _warn(msg):
 
 def _err(msg):
     return dbc.Alert(msg, color="danger", style=_ALERT_STYLE)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#   LOADING SLIDESHOW — modal aç/kapat + slayt navigasyonu
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Yükleme başlayınca modalı aç ─────────────────────────────────────────────
+@app.callback(
+    Output("modal-slideshow",    "is_open", allow_duplicate=True),
+    Output("interval-slideshow", "disabled", allow_duplicate=True),
+    Output("store-slide-index",  "data", allow_duplicate=True),
+    Output("interval-slideshow", "n_intervals", allow_duplicate=True),
+    Input("btn-load",     "n_clicks"),
+    Input("btn-load-csv", "n_clicks"),
+    prevent_initial_call=True,
+)
+def open_slideshow_on_load(*_):
+    return True, False, 0, 0  # open modal, enable interval, reset slide
+
+
+# ── Veri yüklenince modalı kapat ─────────────────────────────────────────────
+@app.callback(
+    Output("modal-slideshow",    "is_open"),
+    Output("interval-slideshow", "disabled"),
+    Input("store-key", "data"),
+    prevent_initial_call=True,
+)
+def close_slideshow_on_data(key):
+    if key:
+        return False, True  # close modal, disable interval
+    return dash.no_update, dash.no_update
+
+
+# ── Interval ile otomatik slayt ilerleme ─────────────────────────────────────
+app.clientside_callback(
+    f"""
+    function(n_intervals, current) {{
+        if (n_intervals === undefined || n_intervals === 0) return current || 0;
+        return ((current || 0) + 1) % {_N_SLIDES};
+    }}
+    """,
+    Output("store-slide-index", "data"),
+    Input("interval-slideshow", "n_intervals"),
+    State("store-slide-index", "data"),
+    prevent_initial_call=True,
+)
+
+
+# ── Dot tıklama → slayt değiştir + interval sıfırla ─────────────────────────
+_dot_inputs = ", ".join(
+    f'{{"component_id": "slide-dot-{i}", "property": "n_clicks"}}'
+    for i in range(_N_SLIDES)
+)
+app.clientside_callback(
+    f"""
+    function({", ".join(f"d{i}" for i in range(_N_SLIDES))}) {{
+        var ctx = dash_clientside.callback_context;
+        if (!ctx || !ctx.triggered || ctx.triggered.length === 0) {{
+            return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+        }}
+        var prop_id = ctx.triggered[0].prop_id;
+        for (var i = 0; i < {_N_SLIDES}; i++) {{
+            if (prop_id === "slide-dot-" + i + ".n_clicks") {{
+                return [i, 0];
+            }}
+        }}
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+    }}
+    """,
+    Output("store-slide-index", "data", allow_duplicate=True),
+    Output("interval-slideshow", "n_intervals", allow_duplicate=True),
+    [Input(f"slide-dot-{i}", "n_clicks") for i in range(_N_SLIDES)],
+    prevent_initial_call=True,
+)
+
+
+# ── Slayt index değişince görünürlüğü, dots ve progress güncelle ─────────────
+_slide_outputs = [Output(f"slide-{i}", "style") for i in range(_N_SLIDES)]
+_dot_outputs = [Output(f"slide-dot-{i}", "className") for i in range(_N_SLIDES)]
+
+app.clientside_callback(
+    f"""
+    function(idx) {{
+        var slides = [];
+        var dots = [];
+        for (var i = 0; i < {_N_SLIDES}; i++) {{
+            slides.push(i === idx ? {{"display": "block"}} : {{"display": "none"}});
+            dots.push(i === idx ? "slide-dot dot-active" : "slide-dot");
+        }}
+        var pct = ((idx + 1) / {_N_SLIDES}) * 100;
+        var progressStyle = {{"width": pct + "%"}};
+        return slides.concat(dots).concat([progressStyle]);
+    }}
+    """,
+    _slide_outputs + _dot_outputs + [Output("slide-progress-fill", "style")],
+    Input("store-slide-index", "data"),
+    prevent_initial_call=True,
+)
+
+
+# ── Elapsed time sayacı (her saniye güncelle) ────────────────────────────────
+app.clientside_callback(
+    """
+    function(is_open) {
+        if (!is_open) {
+            if (window._slideshowTimer) {
+                clearInterval(window._slideshowTimer);
+                window._slideshowTimer = null;
+            }
+            return "";
+        }
+        var start = Date.now();
+        var el = document.getElementById("slideshow-elapsed");
+        if (window._slideshowTimer) clearInterval(window._slideshowTimer);
+        window._slideshowTimer = setInterval(function() {
+            var diff = Math.floor((Date.now() - start) / 1000);
+            var m = Math.floor(diff / 60);
+            var s = diff % 60;
+            if (el) el.textContent = m + ":" + (s < 10 ? "0" : "") + s;
+        }, 1000);
+        return "0:00";
+    }
+    """,
+    Output("slideshow-elapsed", "children"),
+    Input("modal-slideshow", "is_open"),
+    prevent_initial_call=True,
+)

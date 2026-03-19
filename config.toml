@@ -1,4 +1,4 @@
 [database]
-server   = ""
-database = ""
+server   = "IRPHAN"
+database = "MASTER"
 driver   = "ODBC Driver 17 for SQL Server"
