@@ -265,23 +265,29 @@ body {
 }
 
 /* ── dbc.Select (native <select>) ──────────────────────────────────────── */
-.dark-select {
+.dark-select,
+.form-select {
     background-color: var(--bg-elevated) !important;
     border-color: var(--border-default) !important;
     color: var(--text-primary) !important;
     font-size: 0.83rem !important;
     border-radius: var(--radius-sm) !important;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    color-scheme: dark;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%236B7A99' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
 }
-select.dark-select {
+select.dark-select,
+select.form-select {
     height: 36px !important;
 }
-.dark-select:focus {
+.dark-select:focus,
+.form-select:focus {
     border-color: var(--accent-blue) !important;
     box-shadow: 0 0 0 3px var(--accent-blue-glow), var(--shadow-glow-blue) !important;
     background-color: var(--bg-elevated) !important;
 }
-.dark-select option {
+.dark-select option,
+.form-select option {
     background-color: var(--bg-elevated);
     color: var(--text-primary);
 }
@@ -1154,6 +1160,49 @@ select.dark-select {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   JOIN TYPE TOGGLE (LEFT / INNER radio)
+   ══════════════════════════════════════════════════════════════════════════ */
+.join-type-toggle {
+    display: flex !important;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+}
+.join-type-toggle .form-check {
+    margin: 0;
+    padding: 0;
+}
+.join-type-toggle .form-check-input {
+    display: none;
+}
+.join-type-toggle .form-check-label {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.join-type-toggle .form-check:first-child .form-check-label {
+    border-radius: 4px 0 0 4px;
+    border-right: none;
+}
+.join-type-toggle .form-check:last-child .form-check-label {
+    border-radius: 0 4px 4px 0;
+}
+.join-type-toggle .form-check-input:checked + .form-check-label {
+    background: rgba(79, 142, 247, 0.15);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    LOADING SLIDESHOW
    ══════════════════════════════════════════════════════════════════════════ */
 .slideshow-container {
@@ -1325,4 +1374,31 @@ select.dark-select {
     background-color: transparent !important;
     background: transparent !important;
     color: #E8EAF0 !important;
+}
+
+/* ── Accordion (Sonuç sekmesi) ─────────────────────────────────────────── */
+.accordion-item {
+    background-color: var(--bg-secondary) !important;
+    border: 1px solid var(--border-subtle) !important;
+}
+.accordion-button {
+    background-color: var(--bg-surface) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600;
+    font-size: 0.88rem;
+    padding: 0.65rem 1rem;
+    box-shadow: none !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+}
+.accordion-button::after {
+    filter: invert(0.7);
+}
+.accordion-button.collapsed {
+    color: var(--text-secondary) !important;
+    background-color: var(--bg-secondary) !important;
+    border-bottom: none !important;
+}
+.accordion-body {
+    background-color: var(--bg-secondary) !important;
+    padding: 1rem;
 }

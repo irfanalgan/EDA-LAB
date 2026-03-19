@@ -41,5 +41,8 @@ desktop.ini
 .ipynb_checkpoints/
 *.ipynb
 
+# Kayıtlı profiller (kullanıcıya özel, büyük dosyalar)
+profiles/
+
 # Profiling çıktıları
 *.html

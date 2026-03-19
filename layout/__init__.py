@@ -214,6 +214,31 @@ def _build_help_tab() -> "html.Div":
 def build_sidebar():
     return html.Div([
 
+        # ── Bölüm 0: Kayıtlı Profil ─────────────────────────────────────────
+        html.P("Kayıtlı Profil", className="sidebar-section-title"),
+        dbc.Row([
+            dbc.Col(
+                dcc.Dropdown(
+                    id="dd-profile",
+                    options=[],
+                    value=None,
+                    placeholder="Profil seçin…",
+                    searchable=False,
+                    className="dark-dd",
+                    style={"fontSize": "0.78rem"},
+                ),
+                width=9, style={"paddingRight": "4px"},
+            ),
+            dbc.Col(
+                dbc.Button("Yükle", id="btn-profile-load", color="primary",
+                           size="sm", style={"width": "100%", "fontSize": "0.78rem",
+                                             "height": "36px", "padding": "0"}),
+                width=3, style={"paddingLeft": "4px", "display": "flex", "alignItems": "stretch"},
+            ),
+        ], className="g-0 mb-1"),
+        html.Div(id="profile-status", style={"fontSize": "0.75rem", "marginBottom": "0.5rem"}),
+        html.Hr(className="sidebar-divider"),
+
         # ── Bölüm 1: Bağlantı ────────────────────────────────────────────────
         html.P("Veri Kaynağı", className="sidebar-section-title"),
         dbc.RadioItems(
@@ -281,6 +306,13 @@ def build_sidebar():
                     dbc.Input(id="input-table-2", type="text", placeholder="dbo.TABLO2",
                               className="form-control",
                               style={"fontSize": "0.82rem"}),
+                    dbc.RadioItems(
+                        id="radio-sql-join-2",
+                        options=[{"label": "LEFT", "value": "left"},
+                                 {"label": "INNER", "value": "inner"}],
+                        value="left", inline=True,
+                        className="join-type-toggle",
+                    ),
                     dbc.Button("×", id="btn-remove-sql-2", color="link",
                                style={"color": "#ef4444", "fontSize": "1rem",
                                       "padding": "0 0.5rem"}),
@@ -296,6 +328,13 @@ def build_sidebar():
                     dbc.Input(id="input-table-3", type="text", placeholder="dbo.TABLO3",
                               className="form-control",
                               style={"fontSize": "0.82rem"}),
+                    dbc.RadioItems(
+                        id="radio-sql-join-3",
+                        options=[{"label": "LEFT", "value": "left"},
+                                 {"label": "INNER", "value": "inner"}],
+                        value="left", inline=True,
+                        className="join-type-toggle",
+                    ),
                     dbc.Button("×", id="btn-remove-sql-3", color="link",
                                style={"color": "#ef4444", "fontSize": "1rem",
                                       "padding": "0 0.5rem"}),
@@ -371,7 +410,14 @@ def build_sidebar():
                 dbc.Row([
                     dbc.Col(html.Div(id="csv-filename-display-2",
                                     style={"color": "#a78bfa", "fontSize": "0.72rem",
-                                           "fontStyle": "italic"}), width=10),
+                                           "fontStyle": "italic"}), width=6),
+                    dbc.Col(dbc.RadioItems(
+                        id="radio-csv-join-2",
+                        options=[{"label": "LEFT", "value": "left"},
+                                 {"label": "INNER", "value": "inner"}],
+                        value="left", inline=True,
+                        className="join-type-toggle",
+                    ), width=4),
                     dbc.Col(dbc.Button("×", id="btn-remove-csv-2", color="link",
                                        style={"color": "#ef4444", "fontSize": "1rem",
                                               "padding": "0"}), width=2),
@@ -401,7 +447,14 @@ def build_sidebar():
                 dbc.Row([
                     dbc.Col(html.Div(id="csv-filename-display-3",
                                     style={"color": "#a78bfa", "fontSize": "0.72rem",
-                                           "fontStyle": "italic"}), width=10),
+                                           "fontStyle": "italic"}), width=6),
+                    dbc.Col(dbc.RadioItems(
+                        id="radio-csv-join-3",
+                        options=[{"label": "LEFT", "value": "left"},
+                                 {"label": "INNER", "value": "inner"}],
+                        value="left", inline=True,
+                        className="join-type-toggle",
+                    ), width=4),
                     dbc.Col(dbc.Button("×", id="btn-remove-csv-3", color="link",
                                        style={"color": "#ef4444", "fontSize": "1rem",
                                               "padding": "0"}), width=2),
@@ -521,7 +574,25 @@ def build_sidebar():
                     value=None,
                     placeholder="Kolon ara…",
                     searchable=True,
-                    className="dark-dd mb-3",
+                    className="dark-dd mb-1",
+                ),
+
+                # Segment değer seçimi — segment kolonu seçilince görünür
+                dbc.Collapse(
+                    html.Div([
+                        dbc.Label(id="segment-val-label", className="form-label"),
+                        dcc.Dropdown(
+                            id="dd-segment-val",
+                            options=[],
+                            value=["Tümü"],
+                            multi=True,
+                            searchable=False,
+                            placeholder="Segment seçin…",
+                            className="dark-dd mb-3",
+                        ),
+                    ]),
+                    id="collapse-segment",
+                    is_open=False,
                 ),
 
                 dbc.Button(
@@ -536,24 +607,78 @@ def build_sidebar():
             is_open=False,
         ),
 
-        # ── Bölüm 3: Aktif Segment Filtresi ──────────────────────────────────
+        # ── Bölüm 4: Profil Kaydet / Sil ────────────────────────────────────
         dbc.Collapse(
             html.Div([
                 html.Hr(className="sidebar-divider"),
-                html.P("Segment Filtresi", className="sidebar-section-title"),
-                dbc.Label(id="segment-val-label", className="form-label"),
-                dcc.Dropdown(
-                    id="dd-segment-val",
-                    options=[],
-                    value=["Tümü"],
-                    multi=True,
-                    placeholder="Segment seçin…",
-                    className="dark-select",
-                ),
-                html.Div(id="segment-badge-area", style={"marginTop": "0.5rem"}),
+                dbc.Row([
+                    dbc.Col(
+                        dbc.Button("Profil Kaydet", id="btn-profile-save", color="success",
+                                   size="sm", outline=True,
+                                   style={"width": "100%", "fontSize": "0.72rem"}),
+                        width=6, style={"paddingRight": "4px"},
+                    ),
+                    dbc.Col(
+                        dbc.Button("Profil Sil", id="btn-profile-delete", color="danger",
+                                   size="sm", outline=True,
+                                   style={"width": "100%", "fontSize": "0.72rem"}),
+                        width=6, style={"paddingLeft": "4px"},
+                    ),
+                ], className="g-0"),
             ]),
-            id="collapse-segment",
+            id="collapse-profile-actions",
             is_open=False,
+        ),
+
+        # ── Profil Kaydet Modal ──────────────────────────────────────────────
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Profil Kaydet",
+                                           style={"fontSize": "0.95rem"})),
+            dbc.ModalBody([
+                dbc.Label("Profil Adı", className="form-label"),
+                dbc.Input(id="input-profile-name", type="text",
+                          placeholder="ör. İsim_segment",
+                          className="form-control",
+                          style={"fontSize": "0.82rem"}),
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Kaydet", id="btn-profile-save-confirm",
+                           color="success", size="sm"),
+            ),
+        ], id="modal-profile-save", is_open=False, centered=True),
+
+        # ── Profil Sil Modal ──────────────────────────────────────────────────
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Profil Sil",
+                                           style={"fontSize": "0.95rem"})),
+            dbc.ModalBody([
+                dbc.Label("Silinecek Profil", className="form-label"),
+                dcc.Dropdown(
+                    id="dd-profile-delete",
+                    options=[],
+                    value=None,
+                    placeholder="Profil seçin…",
+                    searchable=False,
+                    className="dark-dd",
+                    style={"fontSize": "0.78rem"},
+                ),
+                html.Div(id="delete-confirm-area", style={"marginTop": "0.75rem"}),
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Evet, Sil", id="btn-profile-delete-confirm",
+                           color="danger", size="sm", style={"display": "none"}),
+            ),
+        ], id="modal-profile-delete", is_open=False, centered=True),
+
+        # ── Profil Kaydet Başarı Toast ───────────────────────────────────────
+        dbc.Toast(
+            id="toast-profile-saved",
+            header="Profil Kaydedildi",
+            is_open=False,
+            duration=4000,
+            icon="success",
+            style={"position": "fixed", "top": 20, "right": 20, "zIndex": 9999,
+                   "minWidth": "280px"},
         ),
 
     ], id="sidebar")
@@ -591,7 +716,7 @@ def build_main():
         html.Div(id="metrics-row", style={"marginBottom": "1.5rem"}),
         dbc.Tabs([
             dbc.Tab(dcc.Loading(html.Div(id="data-preview"),   type="dot", color="#4F8EF7", delay_show=200), label="Önizleme",  tab_id="tab-preview",   className="tab-content-area"),
-            dbc.Tab(dcc.Loading(html.Div(id="tab-profiling"), type="dot", color="#4F8EF7", delay_show=200), label="Profiling", tab_id="tab-profiling", className="tab-content-area"),
+            dbc.Tab(dcc.Loading(html.Div(id="tab-profiling"), type="dot", color="#4F8EF7", delay_show=200), label="Describe", tab_id="tab-profiling", className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-target-iv"),  type="dot", color="#4F8EF7", delay_show=300), label="Target & IV",  tab_id="tab-target-iv",  className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-outlier"),   type="dot", color="#4F8EF7", delay_show=300), label="Outlier Analizi", tab_id="tab-outlier",   className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-deep-dive"), type="dot", color="#4F8EF7", delay_show=300), label="Değişken Analizi", tab_id="tab-deep-dive", className="tab-content-area"),
@@ -885,7 +1010,7 @@ def build_main():
                 dcc.Loading(html.Div(id="div-var-summary"), type="dot", color="#4F8EF7", delay_show=300),
             ]), label="Değişken Özeti", tab_id="tab-var-summary", className="tab-content-area"),
             dbc.Tab(html.Div([
-                _tab_info("Playground", "Grafik Oluşturucu · Hızlı Model · SHAP",
+                _tab_info("Modelleme", "Grafik Oluşturucu · Hızlı Model · SHAP",
                           "İki bölümden oluşur: Grafik Oluşturucu ile serbest keşif yapabilir, "
                           "Hızlı Model ile LR / LightGBM / XGBoost / Random Forest modellerini "
                           "hızlıca eğitip AUC, Gini, KS metriklerini ve SHAP beeswarm grafiğini "
@@ -1024,6 +1149,68 @@ def build_main():
                 html.Div(dbc.Checklist(id="chk-use-woe", options=[], value=[]),
                          style={"display": "none"}),
 
+                # ── Kayıtlı Modeller ──────────────────────────────────────
+                dbc.Collapse(
+                    html.Div([
+                        dbc.Label("Kayıtlı Modeller", className="form-label"),
+                        dcc.Dropdown(
+                            id="dd-saved-models",
+                            options=[],
+                            value=None,
+                            placeholder="Model seçin…",
+                            searchable=False,
+                            className="dark-dd mb-2",
+                        ),
+                        html.Div([
+                            dbc.Button("Yükle", id="btn-model-load",
+                                       color="primary", size="sm",
+                                       style={"fontSize": "0.75rem"}),
+                            dbc.Button("Kaydet", id="btn-model-save",
+                                       color="success", size="sm", className="ms-1",
+                                       style={"fontSize": "0.75rem"}),
+                            dbc.Button("Sil", id="btn-model-delete",
+                                       color="danger", size="sm", outline=True,
+                                       className="ms-1",
+                                       style={"fontSize": "0.75rem"}),
+                        ], className="d-flex mb-2"),
+                        html.Div(id="model-save-status"),
+                        dbc.Button("Evet, Sil", id="btn-model-delete-confirm",
+                                   color="danger", size="sm",
+                                   style={"display": "none", "fontSize": "0.75rem"},
+                                   className="mt-1"),
+                    ], style={"marginBottom": "0.75rem",
+                              "padding": "0.5rem 0.6rem",
+                              "backgroundColor": "#0d1520",
+                              "borderRadius": "6px",
+                              "border": "1px solid #1e2a3a"}),
+                    id="collapse-model-actions",
+                    is_open=False,
+                ),
+
+                # Üstüne kaydetme onay modalı
+                dbc.Modal([
+                    dbc.ModalHeader(
+                        html.Span("Model Üstüne Kaydet", style={
+                            "fontWeight": "700", "color": "#c8cdd8"}),
+                        close_button=True,
+                        style={"backgroundColor": "#111827",
+                               "borderBottom": "1px solid #1e2a3a"}),
+                    dbc.ModalBody(
+                        html.Div(id="modal-overwrite-body",
+                                 style={"color": "#d1d5db", "fontSize": "0.85rem"}),
+                        style={"backgroundColor": "#111827"}),
+                    dbc.ModalFooter([
+                        dbc.Button("Evet, Üstüne Kaydet", id="btn-model-overwrite-confirm",
+                                   color="warning", size="sm",
+                                   style={"fontSize": "0.78rem"}),
+                        dbc.Button("Vazgeç", id="btn-model-overwrite-cancel",
+                                   color="secondary", size="sm", outline=True,
+                                   style={"fontSize": "0.78rem"}),
+                    ], style={"backgroundColor": "#111827",
+                              "borderTop": "1px solid #1e2a3a"}),
+                ], id="modal-model-overwrite", is_open=False, centered=True,
+                   backdrop="static", style={"--bs-modal-bg": "#111827"}),
+
                 # Model parametreleri — satır 1: target + test oranı
                 dbc.Row([
                     dbc.Col([
@@ -1093,8 +1280,15 @@ def build_main():
                             type="dot", color="#4F8EF7", delay_show=300),
 
                 dcc.Store(id="store-pg-model-vars", storage_type="memory"),
-            ]), label="Playground", tab_id="tab-playground",
+            ]), label="Modelleme", tab_id="tab-playground",
                className="tab-content-area"),
+
+            # ── Sonuç (Final Rapor) ────────────────────────────────────────
+            dbc.Tab(
+                dcc.Loading(html.Div(id="tab-results"), type="dot",
+                            color="#4F8EF7", delay_show=300),
+                label="Sonuç", tab_id="tab-results",
+                className="tab-content-area"),
         ], id="main-tabs", active_tab="tab-preview", className="main-tabs"),
     ], id="main-content")
 
@@ -1226,7 +1420,7 @@ def _build_slideshow_modal():
 
         # Slide 7 — Playground
         html.Div([
-            html.H4("Playground — Hızlı Model", className="slide-title"),
+            html.H4("Modelleme — Hızlı Model", className="slide-title"),
             html.P(
                 "Seçtiğiniz değişkenlerle hızlıca Logistic Regression, "
                 "LightGBM, XGBoost veya Random Forest modeli kurun. "
@@ -1278,14 +1472,21 @@ def _build_slideshow_modal():
     return dbc.Modal([
         dbc.ModalHeader(
             html.Div([
-                html.Span("Veri Yükleniyor", style={
-                    "fontWeight": "700", "fontSize": "1.05rem", "color": "#c8cdd8",
-                }),
-                html.Span(" — ", style={"color": "#3B4A63"}),
-                html.Span(id="slideshow-elapsed", children="0:00", style={
-                    "fontSize": "0.85rem", "color": "#6b7a99", "fontVariantNumeric": "tabular-nums",
-                }),
-            ]),
+                html.Div([
+                    html.Span("Veri Yükleniyor", style={
+                        "fontWeight": "700", "fontSize": "1.05rem", "color": "#c8cdd8",
+                    }),
+                    html.Span(" — ", style={"color": "#3B4A63"}),
+                    html.Span(id="slideshow-elapsed", children="0:00", style={
+                        "fontSize": "0.85rem", "color": "#6b7a99", "fontVariantNumeric": "tabular-nums",
+                    }),
+                ], style={"flex": "1"}),
+                dbc.Button("✕", id="btn-slideshow-close", size="sm", outline=True,
+                           color="secondary",
+                           style={"padding": "0.15rem 0.5rem", "fontSize": "0.85rem",
+                                  "lineHeight": "1", "borderColor": "#3B4A63",
+                                  "color": "#6b7a99"}),
+            ], style={"display": "flex", "alignItems": "center", "width": "100%"}),
             close_button=False,
             style={"backgroundColor": "#0e1117", "borderBottom": "1px solid #1e2a3a"},
         ),
@@ -1324,6 +1525,10 @@ def build_layout():
         dcc.Store(id="store-expert-exclude", storage_type="memory"),
         dcc.Store(id="store-expert-thresholds", storage_type="memory"),
         dcc.Store(id="store-precompute-state", storage_type="memory"),
+        dcc.Store(id="store-model-signal", storage_type="memory"),
+        dcc.Store(id="store-profile-loaded", storage_type="memory"),
+        dcc.Store(id="store-pending-note", storage_type="memory"),
+        dcc.Store(id="store-loaded-model-index", storage_type="memory"),
         dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
 
         # ── Loading Slideshow ────────────────────────────────────────────────────

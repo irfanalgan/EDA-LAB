@@ -22,24 +22,21 @@ from layout import (
     Output("dd-segment-val", "options"),
     Output("dd-segment-val", "value"),
     Output("segment-val-label", "children"),
-    Input("store-config", "data"),
     Input("dd-segment-col", "value"),
     State("store-key", "data"),
 )
-def open_segment_filter(config, seg_col_input, key):
-    # Kolon: onaylanmış config'den veya seçili dropdown'dan
-    seg_col = (config or {}).get("segment_col") or (seg_col_input or None)
+def open_segment_filter(seg_col, key):
     if not seg_col:
-        return False, [], [], "Segment Değeri"
+        return False, [], ["Tümü"], "Segment Değeri"
     df = _get_df(key)
     if df is None or seg_col not in df.columns:
-        return False, [], [], "Segment Değeri"
+        return False, [], ["Tümü"], "Segment Değeri"
 
     unique_vals = sorted(df[seg_col].dropna().astype(str).unique().tolist())
     options = [{"label": "Tümü", "value": "Tümü"}] + [
         {"label": v, "value": v} for v in unique_vals
     ]
-    label = f"{seg_col}  ({len(unique_vals)} değer)"
+    label = f"Segment Değeri  ({len(unique_vals)} değer)"
     return True, options, ["Tümü"], label
 
 
@@ -47,10 +44,8 @@ def open_segment_filter(config, seg_col_input, key):
 @app.callback(
     Output("config-banner", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
 )
-def update_config_banner(config, seg_val, seg_col_input):
+def update_config_banner(config):
     if not config or not config.get("target_col"):
         return html.Div()
 
@@ -64,13 +59,15 @@ def update_config_banner(config, seg_val, seg_col_input):
     if config.get("date_col"):
         items.append(badge("TARİH", config["date_col"], "#10b981"))
 
-    seg_col = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
     if seg_col:
-        vals = seg_val if isinstance(seg_val, list) else [seg_val] if seg_val else []
-        if not vals or "Tümü" in vals:
+        if not seg_val:
             seg_display = seg_col
+        elif isinstance(seg_val, list):
+            seg_display = ", ".join(str(v) for v in seg_val)
         else:
-            seg_display = ", ".join(str(v) for v in vals)
+            seg_display = str(seg_val)
         items.append(badge("SEGMENT", seg_display, "#f59e0b"))
 
     return html.Div(items, className="config-banner")
@@ -80,11 +77,9 @@ def update_config_banner(config, seg_val, seg_col_input):
 @app.callback(
     Output("metrics-row", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def update_metrics(config, seg_val, key, seg_col_input):
+def update_metrics(config, key):
     df_orig = _get_df(key)
 
     if df_orig is None:
@@ -98,7 +93,8 @@ def update_metrics(config, seg_val, key, seg_col_input):
             className="alert-info-custom",
         )
 
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
+    seg_col   = config.get("segment_col")
+    seg_val   = config.get("segment_val")
     date_col  = config.get("date_col")
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     active_rows = len(df_active)
@@ -412,19 +408,18 @@ def _build_quality_section(key: str, df: pd.DataFrame) -> html.Div:
 @app.callback(
     Output("data-preview", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     Input("store-expert-exclude", "data"),
     Input("store-expert-thresholds", "data"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def update_preview(config, seg_val, expert_excluded, thresholds, key, seg_col_input):
+def update_preview(config, expert_excluded, thresholds, key):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
     expert_excluded = expert_excluded or []
 
-    seg_col = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     preview = df_active.head(50)
 
@@ -618,22 +613,6 @@ def add_expert_exclusions(n_clicks, selected, current):
 def clear_expert_exclusions(_):
     return []
 
-
-# ── Callback: Segment Badge ────────────────────────────────────────────────────
-@app.callback(
-    Output("segment-badge-area", "children"),
-    Input("dd-segment-val", "value"),
-    State("store-config", "data"),
-)
-def update_segment_badge(val, config):
-    vals = val if isinstance(val, list) else [val] if val else []
-    if config and config.get("segment_col") and vals and "Tümü" not in vals:
-        display = ", ".join(str(v) for v in vals)
-        return html.Span(
-            f"{config['segment_col']}: {display}",
-            className="segment-badge",
-        )
-    return html.Div()
 
 
 # ── Callback: Sidebar Toggle ──────────────────────────────────────────────────

@@ -119,17 +119,16 @@ def toggle_outlier_params(method):
     State("out-var-sel",  "value"),
     State("store-key",    "data"),
     State("store-config", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
 def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
-                         key, config, seg_val, seg_col_input):
+                         key, config):
     df_orig = _get_df(key)
     if df_orig is None or not config:
         return html.Div("Veri yok.", className="alert-info-custom")
 
-    seg_col = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
     df = apply_segment_filter(df_orig, seg_col, seg_val).copy()
 
     cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),

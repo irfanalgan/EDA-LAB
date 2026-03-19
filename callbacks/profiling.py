@@ -12,16 +12,15 @@ from modules.profiling import compute_profile, profile_summary
 @app.callback(
     Output("tab-profiling", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def update_profiling(config, seg_val, key, seg_col_input):
+def update_profiling(config, key):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
 
-    seg_col  = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
     profile = compute_profile(df_active)   # local kopya üzerinde çalışır
@@ -110,12 +109,12 @@ def update_profiling(config, seg_val, key, seg_col_input):
     ])
 
     return html.Div([
-        _tab_info("Profiling", "Kolon Kalite Analizi",
+        _tab_info("Describe", "Kolon Kalite Analizi",
                   "Her değişken için eksik oran, kardinalite, veri tipi ve ön eleme sonucunu gösterir. "
                   "Kırmızı satırlar eksik > %50, sarı eksik %5–50, yeşil tam dolu. Eksik veya sabit "
                   "değişkenler otomatik olarak ön elemeden geçer.",
                   "#a78bfa"),
-        html.P("Veri Profiling", className="section-title"),
+        html.P("Describe", className="section-title"),
         summary_row,
         profile_table,
         html.P(

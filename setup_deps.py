@@ -9,6 +9,7 @@ Kullanım:
 
 Mantık:
   - Her paket için önce import dener → başarılıysa atlar (hızlı).
+  - Minimum versiyon belirtilmişse kurulu versiyonu kontrol eder.
   - Başarısızsa pip_prefix.txt'teki komuta paket adını ekleyerek yükler.
 """
 
@@ -17,20 +18,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ── Paket listesi: (import_adı, pip_adı) ─────────────────────────────────────
+# ── Paket listesi: (import_adı, pip_adı, minimum_versiyon | None) ────────────
 PACKAGES = [
-    ("dash",                    "dash>=2.14"),
-    ("dash_bootstrap_components","dash-bootstrap-components>=1.5"),
-    ("pandas",                  "pandas>=2.0"),
-    ("numpy",                   "numpy"),
-    ("plotly",                  "plotly>=5.18"),
-    ("scipy",                   "scipy>=1.11"),
-    ("sklearn",                 "scikit-learn>=1.3"),
-    ("lightgbm",                "lightgbm>=4.0"),
-    ("xgboost",                 "xgboost>=2.0"),
-    ("pyodbc",                  "pyodbc"),
-    ("ydata_profiling",         "ydata-profiling"),
-    ("shap",                    "shap"),
+    ("dash",                    "dash>=4.0",                        "4.0"),
+    ("dash_bootstrap_components","dash-bootstrap-components>=1.5",  None),
+    ("pandas",                  "pandas>=2.0",                      None),
+    ("numpy",                   "numpy",                            None),
+    ("plotly",                  "plotly>=5.18",                     None),
+    ("scipy",                   "scipy>=1.11",                      None),
+    ("sklearn",                 "scikit-learn>=1.3",                None),
+    ("lightgbm",                "lightgbm>=4.0",                    None),
+    ("xgboost",                 "xgboost>=2.0",                     None),
+    ("pyodbc",                  "pyodbc",                           None),
+    ("ydata_profiling",         "ydata-profiling",                  None),
+    ("shap",                    "shap",                             None),
+    ("pyarrow",                 "pyarrow",                          None),
 ]
 
 # ── Prefix dosyasını oku ──────────────────────────────────────────────────────
@@ -50,15 +52,37 @@ def _get_prefix() -> list[str]:
     return parts  # tam yol verilmişse direkt kullan
 
 
+def _ver_tuple(v: str) -> tuple:
+    """'4.0.1' → (4, 0, 1) — basit versiyon karşılaştırma için."""
+    return tuple(int(x) for x in v.split(".") if x.isdigit())
+
+
+def _check_min_version(import_name: str, min_ver: str) -> bool:
+    """Kurulu paketin versiyonu >= min_ver mi kontrol eder."""
+    try:
+        from importlib.metadata import version as _pkg_ver
+        # import_name ve pip_name farklı olabilir (sklearn → scikit-learn)
+        # Dash için import_name = "dash", metadata name = "dash" → sorunsuz
+        installed = _pkg_ver(import_name)
+        return _ver_tuple(installed) >= _ver_tuple(min_ver)
+    except Exception:
+        return False
+
+
 def ensure_deps(verbose: bool = True) -> bool:
     """
-    Eksik paketleri yükler.
+    Eksik veya sürümü yetersiz paketleri yükler.
     Returns: True → herşey tamam / yüklendi, False → en az bir yükleme başarısız.
     """
     missing = []
-    for import_name, pip_name in PACKAGES:
+    for import_name, pip_name, min_ver in PACKAGES:
         try:
             importlib.import_module(import_name)
+            # Paket var ama versiyon yetersiz mi?
+            if min_ver and not _check_min_version(import_name, min_ver):
+                if verbose:
+                    print(f"[setup_deps] {import_name} kurulu ama >= {min_ver} gerekli — güncelleniyor.")
+                missing.append(pip_name)
         except ImportError:
             missing.append(pip_name)
 
@@ -68,7 +92,7 @@ def ensure_deps(verbose: bool = True) -> bool:
         return True
 
     prefix = _get_prefix()
-    print(f"[setup_deps] {len(missing)} eksik paket bulundu: {', '.join(missing)}")
+    print(f"[setup_deps] {len(missing)} eksik/eski paket bulundu: {', '.join(missing)}")
     print(f"[setup_deps] Prefix: {' '.join(prefix)}")
 
     all_ok = True

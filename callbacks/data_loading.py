@@ -124,11 +124,13 @@ def _read_csv_content(contents, filename, sep):
     return df, filename
 
 
-def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str]]) -> pd.DataFrame:
+def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str]],
+                     join_hows: list | None = None) -> pd.DataFrame:
     """Master + ek DataFrame'leri her tablonun kendi key'i üzerinde birleştirir.
 
     join_keys_per_table[0] → master (left_on)
     join_keys_per_table[i] → i. dosya (right_on)
+    join_hows[i] → i. dosyanın join tipi ("left" / "inner"), index 0 kullanılmaz
     """
     result = dfs[0]
     left_keys = join_keys_per_table[0] if join_keys_per_table else []
@@ -136,16 +138,33 @@ def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str
     if not left_keys:
         return result
 
+    # Master dosyada join key kontrolü
+    missing = [k for k in left_keys if k not in result.columns]
+    if missing:
+        raise KeyError(
+            f"Dosya 1 içinde join key bulunamadı: {missing}. "
+            f"Mevcut kolonlar: {list(result.columns[:20])}"
+        )
+
     for i, df in enumerate(dfs[1:], start=1):
+        how = (join_hows[i] if join_hows and i < len(join_hows) else None) or "left"
         right_keys = join_keys_per_table[i] if i < len(join_keys_per_table) and join_keys_per_table[i] else left_keys
+
+        # Ek dosyada join key kontrolü
+        missing_r = [k for k in right_keys if k not in df.columns]
+        if missing_r:
+            raise KeyError(
+                f"Dosya {i+1} içinde join key bulunamadı: {missing_r}. "
+                f"Mevcut kolonlar: {list(df.columns[:20])}"
+            )
         all_keys = set(left_keys) | set(right_keys)
         drop_cols = [c for c in df.columns if c in result.columns and c not in all_keys]
         if drop_cols:
             df = df.drop(columns=drop_cols)
         if left_keys == right_keys:
-            result = pd.merge(result, df, on=left_keys, how="left")
+            result = pd.merge(result, df, on=left_keys, how=how)
         else:
-            result = pd.merge(result, df, left_on=left_keys, right_on=right_keys, how="left")
+            result = pd.merge(result, df, left_on=left_keys, right_on=right_keys, how=how)
             extra = [rk for lk, rk in zip(left_keys, right_keys) if lk != rk and rk in result.columns]
             if extra:
                 result = result.drop(columns=extra)
@@ -156,6 +175,11 @@ def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str
 @app.callback(
     Output("store-key",   "data",     allow_duplicate=True),
     Output("load-status", "children", allow_duplicate=True),
+    Output("store-model-signal", "data", allow_duplicate=True),
+    Output("store-profile-loaded", "data", allow_duplicate=True),
+    Output("store-loaded-model-index", "data", allow_duplicate=True),
+    Output("pg-model-output", "children", allow_duplicate=True),
+    Output("store-pending-note", "data", allow_duplicate=True),
     Input("btn-load-csv", "n_clicks"),
     State("upload-csv",   "contents"), State("upload-csv",   "filename"),
     State("upload-csv-2", "contents"), State("upload-csv-2", "filename"),
@@ -164,16 +188,20 @@ def _join_dataframes(dfs: list[pd.DataFrame], join_keys_per_table: list[list[str
     State("input-csv-jk-1",      "value"),
     State("input-csv-jk-2",      "value"),
     State("input-csv-jk-3",      "value"),
+    State("radio-csv-join-2",    "value"),
+    State("radio-csv-join-3",    "value"),
     State("store-csv-file-count", "data"),
     prevent_initial_call=True,
 )
 def load_csv(n_clicks,
              c1, fn1, c2, fn2, c3, fn3,
-             sep, jk1_raw, jk2_raw, jk3_raw, file_count):
+             sep, jk1_raw, jk2_raw, jk3_raw, jt2, jt3, file_count):
+    _RESET = (None, None, None, "", None)
     if not c1 or not fn1:
-        return dash.no_update, _warn("Önce bir CSV dosyası seçin.")
+        return dash.no_update, _warn("Önce bir CSV dosyası seçin."), *_RESET
 
     sep = sep or ","
+    join_hows = [None, jt2 or "left", jt3 or "left"]
     jk_per_table = []
     for raw in [jk1_raw, jk2_raw, jk3_raw]:
         keys = [k.strip() for k in (raw or "").split(",") if k.strip()]
@@ -191,7 +219,8 @@ def load_csv(n_clicks,
                 filenames.append(fn)
 
         if len(dfs) > 1 and master_keys:
-            result = _join_dataframes(dfs, jk_per_table[:len(dfs)])
+            result = _join_dataframes(dfs, jk_per_table[:len(dfs)],
+                                      join_hows=join_hows[:len(dfs)])
         else:
             result = dfs[0]
 
@@ -203,16 +232,21 @@ def load_csv(n_clicks,
         files_str = " + ".join(filenames)
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
         join_note = f"  ·  {len(dfs)} dosya birleştirildi" if len(dfs) > 1 else ""
-        return key, _ok(f"{len(result):,} satır  ·  {result.shape[1]} kolon  ·  {files_str}{join_note}{conv_note}")
+        return key, _ok(f"{len(result):,} satır  ·  {result.shape[1]} kolon  ·  {files_str}{join_note}{conv_note}"), *_RESET
 
     except Exception as e:
-        return dash.no_update, _err(f"Okuma hatası: {e}")
+        return dash.no_update, _err(f"Okuma hatası: {e}"), *_RESET
 
 
 # ── Callback: Veriyi Yükle (SQL) ──────────────────────────────────────────────
 @app.callback(
     Output("store-key", "data"),
     Output("load-status", "children"),
+    Output("store-model-signal", "data", allow_duplicate=True),
+    Output("store-profile-loaded", "data", allow_duplicate=True),
+    Output("store-loaded-model-index", "data", allow_duplicate=True),
+    Output("pg-model-output", "children", allow_duplicate=True),
+    Output("store-pending-note", "data", allow_duplicate=True),
     Input("btn-load", "n_clicks"),
     State("input-table-1",        "value"),
     State("input-table-2",        "value"),
@@ -220,6 +254,8 @@ def load_csv(n_clicks,
     State("input-sql-jk-1",      "value"),
     State("input-sql-jk-2",      "value"),
     State("input-sql-jk-3",      "value"),
+    State("radio-sql-join-2",    "value"),
+    State("radio-sql-join-3",    "value"),
     State("store-sql-table-count","data"),
     State("input-sql-server",     "value"),
     State("input-sql-database",   "value"),
@@ -229,13 +265,15 @@ def load_csv(n_clicks,
 )
 def load_data(n_clicks,
               t1, t2, t3,
-              jk1_raw, jk2_raw, jk3_raw,
+              jk1_raw, jk2_raw, jk3_raw, jt2, jt3,
               table_count,
               server, database, driver, top1000_val):
+    _RESET = (None, None, None, "", None)  # model-signal, profile, model-index, pg-output, note
     if not t1 or not t1.strip():
-        return dash.no_update, _warn("Lütfen bir tablo adı girin.")
+        return dash.no_update, _warn("Lütfen bir tablo adı girin."), *_RESET
 
     top_n = 1000 if "top1000" in (top1000_val or []) else None
+    join_hows = [None, jt2 or "left", jt3 or "left"]
 
     tables = [t for t in [t1, t2, t3] if t and t.strip()]
     jk_raws = [jk1_raw, jk2_raw, jk3_raw]
@@ -254,6 +292,7 @@ def load_data(n_clicks,
                 join_keys_per_table=jk_per_table[:len(tables)],
                 server=server, database=database, driver=driver,
                 top_n=top_n,
+                join_hows=join_hows[:len(tables)],
             )
             join_note = f"  ·  {len(tables)} tablo birleştirildi"
         else:
@@ -270,10 +309,10 @@ def load_data(n_clicks,
         _SERVER_STORE[key] = df
         _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
-        return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}{top_note}")
+        return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}{top_note}"), *_RESET
 
     except Exception as e:
-        return dash.no_update, _err(str(e))
+        return dash.no_update, _err(str(e)), *_RESET
 
 
 # ── Callback: Kolon Yapılandırması bölümünü aç, dropdown seçeneklerini doldur ─
@@ -374,16 +413,23 @@ def open_slideshow_on_load(*_):
     return True, False, 0, 0  # open modal, enable interval, reset slide
 
 
-# ── Veri yüklenince modalı kapat ─────────────────────────────────────────────
+# ── Veri yüklenince veya hata olunca modalı kapat ───────────────────────────
 @app.callback(
     Output("modal-slideshow",    "is_open"),
     Output("interval-slideshow", "disabled"),
     Input("store-key", "data"),
+    Input("load-status", "children"),
+    Input("btn-slideshow-close", "n_clicks"),
     prevent_initial_call=True,
 )
-def close_slideshow_on_data(key):
-    if key:
-        return False, True  # close modal, disable interval
+def close_slideshow_on_data(key, status, _close):
+    trigger = dash.callback_context.triggered_id
+    if trigger == "btn-slideshow-close":
+        return False, True
+    if trigger == "store-key" and key:
+        return False, True
+    if trigger == "load-status":
+        return False, True
     return dash.no_update, dash.no_update
 
 

@@ -9,13 +9,14 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 | Sekme | İçerik |
 |-------|--------|
 | **Önizleme** | Ham veri tablosu, uzman değişken eleme |
-| **Profiling** | Kolon bazında eksik %, kardinalite, tip analizi |
+| **Describe** | Kolon bazında eksik %, kardinalite, tip analizi |
 | **Target & IV** | Bad rate dağılımı, IV hesabı, zaman serisi |
 | **Outlier Analizi** | IQR / Z-score aykırı değer tespiti, müşteri bazında outlier sayısı |
 | **Değişken Analizi** | WoE/PSI/bivariate deep dive |
 | **İstatistiksel Testler** | Korelasyon, Chi-Square, ANOVA, KS, VIF |
 | **Değişken Özeti** | IV · Eksik% · PSI · Korelasyon · VIF tek tabloda |
 | **Playground** | Grafik oluşturucu + hızlı model (LR / LightGBM / XGBoost / RF) + SHAP |
+| **Sonuç** | Detaylı model raporu — metrikler, ROC, confusion matrix, SHAP, model özeti (accordion) |
 
 ### Veri Kaynakları
 - **MS SQL Server** — Windows Authentication, `config.toml` üzerinden bağlantı
@@ -39,6 +40,16 @@ Logistic Regression · LightGBM · XGBoost · Random Forest — train/test ayrı
 
 - **Eşik optimizasyonu** — Sabit 0.50 / F1 Maks. / KS Noktası / Özel
 - **SHAP Beeswarm** — Tree modeller için tüm test verisi üzerinde shap.summary_plot ile özellik katkı grafiği
+- **Model Kaydet / Yükle** — Modeller profil içine kaydedilir, parametreleriyle birlikte geri yüklenir
+
+### Sonuç Sekmesi
+Playground'dan bağımsız, detaylı model raporu:
+- **dbc.Accordion** ile kategorize edilmiş bölümler (Metrikler, Model Özeti, ROC, Confusion Matrix, SHAP)
+- **Confusion Matrix** — Train / Test / OOT yan yana heatmap
+- **Model Özeti** — LR: `model.summary()` monospace metin; Tree: feature importance tablosu
+- **Ham / WoE alt sekmeleri** — Her iki model sonucu ayrı ayrı incelenebilir
+- **Profil klasörüne export** — Model Pickle, OPT Pickle ve Excel doğrudan profil klasörüne kaydedilir (browser download yerine)
+- **SQL Push** — Model sonuçlarını SQL Server'a yazma
 
 ### Sistem Hazırlama (Precompute)
 Yapılandırma onaylandıktan sonra bir popup açılır ve IV Ranking, Profiling, Korelasyon gibi ağır hesaplamalar arka planda adım adım yapılır. Her adımın durumu ve süresi görüntülenir. Tamamlandıktan sonra sekmeler açılışta bekleme olmadan çalışır.
@@ -221,7 +232,9 @@ EDA-LAB/
 │   ├── correlation.py      # Korelasyon sekmesi
 │   ├── stat_tests.py       # Chi-Square, ANOVA, KS, VIF
 │   ├── var_summary.py      # Değişken Özeti
-│   └── playground.py       # Grafik + Hızlı Model + SHAP
+│   ├── playground.py       # Grafik + Hızlı Model + SHAP
+│   ├── results.py          # Sonuç sekmesi — detaylı model raporu
+│   └── profile.py          # Profil kaydet/yükle/sil + model kaydet/yükle
 ├── modules/
 │   ├── profiling.py        # Veri profiling
 │   ├── target_analysis.py  # Target & IV hesaplamaları
@@ -246,6 +259,20 @@ EDA-LAB/
 ---
 
 ## Değişiklik Geçmişi
+
+### v1.7
+- **Sonuç Sekmesi** — Playground'dan ayrı, detaylı model raporu: Metrikler, Model Özeti, ROC Eğrisi, Confusion Matrix (Train/Test/OOT yan yana), SHAP Beeswarm; tümü accordion ile aç/kapat
+- **Playground Sadeleştirme** — Playground artık sadece Gini kartları + özet katsayı tablosu gösterir; detaylı grafikler Sonuç sekmesine taşındı
+- **Ham / WoE Alt Sekmeleri** — Sonuç sekmesinde her iki model sonucu ayrı tab'larda incelenebilir
+- **Profil Klasörüne Export** — Model Pickle, OPT Pickle ve Excel artık browser download yerine `profiles/<profil_adı>/` klasörüne kaydedilir
+- **Tab-Aware Pickle** — Ham sekmede raw model, WoE sekmede WoE model pickle'ı oluşturulur; OPT pickle sadece WoE sekmesinde aktif
+- **Model Kaydet / Yükle / Sil** — Modeller profil meta.json'a parametreleriyle birlikte kaydedilir, dropdown ile geri yüklenebilir, silinebilir
+- **SQL Push** — Model sonuçlarını doğrudan SQL Server tablosuna yazma
+- **State Reset** — Veri yüklendiğinde veya yapılandırma değiştiğinde eski model sonuçları, profil bağlantısı ve kayıtlı model paneli otomatik temizlenir
+- **OPT Pickle Bugfix** — Eski 2-tuple WoE cache formatında `_opt_dict` boş geliyordu; `_build_woe_dataset` ile yeniden hesaplanarak düzeltildi
+- **SmLogitWrapper** — statsmodels Logit sonucu modül düzeyinde sarmalanarak pickle uyumlu hale getirildi
+- **Describe Sekmesi** — Profiling sekmesi "Describe" olarak yeniden adlandırıldı
+- **Sticky Navbar** — Sekme navigasyonu sabitlendi, scroll ile kaybolmaz
 
 ### v1.5
 - **Loading Slideshow** — 8 eğitim slaytı (EDA Lab nedir, Veri Yükleme, Önizleme, Target & IV, Deep Dive, İstatistiksel Testler, Değişken Özeti, Playground); otomatik 8-saniye ilerleme; tıklanabilir navigasyon noktaları (●○○○); geçen süre sayacı

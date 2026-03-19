@@ -118,6 +118,12 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     durations = {}
 
+    # Profil yüklenmiş ve cache zaten doluysa → skip
+    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
+    if iv_cache_key in _SERVER_STORE:
+        _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": {}, "done": True}
+        return
+
     # ── Adım 0: Screening ────────────────────────────────────────────────────
     try:
         t0 = time.perf_counter()
@@ -202,6 +208,13 @@ _FOOTER_DONE    = (_BTN_HIDDEN, {"fontSize": "0.85rem", "padding": "0.4rem 1.2re
     Output("precompute-modal-body", "children"),
     Output("btn-precompute-close", "style"),
     Output("btn-precompute-done", "style"),
+    Output("store-model-signal", "data", allow_duplicate=True),
+    Output("pg-model-output", "children", allow_duplicate=True),
+    Output("store-loaded-model-index", "data", allow_duplicate=True),
+    Output("store-pending-note", "data", allow_duplicate=True),
+    Output("store-profile-loaded", "data", allow_duplicate=True),
+    Output("dd-profile", "value", allow_duplicate=True),
+    Output("profile-status", "children", allow_duplicate=True),
     Input("btn-confirm", "n_clicks"),
     State("dd-target-col", "value"),
     State("dd-date-col", "value"),
@@ -215,12 +228,13 @@ _FOOTER_DONE    = (_BTN_HIDDEN, {"fontSize": "0.85rem", "padding": "0.4rem 1.2re
 )
 def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
                    segment_val, train_test_val, test_size_cfg, key):
+    _MODEL_RESET = (None, "", None, None, None, None, "")  # model-signal, pg-output, model-index, note, profile-loaded, dd-profile, profile-status
     no_modal = (dash.no_update,) * 6  # modal, interval, body, close-style, done-style
     if not target_col or target_col == "":
         return (dash.no_update, dbc.Alert(
             "Target kolonu zorunludur.", color="warning",
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
-        ), *no_modal)
+        ), *no_modal, *_MODEL_RESET)
 
     df_orig = _get_df(key)
     config = {
@@ -248,6 +262,10 @@ def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
 
     # segment_val: kullanıcı seçtiyse onu kullan, yoksa None (tüm veri)
     seg_val = segment_val if segment_val and segment_val != ["Tümü"] and "Tümü" not in (segment_val if isinstance(segment_val, list) else [segment_val]) else None
+    config["segment_val"] = seg_val
+
+    # Eski model sonuçlarını temizle
+    _SERVER_STORE.pop(f"{key}_model_results", None)
 
     # Background thread başlat — Dash thread'i bloklamaz
     t = threading.Thread(
@@ -265,6 +283,7 @@ def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
         False,                       # interval hemen başlasın
         _build_modal_body(0, {}),    # adım 0 "çalışıyor" göster
         *_FOOTER_RUNNING,
+        *_MODEL_RESET,
     )
 
 

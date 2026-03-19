@@ -17,12 +17,10 @@ from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
 @app.callback(
     Output("tab-deep-dive", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     Input("store-expert-exclude", "data"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input):
+def render_deep_dive_shell(config, expert_excluded, key):
     df = _get_df(key)
     if df is None or not config or not config.get("target_col"):
         return html.Div()
@@ -124,8 +122,8 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
             "oot_date":       config.get("oot_date"),
             "has_test_split": config.get("has_test_split", False),
             "test_size":      config.get("test_size", 20),
-            "seg_col":        config.get("segment_col") or (seg_col_input or None),
-            "seg_val":        seg_val,
+            "seg_col":        config.get("segment_col"),
+            "seg_val":        config.get("segment_val"),
             "key":            key,
         }),
     ])

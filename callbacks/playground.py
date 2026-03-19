@@ -28,6 +28,21 @@ from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _PLOT_LAYOUT, _AXIS_STYLE, _build_woe_dataset
 
 
+class SmLogitWrapper:
+    """sm.Logit sonucunu sklearn predict_proba arayüzüne sarar (pickle uyumlu)."""
+    def __init__(self, result):
+        self._r      = result
+        self.pvalues = result.pvalues
+        self.params  = result.params
+        non_const    = [k for k in result.params.index if k != "const"]
+        self.coef_   = [result.params[non_const].values]
+
+    def predict_proba(self, X):
+        X_c = np.column_stack([np.ones(X.shape[0]), X])
+        probs = self._r.predict(exog=X_c)
+        return np.column_stack([1 - probs, probs])
+
+
 # ── Playground: Kolon seçeneklerini doldur ────────────────────────────────────
 @app.callback(
     Output("pg-x-col",     "options"),
@@ -69,11 +84,12 @@ def populate_pg_cols(config, expert_excluded, key):
 # ── Playground: Target kolonu ve kesim tarihi doldur ──────────────────────────
 @app.callback(
     Output("pg-target-col", "options"),
-    Output("pg-target-col", "value"),
+    Output("pg-target-col", "value", allow_duplicate=True),
     Output("pg-split-date", "options"),
-    Output("pg-split-date", "value"),
+    Output("pg-split-date", "value", allow_duplicate=True),
     Input("store-config", "data"),
     State("store-key", "data"),
+    prevent_initial_call=True,
 )
 def populate_pg_model_params(config, key):
     empty = ([], None, [], None)
@@ -118,18 +134,17 @@ def populate_pg_model_params(config, key):
     State("pg-time-unit",   "value"),
     State("store-key",      "data"),
     State("store-config",   "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
 def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
-                     y2_col, time_unit, key, config, seg_val, seg_col_input):
+                     y2_col, time_unit, key, config):
     if not x_col or not key or not config:
         return html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
     df = apply_segment_filter(df_orig, seg_col, seg_val).copy()
     color = color_col if color_col else None
     y2    = y2_col    if y2_col    else None
@@ -286,13 +301,12 @@ def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
     Input("store-expert-exclude", "data"),
     Input("main-tabs", "active_tab"),
     State("store-key", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
 )
-def render_pg_var_summary_preview(config, expert_excluded, active_tab, key, seg_val, seg_col_input):
+def render_pg_var_summary_preview(config, expert_excluded, active_tab, key):
     if not key or not config or not config.get("target_col"):
         return html.Div()
-    seg_col = config.get("segment_col") or (seg_col_input or None)
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
 
     # Önce tam özet cache'ine bak (Değişken Özeti → Hesapla sonrası dolu olur)
     full_summary = _SERVER_STORE.get(f"{key}_summary_{seg_col}_{seg_val}")
@@ -419,8 +433,9 @@ def pg_remove_all(_):
 # ── Playground: Model dropdown'ı (sabit — binary classification) ──────────────
 @app.callback(
     Output("pg-model-type", "options"),
-    Output("pg-model-type", "value"),
+    Output("pg-model-type", "value", allow_duplicate=True),
     Input("store-config", "data"),
+    prevent_initial_call=True,
 )
 def update_model_type_options(config):
     if not config:
@@ -449,7 +464,8 @@ def toggle_classification_controls(config):
 
 # ── Playground: Model kur ─────────────────────────────────────────────────────
 @app.callback(
-    Output("pg-model-output", "children"),
+    Output("pg-model-output", "children", allow_duplicate=True),
+    Output("store-model-signal", "data", allow_duplicate=True),
     Input("btn-pg-build", "n_clicks"),
     State("store-pg-model-vars", "data"),
     State("chk-use-woe",         "value"),
@@ -463,29 +479,30 @@ def toggle_classification_controls(config):
     State("pg-split-date",       "value"),
     State("store-key",           "data"),
     State("store-config",        "data"),
-    State("dd-segment-val",      "value"),
-    State("dd-segment-col",      "value"),
+    State("store-pending-note",  "data"),
     prevent_initial_call=True,
 )
 def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                    threshold_method, threshold_val,
                    target_sel, split_method, split_date,
-                   key, config, seg_val, seg_col_input):
+                   key, config, pending_note):
+    _no = dash.no_update
     if not model_vars or not key or not config:
         return html.Div("Model listesi boş veya konfigürasyon eksik.",
-                        className="alert-info-custom")
+                        className="alert-info-custom"), _no
     df_orig = _get_df(key)
     if df_orig is None:
-        return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
+        return html.Div("Veri yüklenmemiş.", className="alert-info-custom"), _no
 
     target      = target_sel or config["target_col"]
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val).reset_index(drop=True)
     C           = float(c_val or 1.0)
 
     if target not in df_active.columns:
         return html.Div(f"Target kolonu '{target}' veri setinde bulunamadı.",
-                        className="alert-info-custom")
+                        className="alert-info-custom"), _no
     y_all = pd.to_numeric(df_active[target], errors='coerce')
 
     # ── Train / Test / OOT split ───────────────────────────────────────────────
@@ -506,7 +523,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
 
     if n_tr < 30:
         return html.Div(f"Yetersiz train verisi: {n_tr:,} satır.",
-                        className="alert-info-custom")
+                        className="alert-info-custom"), _no
 
     # ── Base parametreler ─────────────────────────────────────────────────────
     _MODEL_PARAMS = {
@@ -521,7 +538,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     algo = model_type or "lr"
 
     def _fit_and_render(X_df, disp_names, label, accent):
-        """Modeli kur, train+test+oot sonuçlarını döndür."""
+        """Modeli kur, (compact_html, results_dict, model_obj, scaler_obj) döndür."""
         X = X_df.copy()
         for col in X.columns:
             if X[col].isna().any():
@@ -541,11 +558,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             X_oot = None
             y_oot = None
         if len(X_tr) == 0:
-            return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom")
+            return html.Div("Split sonrası boş küme oluştu.", className="alert-info-custom"), None, None, None
 
-        # Scaling: tree modelleri ve sm.Logit hariç
-        # sm.Logit + WoE: değerler zaten dar aralıkta, scaling yapılmaz
-        # Ham (non-WoE) LR'de BFGS overflow riski var → sadece orada scale
         is_tree = algo in ("lgbm", "xgb", "rf")
         _use_sm_logit = (algo == "lr")
         _is_woe = all(c.endswith("_woe") for c in X_tr.columns)
@@ -560,27 +574,16 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             X_te_s  = X_te.values  if has_test else np.empty((0, X_tr.shape[1]))
             X_oot_s = X_oot.values if has_oot  else None
 
-        # statsmodels Logit için sklearn-uyumlu ince sarmalayıcı
-        class _SmLogitWrapper:
-            """sm.Logit sonucunu sklearn predict_proba arayüzüne sarar."""
-            def __init__(self, result):
-                self._r      = result
-                self.pvalues = result.pvalues   # const dahil
-                self.params  = result.params    # const dahil
-                non_const    = [k for k in result.params.index if k != "const"]
-                self.coef_   = [result.params[non_const].values]
-
-            def predict_proba(self, X):
-                X_c = np.column_stack([np.ones(X.shape[0]), X])
-                probs = self._r.predict(exog=X_c)
-                return np.column_stack([1 - probs, probs])
-
+        lr_summary_text = None
         try:
             if _use_sm_logit:
-                # statsmodels Logit — scale edilmiş features + const, BFGS
                 X_tr_const = sm.add_constant(X_tr_s, has_constant="add")
                 sm_res = sm.Logit(y_tr, X_tr_const).fit(disp=0, method="bfgs")
-                mdl = _SmLogitWrapper(sm_res)
+                mdl = SmLogitWrapper(sm_res)
+                try:
+                    lr_summary_text = sm_res.summary().as_text()
+                except Exception:
+                    lr_summary_text = None
             elif algo == "lgbm":
                 mdl = lgb.LGBMClassifier(**_MODEL_PARAMS["lgbm"])
             elif algo == "xgb":
@@ -592,14 +595,14 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             if not _use_sm_logit:
                 mdl.fit(X_tr_s, y_tr)
         except Exception as e:
-            return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom")
+            return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom"), None, None, None
 
         # ── Binary classification çıkışı ──────────────────────────────────────
         tr_prob  = mdl.predict_proba(X_tr_s)[:, 1]
         te_prob  = mdl.predict_proba(X_te_s)[:, 1]  if has_test else None
         oot_prob = mdl.predict_proba(X_oot_s)[:, 1] if has_oot and X_oot_s is not None else None
 
-        # ── Eşik belirleme (test üzerinden, yoksa train) ──────────────────────
+        # ── Eşik belirleme ────────────────────────────────────────────────────
         thr_method = threshold_method or "fixed"
         _ref_prob  = te_prob if te_prob is not None else tr_prob
         _ref_y     = y_te   if te_prob is not None else y_tr
@@ -639,107 +642,9 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         te_m  = _metrics(y_te,  te_prob)  if te_prob  is not None else None
         oot_m = _metrics(y_oot, oot_prob) if oot_prob is not None else None
 
-        # ── Metrik rengi ──────────────────────────────────────────────────────
-        def _gc(g): return "#10b981" if g >= 0.4 else "#f59e0b" if g >= 0.2 else "#ef4444"
-
-        # ── Metrik kartı ──────────────────────────────────────────────────────
-        def mc(v, l, c="#4F8EF7", w=2):
-            return dbc.Col(html.Div([
-                html.Div(str(v), className="metric-value",
-                         style={"color": c, "fontSize": "1.25rem"}),
-                html.Div(l, className="metric-label"),
-            ], className="metric-card"), width=w)
-
-        def _metric_row(m, title, bg):
-            gc = _gc(m["gini"])
-            return html.Div([
-                html.Div(title, style={"color": "#a8b2c2", "fontSize": "0.72rem",
-                                       "fontWeight": "600", "letterSpacing": "0.06em",
-                                       "textTransform": "uppercase",
-                                       "marginBottom": "0.4rem", "paddingLeft": "0.25rem"}),
-                dbc.Row([
-                    mc(f"{m['gini']:.4f}", "Gini",      gc),
-                    mc(f"{m['auc']:.4f}",  "AUC",       gc),
-                    mc(f"{m['ks']:.4f}",   "KS",        "#4F8EF7"),
-                    mc(f"{m['f1']:.4f}",   "F1",        "#a78bfa"),
-                    mc(f"{m['prec']:.4f}", "Precision", "#a78bfa"),
-                    mc(f"{m['rec']:.4f}",  "Recall",    "#a78bfa"),
-                    mc(f"{m['n']:,}",      "N",         "#556070"),
-                ], className="g-2"),
-            ], style={"backgroundColor": bg, "borderRadius": "6px",
-                      "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
-
-        bin_rows = [_metric_row(tr_m, "Train", "#0d1520")]
-        if te_m:
-            bin_rows.append(_metric_row(te_m,  "Test", "#0e1624"))
-        if oot_m:
-            bin_rows.append(_metric_row(oot_m, "OOT",  "#131c30"))
-        metric_panel = html.Div(bin_rows, className="mb-3")
-
-        # ── ROC (train + test + oot) ───────────────────────────────────────────
-        accent_tr = "#556070"
-        fig_roc = go.Figure()
-        roc_traces = [(tr_m, accent_tr, f"Train (AUC={tr_m['auc']:.3f})")]
-        if te_m:
-            roc_traces.append((te_m,  accent,     f"Test  (AUC={te_m['auc']:.3f})"))
-        if oot_m:
-            roc_traces.append((oot_m, "#a78bfa",  f"OOT   (AUC={oot_m['auc']:.3f})"))
-        for m, col_, nm in roc_traces:
-            fig_roc.add_trace(go.Scatter(
-                x=m["fpr"], y=m["tpr"], mode="lines",
-                line=dict(color=col_, width=2), name=nm,
-                fill="tozeroy" if col_ == accent else None,
-                fillcolor=f"rgba({','.join(str(int(accent.lstrip('#')[i:i+2], 16)) for i in (0,2,4))},0.06)",
-            ))
-        fig_roc.add_trace(go.Scatter(
-            x=[0,1], y=[0,1], mode="lines",
-            line=dict(color="#4a5568", dash="dash", width=1), showlegend=False))
-        fig_roc.update_layout(
-            **_PLOT_LAYOUT,
-            title=dict(text="ROC Eğrisi", font=dict(color="#E8EAF0", size=13)),
-            xaxis=dict(**_AXIS_STYLE, title="FPR"),
-            yaxis=dict(**_AXIS_STYLE, title="TPR"),
-            height=300, showlegend=True,
-            legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#8892a4", size=10)),
-        )
-
-        # ── Confusion matrix (test if available, else oot, else train) ────────
-        _cm_src = te_m if te_m else (oot_m if oot_m else tr_m)
-        _cm_lbl = "Test" if te_m else ("OOT" if oot_m else "Train")
-        tn, fp, fn, tp_ = _cm_src["cm"].ravel()
-        fig_cm = go.Figure(go.Heatmap(
-            z=[[tn, fp], [fn, tp_]],
-            x=["Pred: 0", "Pred: 1"], y=["Actual: 0", "Actual: 1"],
-            text=[[str(tn), str(fp)], [str(fn), str(tp_)]],
-            texttemplate="%{text}",
-            colorscale=[[0, "#0e1117"], [1, accent]], showscale=False,
-        ))
-        fig_cm.update_layout(
-            **_PLOT_LAYOUT,
-            title=dict(text=f"Confusion Matrix — {_cm_lbl} ({thr_label})",
-                       font=dict(color="#E8EAF0", size=13)),
-            height=260, xaxis=dict(side="top"),
-        )
-
-        # ── Önem tablosu: LR → katsayı; tree → feature importance ───────────
-        _tbl_style = dict(
-            sort_action="native", page_size=15,
-            style_table={"overflowX": "auto"},
-            style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
-                          "fontWeight": "600", "fontSize": "0.7rem",
-                          "border": "1px solid #2d3a4f",
-                          "textTransform": "uppercase"},
-            style_cell={"backgroundColor": "#111827", "color": "#d1d5db",
-                        "fontSize": "0.78rem", "border": "1px solid #1f2a3c",
-                        "padding": "5px 8px", "textAlign": "left"},
-            style_data_conditional=[
-                {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}
-            ],
-        )
+        # ── Önem tablosu verisini oluştur ─────────────────────────────────────
         if not is_tree:
-            # Logistic Regression: katsayı + p-value (statsmodels), const dahil
             has_pvalues = _use_sm_logit and hasattr(mdl, "pvalues")
-            # const satırı
             if has_pvalues:
                 const_coef = float(mdl.params.get("const", 0.0))
                 const_pv   = float(mdl.pvalues.get("const", np.nan))
@@ -748,44 +653,27 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                               "P-Value": round(const_pv, 4)}]
             else:
                 coef_rows = []
-            # değişken satırları
-            for c, v in zip(X.columns, mdl.coef_[0]):
+            # pvalues index'i const + x1,x2... olabilir (numpy input)
+            # sıralı eşleştir: pvalues[1:] ↔ X.columns
+            _pv_vals = list(mdl.pvalues.values)[1:] if has_pvalues else []
+            for i, (c, v) in enumerate(zip(X.columns, mdl.coef_[0])):
                 row = {"Değişken": disp_names.get(c, c),
                        "Katsayı":  round(float(v), 4)}
-                if has_pvalues:
-                    row["P-Value"] = round(float(mdl.pvalues.get(c, np.nan)), 4)
+                if has_pvalues and i < len(_pv_vals):
+                    row["P-Value"] = round(float(_pv_vals[i]), 4)
                 coef_rows.append(row)
+            imp_records = coef_rows
+            # const üstte, geri kalan abs sıralı
             imp_df = pd.DataFrame(coef_rows)
-            # const sabit üstte, geri kalan abs(katsayı) sıralı
-            if has_pvalues:
+            if has_pvalues and len(imp_df) > 1:
                 const_part = imp_df.iloc[:1]
                 var_part   = imp_df.iloc[1:].sort_values("Katsayı", key=abs, ascending=False)
                 imp_df = pd.concat([const_part, var_part], ignore_index=True)
             else:
                 imp_df = imp_df.sort_values("Katsayı", key=abs, ascending=False)
-
-            # P-Value renk kodlaması
-            pv_cond = []
-            if has_pvalues:
-                pv_cond = [
-                    {"if": {"filter_query": "{P-Value} < 0.05", "column_id": "P-Value"},
-                     "color": "#10b981", "fontWeight": "600"},
-                    {"if": {"filter_query": "{P-Value} >= 0.05 && {P-Value} < 0.10",
-                            "column_id": "P-Value"},
-                     "color": "#f59e0b", "fontWeight": "600"},
-                    {"if": {"filter_query": "{P-Value} >= 0.10", "column_id": "P-Value"},
-                     "color": "#ef4444"},
-                ]
-            imp_df_cond = pv_cond + [{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}]
-            tbl_title = "Katsayı Tablosu"
-            imp_table = dash_table.DataTable(
-                data=imp_df.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in imp_df.columns],
-                style_data_conditional=imp_df_cond,
-                **{k: v for k, v in _tbl_style.items() if k != "style_data_conditional"},
-            )
+            imp_records = imp_df.to_dict("records")
+            importance_type = "coef"
         else:
-            # Tree modeller: feature importance (gain / split)
             raw_imp = mdl.feature_importances_
             total   = raw_imp.sum() or 1.0
             imp_rows = [
@@ -795,33 +683,13 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 for c, v in zip(X.columns, raw_imp)
             ]
             imp_df = pd.DataFrame(imp_rows).sort_values("Önem (%)", ascending=False)
-            # Renk: top %25 yeşil, orta sarı, alt kırmızı
-            top_thr = float(imp_df["Önem (%)"].quantile(0.75))
-            mid_thr = float(imp_df["Önem (%)"].quantile(0.25))
-            imp_df_cond = [
-                {"if": {"filter_query": f"{{Önem (%)}} >= {top_thr:.2f}",
-                        "column_id": "Önem (%)"},
-                 "color": "#10b981", "fontWeight": "700"},
-                {"if": {"filter_query": f"{{Önem (%)}} >= {mid_thr:.2f} && {{Önem (%)}} < {top_thr:.2f}",
-                        "column_id": "Önem (%)"},
-                 "color": "#f59e0b"},
-                {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
-            ]
-            imp_label = {"lgbm": "gain (normalize)", "xgb": "gain (normalize)",
-                         "rf": "mean decrease impurity"}.get(algo, "")
-            tbl_title = f"Feature Importance  ·  {imp_label}"
-            imp_table = dash_table.DataTable(
-                data=imp_df.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in imp_df.columns],
-                style_data_conditional=imp_df_cond,
-                **{k: v for k, v in _tbl_style.items() if k != "style_data_conditional"},
-            )
+            imp_records = imp_df.to_dict("records")
+            importance_type = "feature_importance"
 
-        # ── SHAP Beeswarm — shap.summary_plot → PNG embed ────────────────────
-        shap_section = None
+        # ── SHAP Beeswarm → base64 PNG ────────────────────────────────────────
+        shap_img_b64 = None
         if is_tree:
             try:
-                # Use test for SHAP if available, else oot, else train
                 _X_shap_df = X_te if has_test and len(X_te) > 0 else (X_oot if has_oot and X_oot is not None else X_tr)
                 _shap_n    = len(_X_shap_df)
                 _X_shap    = _X_shap_df.values
@@ -842,8 +710,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 shap.summary_plot(
                     shap_arr, _X_shap,
                     feature_names=feat_names_shap,
-                    max_display=top_n,
-                    show=False,
+                    max_display=top_n, show=False,
                     plot_size=(9, max(4, top_n * 0.38)),
                 )
                 fig_mpl = plt.gcf()
@@ -857,7 +724,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 ax_mpl.spines["right"].set_visible(False)
                 ax_mpl.spines["left"].set_visible(False)
                 ax_mpl.axvline(0, color="#4a5568", linewidth=0.8, zorder=0)
-                # colorbar dark
                 for cax in fig_mpl.axes[1:]:
                     cax.set_facecolor(_BG)
                     cax.tick_params(colors=_FG, labelsize=8)
@@ -868,86 +734,329 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                                 facecolor=_BG, dpi=130)
                 plt.close("all")
                 buf.seek(0)
-                img_b64 = base64.b64encode(buf.read()).decode()
+                shap_img_b64 = base64.b64encode(buf.read()).decode()
+            except Exception:
+                shap_img_b64 = None
 
-                shap_section = html.Div([
-                    html.Hr(style={"borderColor": "#1f2a3c", "margin": "0.8rem 0"}),
-                    html.P(
-                        f"SHAP Beeswarm  ·  n={_shap_n}  ·  top {top_n} değişken",
-                        className="section-title",
-                        style={"marginBottom": "0.5rem"},
-                    ),
-                    html.Img(
-                        src=f"data:image/png;base64,{img_b64}",
-                        style={"width": "100%", "maxWidth": "820px",
-                               "display": "block", "margin": "0 auto"},
-                    ),
-                ])
-            except Exception as _shap_err:
-                shap_section = html.Div(
-                    f"SHAP hesaplanamadı: {_shap_err}",
-                    className="alert-info-custom",
-                    style={"marginTop": "0.5rem"},
-                )
+        # ── VIF hesapla ──────────────────────────────────────────────────────
+        vif_data = None
+        if X_tr.shape[1] >= 2:
+            try:
+                from statsmodels.stats.outliers_influence import variance_inflation_factor as _vif
+                _X_vif = X_tr.values.astype(float)
+                vif_data = []
+                for j in range(_X_vif.shape[1]):
+                    try:
+                        v = float(_vif(_X_vif, j))
+                    except Exception:
+                        v = None
+                    vif_data.append({"Değişken": disp_names.get(X_tr.columns[j], X_tr.columns[j]),
+                                     "VIF": round(v, 2) if v is not None else None})
+            except Exception:
+                vif_data = None
 
-        return html.Div([
+        # ── PSI hesapla (Train vs Test / OOT) ─────────────────────────────────
+        def _calc_psi(base, comp, n_bins=10):
+            """Population Stability Index."""
+            eps = 1e-4
+            mn, mx = float(base.min()), float(base.max())
+            if mn == mx:
+                return 0.0
+            bins = np.linspace(mn, mx, n_bins + 1)
+            bins[0]  = -np.inf
+            bins[-1] =  np.inf
+            b_pct = np.histogram(base, bins=bins)[0] / len(base)
+            c_pct = np.histogram(comp, bins=bins)[0] / len(comp)
+            b_pct = np.where(b_pct < eps, eps, b_pct)
+            c_pct = np.where(c_pct < eps, eps, c_pct)
+            return float(np.sum((c_pct - b_pct) * np.log(c_pct / b_pct)))
+
+        psi_data = None
+        if has_test or has_oot:
+            psi_data = {}
+            for col in X_tr.columns:
+                d_name = disp_names.get(col, col)
+                row = {"Değişken": d_name}
+                if has_test:
+                    row["PSI (Test)"]  = round(_calc_psi(X_tr[col].values, X_te[col].values), 4)
+                if has_oot and X_oot is not None:
+                    row["PSI (OOT)"]   = round(_calc_psi(X_tr[col].values, X_oot[col].values), 4)
+                psi_data[d_name] = row
+            psi_data = list(psi_data.values())
+
+        # ── Sonuçları serialize et (Sonuç sekmesi için) ───────────────────────
+        def _m_dict(m):
+            if m is None:
+                return None
+            return {k: (v.tolist() if hasattr(v, 'tolist') else v)
+                    for k, v in m.items() if k not in ("cm", "fpr", "tpr")}
+
+        def _cm_list(m):
+            if m is None:
+                return None
+            return m["cm"].tolist()
+
+        def _roc_dict(m):
+            if m is None:
+                return None
+            return {"fpr": m["fpr"].tolist(), "tpr": m["tpr"].tolist()}
+
+        results_dict = {
+            "metrics": {
+                "train": _m_dict(tr_m),
+                "test":  _m_dict(te_m),
+                "oot":   _m_dict(oot_m),
+            },
+            "confusion_matrices": {
+                "train": _cm_list(tr_m),
+                "test":  _cm_list(te_m),
+                "oot":   _cm_list(oot_m),
+            },
+            "roc_data": {
+                "train": _roc_dict(tr_m),
+                "test":  _roc_dict(te_m),
+                "oot":   _roc_dict(oot_m),
+            },
+            "probabilities": {
+                "train": tr_prob.tolist(),
+                "test":  te_prob.tolist() if te_prob is not None else None,
+                "oot":   oot_prob.tolist() if oot_prob is not None else None,
+            },
+            "y_true": {
+                "train": y_tr.tolist(),
+                "test":  y_te.tolist() if has_test else None,
+                "oot":   y_oot.tolist() if has_oot else None,
+            },
+            "importance_table": imp_records,
+            "importance_type": importance_type,
+            "lr_summary_text": lr_summary_text,
+            "shap_img_b64": shap_img_b64,
+            "vif_data": vif_data,
+            "psi_data": psi_data,
+            "accent": accent,
+            "label": label,
+            "thr_label": thr_label,
+            "opt_thr": opt_thr,
+        }
+
+        # ── Compact HTML (Playground için sadeleştirilmiş) ────────────────────
+        def _gc(g): return "#10b981" if g >= 0.4 else "#f59e0b" if g >= 0.2 else "#ef4444"
+
+        gini_cards = []
+        for m, title in [(tr_m, "Train"), (te_m, "Test"), (oot_m, "OOT")]:
+            if m is None:
+                continue
+            gc = _gc(m["gini"])
+            gini_cards.append(dbc.Col(html.Div([
+                html.Div(f"{m['gini']:.4f}", style={"color": gc, "fontSize": "1.25rem",
+                                                     "fontWeight": "700"}),
+                html.Div(f"{title} Gini", style={"color": "#8892a4", "fontSize": "0.72rem"}),
+            ], className="metric-card"), width=3))
+
+        # Top-5 importance mini tablo
+        top5 = imp_records[:6] if imp_records[0].get("Değişken") == "const" else imp_records[:5]
+        _tbl_style_mini = dict(
+            style_table={"overflowX": "auto"},
+            style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
+                          "fontWeight": "600", "fontSize": "0.7rem",
+                          "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
+            style_cell={"backgroundColor": "#111827", "color": "#d1d5db",
+                        "fontSize": "0.78rem", "border": "1px solid #1f2a3c",
+                        "padding": "5px 8px", "textAlign": "left"},
+            style_data_conditional=[
+                {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}
+            ],
+        )
+        mini_cols = [{"name": k, "id": k} for k in top5[0].keys()] if top5 else []
+        mini_tbl_title = "Katsayı Tablosu (özet)" if importance_type == "coef" else "Feature Importance (özet)"
+
+        compact_html = html.Div([
             html.Div(f"{split_info}   ·   {thr_label}",
                      style={"color": "#7e8fa4", "fontSize": "0.72rem",
                             "marginBottom": "0.6rem", "fontStyle": "italic"}),
-            metric_panel,
-            dbc.Row([
-                dbc.Col(dcc.Graph(figure=fig_roc, config={"displayModeBar": False}), width=5),
-                dbc.Col([
-                    html.P(tbl_title, className="section-title",
-                           style={"marginBottom": "0.4rem"}),
-                    imp_table,
-                ], width=4),
-                dbc.Col(dcc.Graph(figure=fig_cm, config={"displayModeBar": False}), width=3),
-            ]),
-            shap_section or html.Div(),
+            dbc.Row(gini_cards, className="g-2 mb-3"),
+            html.P(mini_tbl_title, className="section-title",
+                   style={"marginBottom": "0.4rem"}),
+            dash_table.DataTable(data=top5, columns=mini_cols, **_tbl_style_mini),
+            html.Div([
+                html.Span("ℹ ", style={"color": "#4F8EF7"}),
+                html.Span("Detaylı sonuçlar için "),
+                html.Strong("Sonuç", style={"color": "#4F8EF7"}),
+                html.Span(" sekmesine bakın."),
+            ], style={"color": "#6b7a99", "fontSize": "0.78rem", "marginTop": "0.75rem",
+                      "padding": "0.5rem 0.75rem", "backgroundColor": "#0d1520",
+                      "borderRadius": "6px", "border": "1px solid #1e2a3a"}),
         ])
+
+        _scaler_obj = scaler if not _skip_scale else None
+        return compact_html, results_dict, mdl, _scaler_obj
 
     # ── Ham model ─────────────────────────────────────────────────────────────
     raw_cols = [v for v in model_vars if v in df_active.columns]
     X_raw    = pd.get_dummies(df_active[raw_cols].copy(), drop_first=True)
     raw_disp = {c: c for c in X_raw.columns}
-    raw_tab  = _fit_and_render(X_raw, raw_disp, "Ham", "#4F8EF7")
+    raw_html, raw_results, raw_mdl, raw_scaler = _fit_and_render(X_raw, raw_disp, "Ham", "#4F8EF7")
 
     # ── WoE model ─────────────────────────────────────────────────────────────
     woe_cache_key = f"{key}_woe_{seg_col}_{seg_val}"
     if woe_cache_key not in _SERVER_STORE:
-        woe_df_enc, _ = _build_woe_dataset(df_active, target, model_vars)
-        _SERVER_STORE[woe_cache_key] = (woe_df_enc, _)
+        woe_df_enc, _failed, _opt_dict = _build_woe_dataset(df_active, target, model_vars)
+        _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed, _opt_dict)
     else:
-        woe_df_enc, _ = _SERVER_STORE[woe_cache_key]
+        stored = _SERVER_STORE[woe_cache_key]
+        # Eski 2-tuple format uyumu — opt_dict'i yeniden hesapla
+        if len(stored) == 2:
+            woe_df_enc, _failed = stored
+            _, _, _opt_dict = _build_woe_dataset(df_active, target, model_vars)
+            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed, _opt_dict)
+        else:
+            woe_df_enc, _failed, _opt_dict = stored
         new_vars = [v for v in model_vars if f"{v}_woe" not in woe_df_enc.columns]
         if new_vars:
-            extra, ef = _build_woe_dataset(df_active, target, new_vars)
+            extra, ef, eo = _build_woe_dataset(df_active, target, new_vars)
             woe_df_enc = pd.concat([woe_df_enc, extra], axis=1)
-            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _ + ef)
+            _opt_dict = {**_opt_dict, **eo}
+            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed + ef, _opt_dict)
 
     woe_feat_cols = [f"{v}_woe" for v in model_vars if f"{v}_woe" in woe_df_enc.columns]
+    woe_html = None
+    woe_results = None
     if woe_feat_cols:
         X_woe     = woe_df_enc[woe_feat_cols].copy()
         woe_disp  = {f"{v}_woe": v for v in model_vars}
-        woe_tab   = _fit_and_render(X_woe, woe_disp, "WoE", "#a78bfa")
+        woe_html, woe_results, woe_mdl, woe_scaler = _fit_and_render(X_woe, woe_disp, "WoE", "#a78bfa")
         failed_woe = [v for v in model_vars if f"{v}_woe" not in woe_df_enc.columns]
         note_txt  = f"★ WoE — {len(woe_feat_cols)}/{len(model_vars)} değişken encode edildi"
         if failed_woe:
             note_txt += f"  |  encode edilemeyen: {', '.join(failed_woe)}"
         woe_note  = html.Div(note_txt,
             style={"color": "#a78bfa", "fontSize": "0.73rem", "marginBottom": "0.4rem"})
-        woe_content = html.Div([woe_note, woe_tab])
+        woe_content = html.Div([woe_note, woe_html])
     else:
-        failed_woe = model_vars
         woe_content = html.Div(
             f"WoE encode edilebilen değişken bulunamadı. "
             f"({len(model_vars)} değişken denendi: {', '.join(model_vars[:5])}{'...' if len(model_vars)>5 else ''})",
             className="alert-info-custom")
 
-    return dbc.Tabs([
-        dbc.Tab(raw_tab,     label="Ham Değerler",        tab_id="res-raw",
+    # ── WoE dağılım verisi (bin tablosu + monotonluk) ──────────────────────
+    woe_dist = None
+    has_test_split = test_mask.any()
+    has_oot_split  = oot_mask.any()
+    if woe_feat_cols:
+        from modules.deep_dive import get_woe_detail
+        woe_dist = {}
+        # Train split
+        df_train_split = df_active[train_mask].reset_index(drop=True)
+        # Karşı taraf: Test varsa Test, yoksa OOT
+        if has_test_split:
+            df_comp_split = df_active[test_mask].reset_index(drop=True)
+            comp_label = "Test"
+        elif has_oot_split:
+            df_comp_split = df_active[oot_mask].reset_index(drop=True)
+            comp_label = "OOT"
+        else:
+            df_comp_split = None
+            comp_label = None
+
+        for wc in woe_feat_cols:
+            var_name = wc.replace("_woe", "")
+            try:
+                bt_train, iv_train, _ = get_woe_detail(df_train_split, var_name, target)
+                if bt_train.empty:
+                    continue
+                # Monotonluk kontrolü: TOPLAM hariç WOE sütununa bak
+                woe_vals = bt_train[bt_train["Bin"] != "TOPLAM"]["WOE"].tolist()
+                woe_nums = [w for w in woe_vals if isinstance(w, (int, float))]
+                if len(woe_nums) >= 2:
+                    diffs = [woe_nums[i+1] - woe_nums[i] for i in range(len(woe_nums)-1)]
+                    if all(d >= 0 for d in diffs):
+                        monoton = "Artan ↑"
+                    elif all(d <= 0 for d in diffs):
+                        monoton = "Azalan ↓"
+                    else:
+                        monoton = "Monoton Değil ✗"
+                else:
+                    monoton = "–"
+
+                entry = {
+                    "train_table": bt_train.to_dict("records"),
+                    "iv_train": round(iv_train, 4),
+                    "monoton": monoton,
+                }
+
+                # Karşı taraf tablosu
+                if df_comp_split is not None:
+                    try:
+                        bt_comp, iv_comp, _ = get_woe_detail(df_comp_split, var_name, target)
+                        if not bt_comp.empty:
+                            entry["comp_table"] = bt_comp.to_dict("records")
+                            entry["iv_comp"] = round(iv_comp, 4)
+                            entry["comp_label"] = comp_label
+                    except Exception:
+                        pass
+
+                woe_dist[var_name] = entry
+            except Exception:
+                continue
+
+    # ── Korelasyon matrisleri ───────────────────────────────────────────────
+    raw_corr = X_raw[raw_cols].corr().round(4).to_dict() if len(raw_cols) > 1 else None
+    woe_corr = None
+    if woe_feat_cols and len(woe_feat_cols) > 1:
+        _woe_corr_df = woe_df_enc[woe_feat_cols].corr().round(4)
+        _woe_corr_df.index   = [c.replace("_woe", "") for c in _woe_corr_df.index]
+        _woe_corr_df.columns = [c.replace("_woe", "") for c in _woe_corr_df.columns]
+        woe_corr = _woe_corr_df.to_dict()
+
+    # ── Describe verisi (model değişkenleri) ────────────────────────────────
+    from modules.profiling import compute_profile
+    _desc_cols = [v for v in model_vars if v in df_active.columns]
+    describe_data = None
+    if _desc_cols:
+        try:
+            _desc_df = compute_profile(df_active[_desc_cols])
+            describe_data = _desc_df.to_dict("records")
+        except Exception:
+            describe_data = None
+
+    # ── Sonuçları cache'e yaz ─────────────────────────────────────────────────
+    cache_key = f"{key}_model_results"
+    _thr_label = raw_results["thr_label"] if raw_results else ""
+    _opt_thr   = raw_results["opt_thr"] if raw_results else 0.5
+    _SERVER_STORE[cache_key] = {
+        "algo": algo,
+        "model_vars": list(model_vars),
+        "split_info": split_info,
+        "thr_label": _thr_label,
+        "opt_thr": _opt_thr,
+        "corr": {"raw": raw_corr, "woe": woe_corr},
+        "woe_dist": woe_dist,
+        "describe_data": describe_data,
+        "model_note": pending_note or "",
+        "tabs": {
+            "raw": raw_results,
+            "woe": woe_results,
+        },
+        # SQL & Pickle için ek objeler
+        "_models": {"raw": raw_mdl, "woe": woe_mdl if woe_feat_cols else None},
+        "_scalers": {"raw": raw_scaler, "woe": woe_scaler if woe_feat_cols else None},
+        "_opt_dict": _opt_dict,  # {col_name: OptimalBinning} — WoE pickle
+        "_split_masks": {
+            "train": train_mask.tolist(),
+            "test": test_mask.tolist(),
+            "oot": oot_mask.tolist(),
+        },
+        "_target": target,
+        "_seg_col": seg_col,
+        "_seg_val": seg_val,
+        "_date_col": config.get("date_col"),
+    }
+
+    pg_tabs = dbc.Tabs([
+        dbc.Tab(raw_html,    label="Ham Değerler",        tab_id="res-raw",
                 className="tab-content-area"),
         dbc.Tab(woe_content, label="WoE Dönüştürülmüş",  tab_id="res-woe",
                 className="tab-content-area"),
     ], active_tab="res-raw")
+
+    return pg_tabs, cache_key

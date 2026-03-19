@@ -23,7 +23,7 @@ def compute_var_summary_table(df_active, df_train, config, key,
     oot_date    = config.get("oot_date")
 
     # ── 1. IV (Information Value) ────────────────────────────────────────────
-    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_date}"
+    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
     if iv_cache_key in _SERVER_STORE:
         iv_df = _SERVER_STORE[iv_cache_key]
     else:
@@ -37,10 +37,11 @@ def compute_var_summary_table(df_active, df_train, config, key,
     if use_woe:
         woe_cache_key = f"{key}_woe_{seg_col}_{seg_val}"
         if woe_cache_key not in _SERVER_STORE:
-            woe_df_enc, _ = _build_woe_dataset(df_active, target, var_list)
-            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _)
+            woe_df_enc, _f, _o = _build_woe_dataset(df_active, target, var_list)
+            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _f, _o)
         else:
-            woe_df_enc, _ = _SERVER_STORE[woe_cache_key]
+            stored = _SERVER_STORE[woe_cache_key]
+            woe_df_enc = stored[0]
         woe_cols_present = [f"{v}_woe" for v in var_list if f"{v}_woe" in woe_df_enc.columns]
         df_analysis = woe_df_enc[woe_cols_present].copy()
         df_analysis[target] = df_active[target].values
@@ -348,17 +349,16 @@ def _render_var_summary(summary, use_woe):
     Input("store-config", "data"),
     Input("btn-var-summary", "n_clicks"),
     Input("store-expert-exclude", "data"),
-    Input("dd-segment-val", "value"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
     State("chk-varsummary-woe", "value"),
     prevent_initial_call=True,
 )
-def update_var_summary(config, n_clicks, expert_excluded, seg_val, key, seg_col_input, woe_toggle):
+def update_var_summary(config, n_clicks, expert_excluded, key, woe_toggle):
     if not key or not config or not config.get("target_col"):
         return html.Div()
 
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     use_woe     = "woe" in (woe_toggle or [])
     excluded_set = set(expert_excluded or [])
 

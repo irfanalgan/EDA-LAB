@@ -15,14 +15,12 @@ from modules.correlation import get_numeric_cols, compute_correlation_matrix, fi
 @app.callback(
     Output("corr-content", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     Input("corr-threshold", "value"),
     Input("corr-max-cols", "value"),
     Input("store-expert-exclude", "data"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_excluded, key, seg_col_input):
+def render_correlation_content(config, threshold, max_cols_str, expert_excluded, key):
     if not key or not config or not config.get("target_col"):
         return html.Div()
 
@@ -33,7 +31,8 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
     threshold  = float(threshold or 0.75)
     max_cols   = int(max_cols_str or 20)
     target     = config["target_col"]
-    seg_col    = config.get("segment_col") or (seg_col_input or None)
+    seg_col    = config.get("segment_col")
+    seg_val    = config.get("segment_val")
     df_active  = apply_segment_filter(df_orig, seg_col, seg_val)
     expert_excluded_set = set(expert_excluded or [])
 
@@ -329,16 +328,16 @@ def render_correlation_content(config, seg_val, threshold, max_cols_str, expert_
     Input("corr-var2", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
-    State("dd-segment-val", "value"),
     prevent_initial_call=True,
 )
-def render_pair_scatter(var1, var2, key, config, seg_val):
+def render_pair_scatter(var1, var2, key, config):
     if not var1 or not var2 or not key or not config:
         return html.Div(), html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div(), html.Div()
     seg_col   = config.get("segment_col")
+    seg_val   = config.get("segment_val")
     target    = config["target_col"]
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 

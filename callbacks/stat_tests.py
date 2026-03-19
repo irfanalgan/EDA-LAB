@@ -539,17 +539,16 @@ def _render_vif_sandbox(df_active: pd.DataFrame, var_set: str, max_cols: int,
     State("chi-max-cats", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
-def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, seg_val, seg_col_input):
+def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config):
     if not all([var1, var2, key, config]):
         return html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val).copy()
     max_cats    = int(max_cats_str or 15)
     try:
@@ -565,17 +564,16 @@ def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, seg_val,
     State("anova-var", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
-def compute_anova(n_clicks, var_col, key, config, seg_val, seg_col_input):
+def compute_anova(n_clicks, var_col, key, config):
     if not all([var_col, key, config]):
         return html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
     if not target:
@@ -593,17 +591,16 @@ def compute_anova(n_clicks, var_col, key, config, seg_val, seg_col_input):
     State("ks-var", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
-def compute_ks_test(n_clicks, var_col, key, config, seg_val, seg_col_input):
+def compute_ks_test(n_clicks, var_col, key, config):
     if not all([var_col, key, config]):
         return html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
     if not target:
@@ -623,17 +620,16 @@ def compute_ks_test(n_clicks, var_col, key, config, seg_val, seg_col_input):
     State("store-key", "data"),
     State("store-config", "data"),
     State("store-expert-exclude", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
     prevent_initial_call=True,
 )
-def compute_vif_sandbox(n_clicks, var_set, max_cols_str, key, config, expert_excluded, seg_val, seg_col_input):
+def compute_vif_sandbox(n_clicks, var_set, max_cols_str, key, config, expert_excluded):
     if not key or not config:
         return html.Div()
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div()
-    seg_col   = config.get("segment_col") or (seg_col_input or None)
+    seg_col   = config.get("segment_col")
+    seg_val   = config.get("segment_val")
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     max_cols  = int(max_cols_str or 20)
     try:

@@ -55,21 +55,25 @@ _TABLE_STYLE = dict(
 def _build_woe_dataset(df: pd.DataFrame, target: str, cols: list) -> tuple:
     """
     Her kolon için WoE encode eder; kolon adı '{col}_woe' olarak kaydedilir.
-    Returns: (woe_df, failed_cols)
+    Returns: (woe_df, failed_cols, opt_dict)
+    opt_dict: {col_name: OptimalBinning object} — pickle için saklanır.
     """
     result = {}
     failed = []
+    opt_dict = {}
     for col in cols:
         try:
-            woe_series, _, ok = get_woe_encoder(df, col, target)
+            woe_series, _, ok, optb = get_woe_encoder(df, col, target)
             if ok:
                 result[f"{col}_woe"] = woe_series.values
+                if optb is not None:
+                    opt_dict[col] = optb
             else:
                 failed.append(col)
         except Exception:
             failed.append(col)
     woe_df = pd.DataFrame(result, index=df.index)
-    return woe_df, failed
+    return woe_df, failed, opt_dict
 
 
 # ── Yardımcı: r Badge ────────────────────────────────────────────────────────

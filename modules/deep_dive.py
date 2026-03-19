@@ -422,8 +422,8 @@ def get_woe_encoder(df: pd.DataFrame, col: str, target: str,
                     max_n_bins: int = 4) -> tuple:
     """
     OptimalBinning ile her satır için WoE değeri hesaplar.
-    Returns: (woe_series, iv_total, success: bool)
-    Başarısızsa woe_series = NaN dolu, success = False.
+    Returns: (woe_series, iv_total, success: bool, optb_obj | None)
+    Başarısızsa woe_series = NaN dolu, success = False, optb_obj = None.
     """
     from optbinning import OptimalBinning as _OB
 
@@ -437,7 +437,7 @@ def get_woe_encoder(df: pd.DataFrame, col: str, target: str,
     total_bad  = local[target].sum()
     total_good = len(local) - total_bad
     if total_bad == 0 or total_good == 0:
-        return pd.Series(np.nan, index=df.index), 0.0, False
+        return pd.Series(np.nan, index=df.index), 0.0, False, None
 
     is_numeric = pd.api.types.is_numeric_dtype(local[col])
 
@@ -456,6 +456,6 @@ def get_woe_encoder(df: pd.DataFrame, col: str, target: str,
                                    metric_special="empirical")
         woe_series = pd.Series(woe_vals, index=df.index).fillna(0.0)
     except Exception:
-        return pd.Series(np.nan, index=df.index), 0.0, False
+        return pd.Series(np.nan, index=df.index), 0.0, False, None
 
-    return woe_series, iv, True
+    return woe_series, iv, True, optb

@@ -72,12 +72,10 @@ def _render_trend_chart(df_plot, target, date_col, period_label):
 @app.callback(
     Output("tab-target-iv", "children"),
     Input("store-config", "data"),
-    Input("dd-segment-val", "value"),
     Input("store-expert-exclude", "data"),
     State("store-key", "data"),
-    State("dd-segment-col", "value"),
 )
-def update_target_iv(config, seg_val, expert_excluded, key, seg_col_input):
+def update_target_iv(config, expert_excluded, key):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
@@ -85,7 +83,8 @@ def update_target_iv(config, seg_val, expert_excluded, key, seg_col_input):
     target      = config["target_col"]
     date_col    = config.get("date_col")
     oot_date    = config.get("oot_date")
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    seg_col     = config.get("segment_col")
+    seg_val     = config.get("segment_val")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     excluded_set = set(expert_excluded or [])
 
@@ -121,8 +120,7 @@ def update_target_iv(config, seg_val, expert_excluded, key, seg_col_input):
     trend_dropdown, _trend_opts = _build_trend_dropdown()
 
     # IV — sadece train üzerinden
-    oot_key   = config.get("oot_date") or "none"
-    cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_key}"
+    cache_key = f"{key}_iv_{seg_col}_{seg_val}"
     if cache_key in _SERVER_STORE:
         iv_df = _SERVER_STORE[cache_key]
     else:
