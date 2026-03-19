@@ -579,34 +579,42 @@ def _build_woe_dist_section(woe_dist):
         train_cols = [{"name": k, "id": k} for k in train_rows[0].keys()]
         train_tbl = dash_table.DataTable(data=train_rows, columns=train_cols, **_TBL_STYLE)
 
-        # Karşı taraf tablosu (Test veya OOT)
-        comp_rows = info.get("comp_table")
-        comp_label = info.get("comp_label", "")
-        iv_comp = info.get("iv_comp")
+        # Test ve OOT tabloları (ayrı ayrı, train'in bin sınırlarıyla)
+        test_rows = info.get("test_table")
+        iv_test   = info.get("iv_test")
+        oot_rows  = info.get("oot_table")
+        iv_oot    = info.get("iv_oot")
 
-        if comp_rows:
-            iv_comp_txt = f"  ·  IV ({comp_label}): {iv_comp}" if iv_comp is not None else ""
-            comp_cols = [{"name": k, "id": k} for k in comp_rows[0].keys()]
-            comp_tbl = dash_table.DataTable(data=comp_rows, columns=comp_cols, **_TBL_STYLE)
-            row_content = dbc.Row([
-                dbc.Col([
-                    html.Div("Train", style={"color": "#8892a4", "fontSize": "0.72rem",
-                                             "fontWeight": "600", "marginBottom": "0.3rem",
-                                             "textTransform": "uppercase"}),
-                    train_tbl,
-                ], md=6),
-                dbc.Col([
-                    html.Div(comp_label, style={"color": "#8892a4", "fontSize": "0.72rem",
-                                                "fontWeight": "600", "marginBottom": "0.3rem",
-                                                "textTransform": "uppercase"}),
-                    comp_tbl,
-                ], md=6),
-            ], className="g-2")
-            # IV bilgisini header'a ekle
-            if iv_comp is not None:
+        _lbl_style = {"color": "#8892a4", "fontSize": "0.72rem",
+                      "fontWeight": "600", "marginBottom": "0.3rem",
+                      "textTransform": "uppercase"}
+
+        has_test_tbl = bool(test_rows)
+        has_oot_tbl  = bool(oot_rows)
+        n_splits = 1 + int(has_test_tbl) + int(has_oot_tbl)
+
+        if n_splits > 1:
+            col_w = 12 // n_splits
+            cols = [dbc.Col([html.Div("Train", style=_lbl_style), train_tbl], md=col_w)]
+            if has_test_tbl:
+                _tc = [{"name": k, "id": k} for k in test_rows[0].keys()]
+                cols.append(dbc.Col([
+                    html.Div("Test", style=_lbl_style),
+                    dash_table.DataTable(data=test_rows, columns=_tc, **_TBL_STYLE),
+                ], md=col_w))
                 header.children.insert(2, html.Span(
-                    f"IV ({comp_label}): {iv_comp}",
+                    f"IV (Test): {iv_test}",
                     style={"color": "#a78bfa", "fontSize": "0.75rem", "marginRight": "1rem"}))
+            if has_oot_tbl:
+                _oc = [{"name": k, "id": k} for k in oot_rows[0].keys()]
+                cols.append(dbc.Col([
+                    html.Div("OOT", style=_lbl_style),
+                    dash_table.DataTable(data=oot_rows, columns=_oc, **_TBL_STYLE),
+                ], md=col_w))
+                header.children.insert(len(header.children) - 1, html.Span(
+                    f"IV (OOT): {iv_oot}",
+                    style={"color": "#a78bfa", "fontSize": "0.75rem", "marginRight": "1rem"}))
+            row_content = dbc.Row(cols, className="g-2")
         else:
             row_content = train_tbl
 
@@ -622,49 +630,48 @@ def _build_woe_dist_section(woe_dist):
     )
 
 
-def _build_vif_section(tab_data):
-    """VIF (Variance Inflation Factor) tablosu."""
-    vif_data = tab_data.get("vif_data")
+def _build_vif_section(vif_data):
+    """VIF (Variance Inflation Factor) tablosu — WoE, Train/Test/OOT ayrı."""
     if not vif_data:
         return None
 
-    rows = sorted(vif_data, key=lambda r: (r["VIF"] is None, -(r["VIF"] or 0)))
+    # Train VIF'e göre sırala
+    rows = sorted(vif_data, key=lambda r: (r.get("Train VIF") is None,
+                                            -(r.get("Train VIF") or 0)))
+    cols = [{"name": k, "id": k} for k in rows[0].keys()]
 
-    vif_cond = list(_TBL_STYLE["style_data_conditional"]) + [
-        {"if": {"filter_query": "{VIF} >= 10", "column_id": "VIF"},
-         "color": "#ef4444", "fontWeight": "600"},
-        {"if": {"filter_query": "{VIF} >= 5 && {VIF} < 10", "column_id": "VIF"},
-         "color": "#f59e0b", "fontWeight": "600"},
-    ]
+    vif_cond = list(_TBL_STYLE["style_data_conditional"])
+    for cid in [c["id"] for c in cols if "VIF" in c["id"]]:
+        vif_cond += [
+            {"if": {"filter_query": f"{{{cid}}} >= 10", "column_id": cid},
+             "color": "#ef4444", "fontWeight": "600"},
+            {"if": {"filter_query": f"{{{cid}}} >= 5 && {{{cid}}} < 10", "column_id": cid},
+             "color": "#f59e0b", "fontWeight": "600"},
+        ]
     tbl = dash_table.DataTable(
-        data=rows,
-        columns=[{"name": "Değişken", "id": "Değişken"},
-                 {"name": "VIF", "id": "VIF"}],
+        data=rows, columns=cols,
         **{**_TBL_STYLE, "style_data_conditional": vif_cond},
     )
 
     return dbc.AccordionItem(tbl, title="VIF", item_id="item-vif")
 
 
-def _build_psi_section(tab_data):
-    """PSI (Population Stability Index) tablosu."""
-    psi_data = tab_data.get("psi_data")
+def _build_psi_section(psi_data):
+    """PSI (Population Stability Index) tablosu — Train WoE vs OOT WoE."""
     if not psi_data:
         return None
 
     cols = [{"name": k, "id": k} for k in psi_data[0].keys()]
 
-    # Renklendirme: PSI >= 0.25 kırmızı, >= 0.10 turuncu
     cond = list(_TBL_STYLE["style_data_conditional"])
-    for cid in ("PSI (Test)", "PSI (OOT)"):
-        if any(cid in r for r in psi_data):
-            cond += [
-                {"if": {"filter_query": f"{{{cid}}} >= 0.25", "column_id": cid},
-                 "color": "#ef4444", "fontWeight": "600"},
-                {"if": {"filter_query": f"{{{cid}}} >= 0.10 && {{{cid}}} < 0.25",
-                        "column_id": cid},
-                 "color": "#f59e0b", "fontWeight": "600"},
-            ]
+    for cid in [c["id"] for c in cols if "PSI" in c["id"]]:
+        cond += [
+            {"if": {"filter_query": f"{{{cid}}} >= 0.25", "column_id": cid},
+             "color": "#ef4444", "fontWeight": "600"},
+            {"if": {"filter_query": f"{{{cid}}} >= 0.10 && {{{cid}}} < 0.25",
+                    "column_id": cid},
+             "color": "#f59e0b", "fontWeight": "600"},
+        ]
 
     tbl = dash_table.DataTable(
         data=psi_data, columns=cols, **{**_TBL_STYLE, "style_data_conditional": cond},
@@ -726,6 +733,7 @@ def _build_describe_section(describe_data):
 
 
 def _build_results_content(tab_data, results, corr_dict=None, woe_dist=None,
+                           psi_data=None, vif_data=None,
                            describe_data=None, note_text=None):
     """Tek bir tab (Ham veya WoE) için accordion yapısını oluşturur."""
     algo = results["algo"]
@@ -753,13 +761,13 @@ def _build_results_content(tab_data, results, corr_dict=None, woe_dist=None,
     if weight_item:
         items.append(weight_item)
 
-    # VIF
-    vif_item = _build_vif_section(tab_data)
+    # VIF — top-level, WoE Train/Test/OOT
+    vif_item = _build_vif_section(vif_data)
     if vif_item:
         items.append(vif_item)
 
-    # PSI
-    psi_item = _build_psi_section(tab_data)
+    # PSI — top-level, Train WoE vs OOT WoE
+    psi_item = _build_psi_section(psi_data)
     if psi_item:
         items.append(psi_item)
 
@@ -824,8 +832,10 @@ def render_results_tab(active_tab, model_signal, key, _srv, _db, _drv):
               "backgroundColor": "#0d1520", "borderRadius": "6px",
               "border": "1px solid #1e2a3a"})
 
-    corr_data = results.get("corr", {}) or {}
+    woe_corr_data = results.get("corr")  # tek korelasyon (Train WoE)
     woe_dist_data = results.get("woe_dist")
+    psi_data = results.get("psi_data")
+    vif_data = results.get("vif_data")
     describe_data = results.get("describe_data")
     note_text = results.get("model_note", "")
 
@@ -836,8 +846,10 @@ def render_results_tab(active_tab, model_signal, key, _srv, _db, _drv):
             continue
         content = _build_results_content(
             tab_data, results,
-            corr_dict=corr_data.get(tab_key),
+            corr_dict=woe_corr_data,
             woe_dist=woe_dist_data if tab_key == "woe" else None,
+            psi_data=psi_data,
+            vif_data=vif_data,
             describe_data=describe_data,
             note_text=note_text,
         )
@@ -878,9 +890,8 @@ def render_results_tab(active_tab, model_signal, key, _srv, _db, _drv):
         for mc in [_target, _date_col, _seg_col]:
             if mc:
                 _meta_cols.add(mc)
-        _woe_cols = {f"{v}_woe" for v in model_vars}
         for c in df_orig.columns:
-            if c not in _meta_cols and c not in model_vars and c not in _woe_cols:
+            if c not in _meta_cols and c not in model_vars:
                 all_col_opts.append({"label": c, "value": c})
 
     sql_pickle_section = _build_sql_pickle_section(
@@ -1101,14 +1112,15 @@ def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config
 
     from utils.helpers import apply_segment_filter
     seg_val = results.get("_seg_val")
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val).reset_index(drop=True)
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
-    # WoE DataFrame
-    woe_cache_key = f"{key}_woe_{seg_col}_{seg_val}"
-    woe_df = None
-    if woe_cache_key in _SERVER_STORE:
-        stored = _SERVER_STORE[woe_cache_key]
-        woe_df = stored[0]
+    # WoE DataFrame — merkezi cache'ten
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+    _train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
+    _test_woe  = _SERVER_STORE.get(f"{_pfx}_test_woe")
+    _oot_woe   = _SERVER_STORE.get(f"{_pfx}_oot_woe")
+    woe_parts = [df for df in [_train_woe, _test_woe, _oot_woe] if df is not None]
+    woe_df = pd.concat(woe_parts, axis=0).reindex(df_active.index) if woe_parts else None
 
     # DataFrame oluştur
     out_cols = []
@@ -1144,9 +1156,8 @@ def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config
     for v in model_vars:
         if v in df_active.columns:
             out_df[v] = df_active[v].values
-        woe_col = f"{v}_woe"
-        if woe_df is not None and woe_col in woe_df.columns:
-            out_df[woe_col] = woe_df[woe_col].values
+        if woe_df is not None and v in woe_df.columns:
+            out_df[f"{v}_woe"] = woe_df[v].values
 
     # 5) Predict proba (varsa)
     tabs = results.get("tabs", {})
@@ -1755,26 +1766,30 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     # ═══════════════════════════════════════════════════════════════════════════
     # SHEET 6 — VIF
     # ═══════════════════════════════════════════════════════════════════════════
-    vif_data = tab_data.get("vif_data")
+    vif_data = results.get("vif_data")
     if vif_data:
         ws_v = wb.create_sheet("VIF")
         ws_v.sheet_properties.tabColor = "EF4444"
-        _xl_write_title(ws_v, "VIF — Variance Inflation Factor", 2, S)
+        _xl_write_title(ws_v, "VIF — Variance Inflation Factor (WoE)", len(vif_data[0]), S)
 
-        df_vif = pd.DataFrame(sorted(vif_data, key=lambda r: (r["VIF"] is None, -(r["VIF"] or 0))))
+        df_vif = pd.DataFrame(sorted(vif_data, key=lambda r: (r.get("Train VIF") is None,
+                                                                -(r.get("Train VIF") or 0))))
+        _vif_num_cols = {i + 1: "0.00" for i, cn in enumerate(df_vif.columns) if "VIF" in cn}
         end_r = _xl_write_df(ws_v, df_vif, 3, S, left_align_cols={1},
-                             num_fmt_cols={2: "0.00"})
+                             num_fmt_cols=_vif_num_cols)
 
         # VIF renklendirme
+        _vif_col_idxs = [i + 1 for i, cn in enumerate(df_vif.columns) if "VIF" in cn]
         for r in range(4, end_r + 1):
-            cell = ws_v.cell(row=r, column=2)
-            if isinstance(cell.value, (int, float)):
-                if cell.value >= 10:
-                    cell.font = S["red_font"]
-                    cell.fill = PatternFill("solid", fgColor="FEE2E2")
-                elif cell.value >= 5:
-                    cell.font = S["orange_font"]
-                    cell.fill = PatternFill("solid", fgColor="FEF3C7")
+            for vc in _vif_col_idxs:
+                cell = ws_v.cell(row=r, column=vc)
+                if isinstance(cell.value, (int, float)):
+                    if cell.value >= 10:
+                        cell.font = S["red_font"]
+                        cell.fill = PatternFill("solid", fgColor="FEE2E2")
+                    elif cell.value >= 5:
+                        cell.font = S["orange_font"]
+                        cell.fill = PatternFill("solid", fgColor="FEF3C7")
 
         # VIF eşik açıklama
         legend_r = end_r + 2
@@ -1790,7 +1805,7 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     # ═══════════════════════════════════════════════════════════════════════════
     # SHEET 7 — PSI
     # ═══════════════════════════════════════════════════════════════════════════
-    psi_data = tab_data.get("psi_data")
+    psi_data = results.get("psi_data")
     if psi_data:
         ws_p = wb.create_sheet("PSI")
         ws_p.sheet_properties.tabColor = "D97706"
@@ -2156,8 +2171,7 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     # ═══════════════════════════════════════════════════════════════════════════
     # SHEET 13 — Korelasyon
     # ═══════════════════════════════════════════════════════════════════════════
-    corr_all = results.get("corr", {}) or {}
-    corr_dict = corr_all.get(tab_key)
+    corr_dict = results.get("corr")
     if corr_dict:
         vars_ = list(corr_dict.keys())
         n_vars = len(vars_)
@@ -2226,8 +2240,8 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
                     continue
                 monoton = info.get("monoton", "–")
                 iv_train = info.get("iv_train", 0)
-                iv_comp = info.get("iv_comp")
-                comp_label = info.get("comp_label", "Test")
+                iv_test  = info.get("iv_test")
+                iv_oot   = info.get("iv_oot")
 
                 # Değişken başlığı
                 ws_woe.cell(row=current_row, column=1, value=var_name).font = Font(
@@ -2236,8 +2250,10 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
                     "solid", fgColor="374151")
 
                 iv_text = f"IV (Train): {iv_train}"
-                if iv_comp is not None:
-                    iv_text += f"  |  IV ({comp_label}): {iv_comp}"
+                if iv_test is not None:
+                    iv_text += f"  |  IV (Test): {iv_test}"
+                if iv_oot is not None:
+                    iv_text += f"  |  IV (OOT): {iv_oot}"
                 ws_woe.cell(row=current_row, column=3, value=iv_text).font = Font(
                     name="Segoe UI", color="8B5CF6", size=10)
 
@@ -2256,14 +2272,22 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
                 end_r = _xl_write_df(ws_woe, df_train, current_row, S, left_align_cols={1})
                 current_row = end_r + 2
 
-                # Karşı taraf tablosu
-                comp_rows = info.get("comp_table")
-                if comp_rows:
-                    ws_woe.cell(row=current_row, column=1, value=comp_label).font = Font(
+                # Test tablosu
+                test_rows = info.get("test_table")
+                if test_rows:
+                    ws_woe.cell(row=current_row, column=1, value="Test").font = Font(
                         name="Segoe UI", bold=True, color=S["ACCENT"], size=10)
                     current_row += 1
-                    df_comp = pd.DataFrame(comp_rows)
-                    end_r = _xl_write_df(ws_woe, df_comp, current_row, S, left_align_cols={1})
+                    end_r = _xl_write_df(ws_woe, pd.DataFrame(test_rows), current_row, S, left_align_cols={1})
+                    current_row = end_r + 2
+
+                # OOT tablosu
+                oot_rows = info.get("oot_table")
+                if oot_rows:
+                    ws_woe.cell(row=current_row, column=1, value="OOT").font = Font(
+                        name="Segoe UI", bold=True, color=S["ACCENT"], size=10)
+                    current_row += 1
+                    end_r = _xl_write_df(ws_woe, pd.DataFrame(oot_rows), current_row, S, left_align_cols={1})
                     current_row = end_r + 2
 
                 current_row += 1  # değişkenler arası boşluk

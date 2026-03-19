@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import _PLOT_LAYOUT, _AXIS_STYLE, _build_woe_dataset
+from utils.chart_helpers import _PLOT_LAYOUT, _AXIS_STYLE
 
 
 class SmLogitWrapper:
@@ -497,7 +497,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     target      = target_sel or config["target_col"]
     seg_col     = config.get("segment_col")
     seg_val     = config.get("segment_val")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val).reset_index(drop=True)
+    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     C           = float(c_val or 1.0)
 
     if target not in df_active.columns:
@@ -505,9 +505,15 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                         className="alert-info-custom"), _no
     y_all = pd.to_numeric(df_active[target], errors='coerce')
 
-    # ── Train / Test / OOT split ───────────────────────────────────────────────
-    _split_cfg = {**config, "test_size": int(config.get("test_size", 20))}
-    _df_tr, _df_te, _df_oot = get_splits(df_active, _split_cfg)
+    # ── Train / Test / OOT split — cache'ten oku ─────────────────────────────
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+    if f"{_pfx}_train" in _SERVER_STORE:
+        _df_tr  = _SERVER_STORE[f"{_pfx}_train"]
+        _df_te  = _SERVER_STORE.get(f"{_pfx}_test")
+        _df_oot = _SERVER_STORE.get(f"{_pfx}_oot")
+    else:
+        _split_cfg = {**config, "test_size": int(config.get("test_size", 20))}
+        _df_tr, _df_te, _df_oot = get_splits(df_active, _split_cfg)
 
     train_mask = df_active.index.isin(_df_tr.index)
     test_mask  = (df_active.index.isin(_df_te.index)
@@ -545,15 +551,15 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 fill = X[col].median() if pd.api.types.is_numeric_dtype(X[col]) \
                        else X[col].mode().iloc[0]
                 X[col] = X[col].fillna(fill)
-        X_tr = X.iloc[train_mask]
-        X_te = X.iloc[test_mask]
-        y_tr = y_all.iloc[train_mask]
-        y_te = y_all.iloc[test_mask]
+        X_tr = X.iloc[train_mask].reset_index(drop=True)
+        X_te = X.iloc[test_mask].reset_index(drop=True)
+        y_tr = y_all.iloc[train_mask].reset_index(drop=True)
+        y_te = y_all.iloc[test_mask].reset_index(drop=True)
         has_test = len(X_te) > 0
         has_oot  = oot_mask.any()
         if has_oot:
-            X_oot = X.iloc[oot_mask]
-            y_oot = y_all.iloc[oot_mask]
+            X_oot = X.iloc[oot_mask].reset_index(drop=True)
+            y_oot = y_all.iloc[oot_mask].reset_index(drop=True)
         else:
             X_oot = None
             y_oot = None
@@ -562,17 +568,17 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
 
         is_tree = algo in ("lgbm", "xgb", "rf")
         _use_sm_logit = (algo == "lr")
-        _is_woe = all(c.endswith("_woe") for c in X_tr.columns)
+        _is_woe = (label == "WoE")
         _skip_scale = is_tree or (_use_sm_logit and _is_woe)
         if not _skip_scale:
             scaler = StandardScaler()
-            X_tr_s  = scaler.fit_transform(X_tr)
-            X_te_s  = scaler.transform(X_te)  if has_test else np.empty((0, X_tr.shape[1]))
-            X_oot_s = scaler.transform(X_oot) if has_oot  else None
+            X_tr_s  = pd.DataFrame(scaler.fit_transform(X_tr), columns=X_tr.columns, index=X_tr.index)
+            X_te_s  = pd.DataFrame(scaler.transform(X_te), columns=X_tr.columns, index=X_te.index) if has_test else pd.DataFrame()
+            X_oot_s = pd.DataFrame(scaler.transform(X_oot), columns=X_tr.columns, index=X_oot.index) if has_oot and X_oot is not None else None
         else:
-            X_tr_s  = X_tr.values if hasattr(X_tr, 'values') else X_tr
-            X_te_s  = X_te.values  if has_test else np.empty((0, X_tr.shape[1]))
-            X_oot_s = X_oot.values if has_oot  else None
+            X_tr_s  = X_tr
+            X_te_s  = X_te  if has_test else pd.DataFrame()
+            X_oot_s = X_oot if has_oot  else None
 
         lr_summary_text = None
         try:
@@ -738,52 +744,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             except Exception:
                 shap_img_b64 = None
 
-        # ── VIF hesapla ──────────────────────────────────────────────────────
-        vif_data = None
-        if X_tr.shape[1] >= 2:
-            try:
-                from statsmodels.stats.outliers_influence import variance_inflation_factor as _vif
-                _X_vif = X_tr.values.astype(float)
-                vif_data = []
-                for j in range(_X_vif.shape[1]):
-                    try:
-                        v = float(_vif(_X_vif, j))
-                    except Exception:
-                        v = None
-                    vif_data.append({"Değişken": disp_names.get(X_tr.columns[j], X_tr.columns[j]),
-                                     "VIF": round(v, 2) if v is not None else None})
-            except Exception:
-                vif_data = None
-
-        # ── PSI hesapla (Train vs Test / OOT) ─────────────────────────────────
-        def _calc_psi(base, comp, n_bins=10):
-            """Population Stability Index."""
-            eps = 1e-4
-            mn, mx = float(base.min()), float(base.max())
-            if mn == mx:
-                return 0.0
-            bins = np.linspace(mn, mx, n_bins + 1)
-            bins[0]  = -np.inf
-            bins[-1] =  np.inf
-            b_pct = np.histogram(base, bins=bins)[0] / len(base)
-            c_pct = np.histogram(comp, bins=bins)[0] / len(comp)
-            b_pct = np.where(b_pct < eps, eps, b_pct)
-            c_pct = np.where(c_pct < eps, eps, c_pct)
-            return float(np.sum((c_pct - b_pct) * np.log(c_pct / b_pct)))
-
-        psi_data = None
-        if has_test or has_oot:
-            psi_data = {}
-            for col in X_tr.columns:
-                d_name = disp_names.get(col, col)
-                row = {"Değişken": d_name}
-                if has_test:
-                    row["PSI (Test)"]  = round(_calc_psi(X_tr[col].values, X_te[col].values), 4)
-                if has_oot and X_oot is not None:
-                    row["PSI (OOT)"]   = round(_calc_psi(X_tr[col].values, X_oot[col].values), 4)
-                psi_data[d_name] = row
-            psi_data = list(psi_data.values())
-
         # ── Sonuçları serialize et (Sonuç sekmesi için) ───────────────────────
         def _m_dict(m):
             if m is None:
@@ -831,8 +791,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             "importance_type": importance_type,
             "lr_summary_text": lr_summary_text,
             "shap_img_b64": shap_img_b64,
-            "vif_data": vif_data,
-            "psi_data": psi_data,
             "accent": accent,
             "label": label,
             "thr_label": thr_label,
@@ -897,35 +855,41 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     raw_disp = {c: c for c in X_raw.columns}
     raw_html, raw_results, raw_mdl, raw_scaler = _fit_and_render(X_raw, raw_disp, "Ham", "#4F8EF7")
 
-    # ── WoE model ─────────────────────────────────────────────────────────────
-    woe_cache_key = f"{key}_woe_{seg_col}_{seg_val}"
-    if woe_cache_key not in _SERVER_STORE:
-        woe_df_enc, _failed, _opt_dict = _build_woe_dataset(df_active, target, model_vars)
-        _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed, _opt_dict)
-    else:
-        stored = _SERVER_STORE[woe_cache_key]
-        # Eski 2-tuple format uyumu — opt_dict'i yeniden hesapla
-        if len(stored) == 2:
-            woe_df_enc, _failed = stored
-            _, _, _opt_dict = _build_woe_dataset(df_active, target, model_vars)
-            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed, _opt_dict)
-        else:
-            woe_df_enc, _failed, _opt_dict = stored
-        new_vars = [v for v in model_vars if f"{v}_woe" not in woe_df_enc.columns]
-        if new_vars:
-            extra, ef, eo = _build_woe_dataset(df_active, target, new_vars)
-            woe_df_enc = pd.concat([woe_df_enc, extra], axis=1)
-            _opt_dict = {**_opt_dict, **eo}
-            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _failed + ef, _opt_dict)
+    # ── WoE model — cache'ten oku ──────────────────────────────────────────────
+    _train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
+    _test_woe  = _SERVER_STORE.get(f"{_pfx}_test_woe")
+    _oot_woe   = _SERVER_STORE.get(f"{_pfx}_oot_woe")
+    _opt_dict  = _SERVER_STORE.get(f"{_pfx}_optb", {})
 
-    woe_feat_cols = [f"{v}_woe" for v in model_vars if f"{v}_woe" in woe_df_enc.columns]
+    # Cache yoksa veya model değişkenleri cache'te eksikse → fallback
+    if _train_woe is None:
+        from utils.chart_helpers import build_woe_datasets
+        woe_result = build_woe_datasets(_df_tr, _df_te, _df_oot, target, model_vars)
+        _train_woe = woe_result["train_woe"]
+        _test_woe  = woe_result["test_woe"]
+        _oot_woe   = woe_result["oot_woe"]
+        _opt_dict  = woe_result["optb_dict"]
+        _SERVER_STORE[f"{_pfx}_train_woe"] = _train_woe
+        _SERVER_STORE[f"{_pfx}_test_woe"]  = _test_woe
+        _SERVER_STORE[f"{_pfx}_oot_woe"]   = _oot_woe
+        _SERVER_STORE[f"{_pfx}_optb"]      = _opt_dict
+
+    # df_active boyutunda WoE DataFrame oluştur (model fit için mask'lerle çalışır)
+    woe_parts = [_train_woe]
+    if _test_woe is not None:
+        woe_parts.append(_test_woe)
+    if _oot_woe is not None:
+        woe_parts.append(_oot_woe)
+    woe_df_enc = pd.concat(woe_parts, axis=0).reindex(df_active.index)
+
+    woe_feat_cols = [v for v in model_vars if v in woe_df_enc.columns]
     woe_html = None
     woe_results = None
     if woe_feat_cols:
         X_woe     = woe_df_enc[woe_feat_cols].copy()
-        woe_disp  = {f"{v}_woe": v for v in model_vars}
+        woe_disp  = {v: v for v in model_vars}
         woe_html, woe_results, woe_mdl, woe_scaler = _fit_and_render(X_woe, woe_disp, "WoE", "#a78bfa")
-        failed_woe = [v for v in model_vars if f"{v}_woe" not in woe_df_enc.columns]
+        failed_woe = [v for v in model_vars if v not in woe_df_enc.columns]
         note_txt  = f"★ WoE — {len(woe_feat_cols)}/{len(model_vars)} değişken encode edildi"
         if failed_woe:
             note_txt += f"  |  encode edilemeyen: {', '.join(failed_woe)}"
@@ -938,83 +902,84 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             f"({len(model_vars)} değişken denendi: {', '.join(model_vars[:5])}{'...' if len(model_vars)>5 else ''})",
             className="alert-info-custom")
 
-    # ── WoE dağılım verisi (bin tablosu + monotonluk) ──────────────────────
+    # ── WoE dağılım verisi (bin tablosu + monotonluk) — cache'ten oku ───────
     woe_dist = None
     has_test_split = test_mask.any()
     has_oot_split  = oot_mask.any()
     if woe_feat_cols:
-        from modules.deep_dive import get_woe_detail
-        woe_dist = {}
-        # Train split
-        df_train_split = df_active[train_mask].reset_index(drop=True)
-        # Karşı taraf: Test varsa Test, yoksa OOT
-        if has_test_split:
-            df_comp_split = df_active[test_mask].reset_index(drop=True)
-            comp_label = "Test"
-        elif has_oot_split:
-            df_comp_split = df_active[oot_mask].reset_index(drop=True)
-            comp_label = "OOT"
-        else:
-            df_comp_split = None
-            comp_label = None
+        _all_woe_tables = _SERVER_STORE.get(f"{_pfx}_woe_tables", {})
+        woe_dist = {v: _all_woe_tables[v] for v in woe_feat_cols
+                    if v in _all_woe_tables}
 
-        for wc in woe_feat_cols:
-            var_name = wc.replace("_woe", "")
-            try:
-                bt_train, iv_train, _ = get_woe_detail(df_train_split, var_name, target)
-                if bt_train.empty:
-                    continue
-                # Monotonluk kontrolü: TOPLAM hariç WOE sütununa bak
-                woe_vals = bt_train[bt_train["Bin"] != "TOPLAM"]["WOE"].tolist()
-                woe_nums = [w for w in woe_vals if isinstance(w, (int, float))]
-                if len(woe_nums) >= 2:
-                    diffs = [woe_nums[i+1] - woe_nums[i] for i in range(len(woe_nums)-1)]
-                    if all(d >= 0 for d in diffs):
-                        monoton = "Artan ↑"
-                    elif all(d <= 0 for d in diffs):
-                        monoton = "Azalan ↓"
-                    else:
-                        monoton = "Monoton Değil ✗"
-                else:
-                    monoton = "–"
-
-                entry = {
-                    "train_table": bt_train.to_dict("records"),
-                    "iv_train": round(iv_train, 4),
-                    "monoton": monoton,
-                }
-
-                # Karşı taraf tablosu
-                if df_comp_split is not None:
-                    try:
-                        bt_comp, iv_comp, _ = get_woe_detail(df_comp_split, var_name, target)
-                        if not bt_comp.empty:
-                            entry["comp_table"] = bt_comp.to_dict("records")
-                            entry["iv_comp"] = round(iv_comp, 4)
-                            entry["comp_label"] = comp_label
-                    except Exception:
-                        pass
-
-                woe_dist[var_name] = entry
-            except Exception:
-                continue
-
-    # ── Korelasyon matrisleri ───────────────────────────────────────────────
-    raw_corr = X_raw[raw_cols].corr().round(4).to_dict() if len(raw_cols) > 1 else None
+    # ── Korelasyon — Train WoE üzerinden (tek çıktı) ────────────────────────
     woe_corr = None
     if woe_feat_cols and len(woe_feat_cols) > 1:
-        _woe_corr_df = woe_df_enc[woe_feat_cols].corr().round(4)
-        _woe_corr_df.index   = [c.replace("_woe", "") for c in _woe_corr_df.index]
-        _woe_corr_df.columns = [c.replace("_woe", "") for c in _woe_corr_df.columns]
+        _woe_train = woe_df_enc.loc[train_mask, woe_feat_cols]
+        _woe_corr_df = _woe_train.corr().round(4)
         woe_corr = _woe_corr_df.to_dict()
 
-    # ── Describe verisi (model değişkenleri) ────────────────────────────────
+    # ── PSI — Train WoE vs OOT WoE (tek çıktı) ──────────────────────────────
+    from utils.chart_helpers import calc_psi
+    psi_data = None
+    if woe_feat_cols and oot_mask.any():
+        psi_data = []
+        for vc in woe_feat_cols:
+            _tr_vals = woe_df_enc.loc[train_mask, vc].dropna().values
+            _oot_vals = woe_df_enc.loc[oot_mask, vc].dropna().values
+            if len(_tr_vals) > 0 and len(_oot_vals) > 0:
+                psi_val = round(calc_psi(_tr_vals, _oot_vals), 4)
+                psi_data.append({"Değişken": vc, "PSI (OOT)": psi_val})
+
+    # ── VIF — Train / Test / OOT ayrı, WoE üzerinden (tek çıktı) ─────────
+    def _calc_vif(X_df):
+        from statsmodels.stats.outliers_influence import variance_inflation_factor as _vif
+        _X = X_df.values.astype(float)
+        vif_list = []
+        for j in range(_X.shape[1]):
+            try:
+                v = float(_vif(_X, j))
+            except Exception:
+                v = None
+            vif_list.append(round(v, 2) if v is not None else None)
+        return vif_list
+
+    vif_data = None
+    if woe_feat_cols and len(woe_feat_cols) >= 2:
+        try:
+            _woe_tr = woe_df_enc.loc[train_mask, woe_feat_cols].dropna()
+            vif_tr = _calc_vif(_woe_tr)
+
+            vif_te = None
+            if test_mask.any():
+                _woe_te = woe_df_enc.loc[test_mask, woe_feat_cols].dropna()
+                if len(_woe_te) >= 2:
+                    vif_te = _calc_vif(_woe_te)
+
+            vif_oot = None
+            if oot_mask.any():
+                _woe_oot = woe_df_enc.loc[oot_mask, woe_feat_cols].dropna()
+                if len(_woe_oot) >= 2:
+                    vif_oot = _calc_vif(_woe_oot)
+
+            vif_data = []
+            for i, vc in enumerate(woe_feat_cols):
+                row = {"Değişken": vc, "Train VIF": vif_tr[i]}
+                if vif_te is not None:
+                    row["Test VIF"] = vif_te[i]
+                if vif_oot is not None:
+                    row["OOT VIF"] = vif_oot[i]
+                vif_data.append(row)
+        except Exception:
+            vif_data = None
+
+    # ── Describe — Train+Test, ham veri ───────────────────────────────────────
     from modules.profiling import compute_profile
     _desc_cols = [v for v in model_vars if v in df_active.columns]
     describe_data = None
     if _desc_cols:
         try:
-            _desc_df = compute_profile(df_active[_desc_cols])
+            _desc_mask = train_mask | test_mask
+            _desc_df = compute_profile(df_active.loc[_desc_mask, _desc_cols])
             describe_data = _desc_df.to_dict("records")
         except Exception:
             describe_data = None
@@ -1029,8 +994,10 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         "split_info": split_info,
         "thr_label": _thr_label,
         "opt_thr": _opt_thr,
-        "corr": {"raw": raw_corr, "woe": woe_corr},
+        "corr": woe_corr,
         "woe_dist": woe_dist,
+        "psi_data": psi_data,
+        "vif_data": vif_data,
         "describe_data": describe_data,
         "model_note": pending_note or "",
         "tabs": {

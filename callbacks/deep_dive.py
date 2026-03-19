@@ -171,7 +171,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
     _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
 
     # WOE — sadece train üzerinden
-    woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(
+    woe_df, iv_total_dd, woe_bin_edges, _ = get_woe_detail(
         df_train, col, target, _max_bins, force_dtype=_force_dtype)
 
     # PSI cutoff: OOT date öncelikli, yoksa manuel seçim
@@ -465,26 +465,29 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
             if is_train:
                 chart_df = ref_woe_df[ref_woe_df["Bin"] != "TOPLAM"].copy()
                 table_df = ref_woe_df.copy()
+                _period_iv = iv_total
             else:
-                # Test / OOT: train bin edges ile bad rate hesapla
-                p_df = compute_period_badrate(period_df, col, target,
-                                              ref_woe_df, ref_bin_edges)
-                if p_df.empty:
+                # Test / OOT: train bin edges ile bad rate + WOE + IV Katkı
+                p_df, _period_iv = compute_period_badrate(
+                    period_df, col, target, ref_woe_df, ref_bin_edges)
+                if isinstance(p_df, pd.DataFrame) and p_df.empty:
                     return None
                 chart_df = p_df[p_df["Bin"] != "TOPLAM"].copy()
-                # Tablo: period sonuçları + train WOE referansı
                 table_df = p_df.copy()
-                woe_ref = ref_woe_df.set_index("Bin")["WOE"].to_dict()
-                table_df["WOE (Train)"] = table_df["Bin"].map(
-                    lambda b: woe_ref.get(b, "")
-                )
 
             n_period   = len(period_df)
             bad_n      = int(period_df[target].sum())
             br_overall = round(bad_n / n_period * 100, 2) if n_period > 0 else 0.0
 
+            # IV label ve renk
+            _p_iv_label = ("Çok Zayıf" if _period_iv < 0.02 else "Zayıf" if _period_iv < 0.1
+                           else "Orta" if _period_iv < 0.3 else "Güçlü" if _period_iv < 0.5
+                           else "Şüpheli")
+            _p_iv_color = {"Çok Zayıf": "#4a5568", "Zayıf": "#f59e0b", "Orta": "#4F8EF7",
+                           "Güçlü": "#10b981", "Şüpheli": "#ef4444"}.get(_p_iv_label, "#4F8EF7")
+
             title_text = (f"{period_label}  ·  n={n_period:,}  ·  Bad Rate: {br_overall:.2f}%"
-                          + (f"  |  IV: {iv_total:.4f}  [{iv_label}]" if is_train else ""))
+                          f"  |  IV: {_period_iv:.4f}  [{_p_iv_label}]")
 
             fig = go.Figure()
             fig.add_trace(go.Bar(
@@ -503,7 +506,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
             fig.update_layout(
                 **_PLOT_LAYOUT,
                 title=dict(text=title_text,
-                           font=dict(color=iv_color if is_train else "#c8cdd8", size=12)),
+                           font=dict(color=_p_iv_color, size=12)),
                 xaxis=dict(**_AXIS_STYLE, tickangle=-30),
                 yaxis=dict(**_AXIS_STYLE, title="Bad Rate %", ticksuffix="%"),
                 yaxis2=dict(title="Adet", overlaying="y", side="right", showgrid=False,

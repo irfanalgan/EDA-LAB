@@ -76,6 +76,151 @@ def _build_woe_dataset(df: pd.DataFrame, target: str, cols: list) -> tuple:
     return woe_df, failed, opt_dict
 
 
+def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
+                       target: str, cols: list) -> dict:
+    """
+    Train üzerinde OptimalBinning fit → tek döngüde IV, optb, bin_edges,
+    WoE transform (train + test + oot) üretir.
+
+    Returns dict:
+        "train_woe":  pd.DataFrame  — train WoE değerleri
+        "test_woe":   pd.DataFrame | None
+        "oot_woe":    pd.DataFrame | None
+        "iv_df":      pd.DataFrame  — Değişken, IV, Eksik %
+        "optb_dict":  dict          — {col: OptimalBinning}
+        "bins_dict":  dict          — {col: [bin_edges]}
+        "iv_tables":  dict          — {col: binning_table DataFrame}
+        "failed":     list          — encode edilemeyen kolonlar
+    """
+    from optbinning import OptimalBinning as _OB
+    from modules.deep_dive import SPECIAL_VALUES
+
+    train_woe_data = {}
+    test_woe_data = {}
+    oot_woe_data = {}
+    iv_records = []
+    optb_dict = {}
+    bins_dict = {}
+    iv_tables = {}
+    failed = []
+
+    # Eksik % → train + test
+    if df_test is not None:
+        _eksik_df = pd.concat([df_train, df_test], ignore_index=True)
+    else:
+        _eksik_df = df_train
+
+    y_train = pd.to_numeric(df_train[target], errors="coerce")
+    _clean_mask = y_train.notna()
+
+    for col in cols:
+        if col == target:
+            continue
+        try:
+            is_numeric = pd.api.types.is_numeric_dtype(df_train[col])
+
+            # Fit on train
+            _local = df_train.loc[_clean_mask, [col, target]].copy()
+            _local[target] = y_train[_clean_mask].astype(int)
+
+            kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
+                          max_n_bins=4, solver="cp",
+                          dtype="numerical" if is_numeric else "categorical")
+            if is_numeric:
+                kwargs["special_codes"] = list(SPECIAL_VALUES)
+
+            optb = _OB(**kwargs)
+            optb.fit(_local[col].values, _local[target].values)
+
+            # IV table + IV value
+            bt = optb.binning_table.build(show_digits=8)
+            iv = float(bt.loc["Totals", "IV"])
+            iv_tables[col] = bt
+            optb_dict[col] = optb
+
+            # Bin edges
+            if is_numeric and hasattr(optb, "splits") and optb.splits is not None:
+                edges = list(optb.splits)
+                edges.insert(0, -np.inf)
+                edges.append(np.inf)
+                bins_dict[col] = edges
+
+            # WoE transform — train
+            _tr_woe = optb.transform(df_train[col].values, metric="woe",
+                                     metric_missing="empirical",
+                                     metric_special="empirical")
+            train_woe_data[col] = pd.Series(_tr_woe, index=df_train.index).fillna(0.0)
+
+            # WoE transform — test
+            if df_test is not None and len(df_test) > 0:
+                _te_woe = optb.transform(df_test[col].values, metric="woe",
+                                         metric_missing="empirical",
+                                         metric_special="empirical")
+                test_woe_data[col] = pd.Series(_te_woe, index=df_test.index).fillna(0.0)
+
+            # WoE transform — oot
+            if df_oot is not None and len(df_oot) > 0:
+                _oot_woe = optb.transform(df_oot[col].values, metric="woe",
+                                          metric_missing="empirical",
+                                          metric_special="empirical")
+                oot_woe_data[col] = pd.Series(_oot_woe, index=df_oot.index).fillna(0.0)
+
+            # IV record
+            eksik_pct = round(_eksik_df[col].isna().mean() * 100, 2)
+            iv_records.append({"Değişken": col, "IV": round(iv, 4), "Eksik %": eksik_pct})
+
+        except Exception:
+            eksik_pct = round(_eksik_df[col].isna().mean() * 100, 2) if col in _eksik_df.columns else 0.0
+            iv_records.append({"Değişken": col, "IV": 0.0, "Eksik %": eksik_pct})
+            failed.append(col)
+
+    # Build DataFrames
+    df_train_woe = pd.DataFrame(train_woe_data, index=df_train.index)
+    df_test_woe = pd.DataFrame(test_woe_data, index=df_test.index) if df_test is not None and test_woe_data else None
+    df_oot_woe = pd.DataFrame(oot_woe_data, index=df_oot.index) if df_oot is not None and oot_woe_data else None
+
+    iv_df = pd.DataFrame(iv_records).sort_values("IV", ascending=False).reset_index(drop=True)
+
+    return {
+        "train_woe": df_train_woe,
+        "test_woe": df_test_woe,
+        "oot_woe": df_oot_woe,
+        "iv_df": iv_df,
+        "optb_dict": optb_dict,
+        "bins_dict": bins_dict,
+        "iv_tables": iv_tables,
+        "failed": failed,
+    }
+
+
+# ── PSI — Train WoE vs OOT WoE ───────────────────────────────────────────────
+def calc_psi(base: np.ndarray, comp: np.ndarray, n_bins: int = 10) -> float:
+    """
+    Population Stability Index: base (train WoE) vs comp (OOT WoE).
+    Tek kaynak — var_summary ve playground aynı fonksiyonu kullanır.
+    """
+    eps = 1e-4
+    mn, mx = float(base.min()), float(base.max())
+    if mn == mx:
+        return 0.0
+    bins = np.linspace(mn, mx, n_bins + 1)
+    bins[0] = -np.inf
+    bins[-1] = np.inf
+    b_pct = np.histogram(base, bins=bins)[0] / len(base)
+    c_pct = np.histogram(comp, bins=bins)[0] / len(comp)
+    b_pct = np.where(b_pct < eps, eps, b_pct)
+    c_pct = np.where(c_pct < eps, eps, c_pct)
+    return float(np.sum((c_pct - b_pct) * np.log(c_pct / b_pct)))
+
+
+def psi_label(psi_val: float) -> str:
+    if psi_val < 0.10:
+        return "Stabil"
+    if psi_val < 0.25:
+        return "Hafif Kayma"
+    return "Kritik Kayma"
+
+
 # ── Yardımcı: r Badge ────────────────────────────────────────────────────────
 def _make_r_badge(r):
     if np.isnan(r):

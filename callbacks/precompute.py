@@ -9,11 +9,12 @@ import pandas as pd
 
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
+from utils.chart_helpers import build_woe_datasets
 from modules.profiling import compute_profile
-from modules.deep_dive import compute_iv_ranking_optimal
 from modules.correlation import compute_correlation_matrix
 from modules.screening import screen_columns
+from modules.deep_dive import get_woe_detail, _build_binning_table_from_edges
 
 
 # ── Precompute yardımcıları ───────────────────────────────────────────────────
@@ -118,9 +119,15 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     durations = {}
 
-    # Profil yüklenmiş ve cache zaten doluysa → skip
-    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
-    if iv_cache_key in _SERVER_STORE:
+    cfg = config or {
+        "target_col": target, "date_col": date_col, "oot_date": None,
+        "segment_col": seg_col, "target_type": "binary",
+        "has_test_split": False, "test_size": 20,
+    }
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    # Zaten hesaplanmışsa skip
+    if f"{_pfx}_train" in _SERVER_STORE:
         _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": {}, "done": True}
         return
 
@@ -144,46 +151,120 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         durations["profiling"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 2, "durations": dict(durations), "done": False}
 
-    # ── Adım 2: IV Ranking ───────────────────────────────────────────────────
+    # ── Adım 2: Split — 6 DataFrame oluştur ──────────────────────────────────
     try:
         t0 = time.perf_counter()
-        iv_df = compute_iv_ranking_optimal(df_active, target)
-        if not iv_df.empty and iv_df["IV"].sum() > 0:
-            _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = iv_df
+        df_train, df_test, df_oot = get_splits(df_active, cfg)
+        _SERVER_STORE[f"{_pfx}_train"] = df_train
+        _SERVER_STORE[f"{_pfx}_test"]  = df_test   # None olabilir
+        _SERVER_STORE[f"{_pfx}_oot"]   = df_oot    # None olabilir
+
+        # Screening'den geçen kolonlar
+        screen_data = _SERVER_STORE.get(f"{key}_screen")
+        if screen_data:
+            var_list = [c for c in screen_data[0] if c != target]
+        else:
+            var_list = [c for c in df_train.columns if c != target
+                        and c != date_col and c != seg_col]
+
+        # Tek döngüde WoE fit (train) + IV + transform (train/test/oot)
+        woe_result = build_woe_datasets(df_train, df_test, df_oot,
+                                         target, var_list)
+
+        _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
+        _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
+        _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]
+        _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"]  = woe_result["iv_df"]
+        _SERVER_STORE[f"{_pfx}_optb"]      = woe_result["optb_dict"]
+        _SERVER_STORE[f"{_pfx}_bins"]      = woe_result["bins_dict"]
+        _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
+        _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
+
+        # ── WoE dağılım tabloları (train/test/oot) — tek seferlik ──────────────
+        optb_dict = woe_result["optb_dict"]
+        iv_df = woe_result["iv_df"]
+        woe_tables = {}
+        for var in var_list:
+            _optb = optb_dict.get(var)
+            if _optb is None:
+                continue
+            try:
+                # Train tablosu: optb.binning_table.build() → get_woe_detail formatı
+                bt_train, iv_train, _, _ = get_woe_detail(
+                    df_train, var, target, fitted_optb=_optb, use_edges=False)
+                if bt_train.empty:
+                    continue
+
+                # Monotonluk
+                woe_vals = bt_train[bt_train["Bin"] != "TOPLAM"]["WOE"].tolist()
+                woe_nums = [w for w in woe_vals if isinstance(w, (int, float))]
+                if len(woe_nums) >= 2:
+                    diffs = [woe_nums[i+1] - woe_nums[i] for i in range(len(woe_nums)-1)]
+                    if all(d >= 0 for d in diffs):
+                        monoton = "Artan ↑"
+                    elif all(d <= 0 for d in diffs):
+                        monoton = "Azalan ↓"
+                    else:
+                        monoton = "Monoton Değil ✗"
+                else:
+                    monoton = "–"
+
+                entry = {
+                    "train_table": bt_train.to_dict("records"),
+                    "iv_train": round(iv_train, 4),
+                    "monoton": monoton,
+                }
+
+                # Test tablosu
+                if df_test is not None and len(df_test) > 0:
+                    try:
+                        bt_test, iv_test, _, _ = get_woe_detail(
+                            df_test, var, target, fitted_optb=_optb, use_edges=True)
+                        if not bt_test.empty:
+                            entry["test_table"] = bt_test.to_dict("records")
+                            entry["iv_test"] = round(iv_test, 4)
+                    except Exception:
+                        pass
+
+                # OOT tablosu
+                if df_oot is not None and len(df_oot) > 0:
+                    try:
+                        bt_oot, iv_oot, _, _ = get_woe_detail(
+                            df_oot, var, target, fitted_optb=_optb, use_edges=True)
+                        if not bt_oot.empty:
+                            entry["oot_table"] = bt_oot.to_dict("records")
+                            entry["iv_oot"] = round(iv_oot, 4)
+                    except Exception:
+                        pass
+
+                woe_tables[var] = entry
+            except Exception:
+                continue
+        _SERVER_STORE[f"{_pfx}_woe_tables"] = woe_tables
+
         durations["iv_ranking"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["iv_ranking"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 3, "durations": dict(durations), "done": False}
 
-    # ── Adım 3: Korelasyon ───────────────────────────────────────────────────
+    # ── Adım 3: Korelasyon (Train WoE, tüm değişkenler) ─────────────────────
     try:
         t0 = time.perf_counter()
-        num_cols_corr = [c for c in df_active.select_dtypes(include=[np.number]).columns
-                         if c != target][:30]
-        corr_df = compute_correlation_matrix(df_active, num_cols_corr)
-        _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}_precomp"] = (corr_df, num_cols_corr)
+        train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
+        if train_woe is not None and not train_woe.empty:
+            num_cols_corr = list(train_woe.columns)[:30]
+            corr_df = compute_correlation_matrix(train_woe, num_cols_corr)
+            _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}_precomp"] = (corr_df, num_cols_corr)
         durations["correlation"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["correlation"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": False}
 
-    # ── Adım 4: Değişken Özeti (WoE) ───────────────────────────────────────────
+    # ── Adım 4: Değişken Özeti tablosu ───────────────────────────────────────
     try:
         t0 = time.perf_counter()
-        cfg = config or {
-            "target_col": target, "date_col": date_col, "oot_date": None,
-            "segment_col": seg_col, "target_type": "binary",
-            "has_test_split": False, "test_size": 20,
-        }
-        oot_date_vs = cfg.get("oot_date")
-        if oot_date_vs and date_col and date_col in df_active.columns:
-            _mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date_vs)
-            df_train_vs = df_active[_mask]
-        else:
-            df_train_vs = df_active
         from callbacks.var_summary import compute_var_summary_table
-        compute_var_summary_table(df_active, df_train_vs, cfg, key,
-                                  seg_col, seg_val, use_woe=True)
+        compute_var_summary_table(cfg, key, seg_col, seg_val)
         durations["var_summary"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["var_summary"] = None

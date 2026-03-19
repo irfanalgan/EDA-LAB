@@ -1,143 +1,74 @@
+import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
+import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import _build_woe_dataset
-from modules.deep_dive import compute_iv_ranking_optimal, compute_psi, get_woe_detail
+from utils.chart_helpers import build_woe_datasets, calc_psi, psi_label
+from modules.deep_dive import get_woe_detail
 from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
 
 
 # ── Hesaplama fonksiyonu (precompute + callback ortak) ────────────────────────
-def compute_var_summary_table(df_active, df_train, config, key,
-                              seg_col, seg_val, use_woe=True):
+def compute_var_summary_table(config, key, seg_col, seg_val):
     """
-    Değişken özeti DataFrame'ini hesaplar ve cache'e yazar.
+    Merkezi cache'teki 6 DataFrame'den değişken özeti tablosu üretir.
     Precompute thread'inden veya callback'ten çağrılabilir.
-    Returns: summary DataFrame (tüm kolonlar dahil)
+    Returns: summary DataFrame
     """
-    target      = config["target_col"]
-    date_col    = config.get("date_col")
-    oot_date    = config.get("oot_date")
+    target   = config["target_col"]
+    _pfx     = f"{key}_ds_{seg_col}_{seg_val}"
 
-    # ── 1. IV (Information Value) ────────────────────────────────────────────
-    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
-    if iv_cache_key in _SERVER_STORE:
-        iv_df = _SERVER_STORE[iv_cache_key]
-    else:
-        iv_df = compute_iv_ranking_optimal(df_train, target)
-        _SERVER_STORE[iv_cache_key] = iv_df
+    # ── Cache'ten oku ─────────────────────────────────────────────────────────
+    iv_df       = _SERVER_STORE.get(f"{key}_iv_{seg_col}_{seg_val}")
+    train_woe   = _SERVER_STORE.get(f"{_pfx}_train_woe")
+    oot_woe     = _SERVER_STORE.get(f"{_pfx}_oot_woe")
+    optb_dict   = _SERVER_STORE.get(f"{_pfx}_optb", {})
+    df_test     = _SERVER_STORE.get(f"{_pfx}_test")
+    df_oot      = _SERVER_STORE.get(f"{_pfx}_oot")
 
-    summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
+    if iv_df is None or iv_df.empty:
+        return pd.DataFrame()
+
+    summary = iv_df[["Değişken", "IV", "Eksik %"]].copy()
     var_list = summary["Değişken"].tolist()
 
-    # ── 2. WoE dataset (gerekiyorsa) ──────────────────────────────────────────
-    if use_woe:
-        woe_cache_key = f"{key}_woe_{seg_col}_{seg_val}"
-        if woe_cache_key not in _SERVER_STORE:
-            woe_df_enc, _f, _o = _build_woe_dataset(df_active, target, var_list)
-            _SERVER_STORE[woe_cache_key] = (woe_df_enc, _f, _o)
-        else:
-            stored = _SERVER_STORE[woe_cache_key]
-            woe_df_enc = stored[0]
-        woe_cols_present = [f"{v}_woe" for v in var_list if f"{v}_woe" in woe_df_enc.columns]
-        df_analysis = woe_df_enc[woe_cols_present].copy()
-        df_analysis[target] = df_active[target].values
-        col_rename = {f"{v}_woe": v for v in var_list}
-        df_analysis_renamed = df_analysis.rename(columns=col_rename)
-    else:
-        df_analysis_renamed = df_active
-
-    # ── 3. Korelasyon: yüksek korelasyon flag ─────────────────────────────────
-    corr_flag: dict[str, str] = {}
-    if use_woe:
-        try:
-            num_cols_c = [v for v in var_list if v in df_analysis_renamed.columns
-                          and pd.api.types.is_numeric_dtype(df_analysis_renamed[v])]
-            if len(num_cols_c) >= 2:
-                corr_df_woe = compute_correlation_matrix(df_analysis_renamed, num_cols_c)
-                high_pairs  = find_high_corr_pairs(corr_df_woe, threshold=0.75)
-                for _, row in high_pairs.iterrows():
-                    v1, v2 = row["Değişken 1"], row["Değişken 2"]
-                    r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
-                    for v in (v1, v2):
-                        if v not in corr_flag or r > float(corr_flag[v].split("r=")[-1].rstrip(")")):
-                            corr_flag[v] = f"⚠ (r={r:.2f})"
-        except Exception:
-            pass
-    else:
-        for k in _SERVER_STORE:
-            if k.startswith(f"{key}_corr_{seg_col}_{seg_val}_"):
-                try:
-                    corr_df_found, _ = _SERVER_STORE[k]
-                    high_pairs = find_high_corr_pairs(corr_df_found, threshold=0.75)
-                    for _, row in high_pairs.iterrows():
-                        v1, v2 = row["Değişken 1"], row["Değişken 2"]
-                        r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
-                        for v in (v1, v2):
-                            if v not in corr_flag or r > float(corr_flag[v].split("r=")[-1].rstrip(")")):
-                                corr_flag[v] = f"⚠ (r={r:.2f})"
-                except Exception:
-                    pass
-                break
-    summary["Yüksek Korr."] = summary["Değişken"].map(lambda v: corr_flag.get(v, "—"))
-
-    # ── 4. VIF ────────────────────────────────────────────────────────────────
-    vif_map: dict[str, float] = {}
-    if use_woe:
-        try:
-            num_cols_vif = [v for v in var_list if v in df_analysis_renamed.columns
-                            and pd.api.types.is_numeric_dtype(df_analysis_renamed[v])]
-            if len(num_cols_vif) >= 2:
-                vif_res = compute_vif(df_analysis_renamed, num_cols_vif)
-                if not vif_res.empty and "Değişken" in vif_res.columns:
-                    for _, row in vif_res.iterrows():
-                        vif_map[row["Değişken"]] = row["VIF"]
-        except Exception:
-            pass
-    else:
-        for k in _SERVER_STORE:
-            if k.startswith(f"{key}_vif_{seg_col}_{seg_val}_"):
-                vif_df_cached = _SERVER_STORE[k]
-                if not vif_df_cached.empty and "Değişken" in vif_df_cached.columns and "VIF" in vif_df_cached.columns:
-                    for _, row in vif_df_cached.iterrows():
-                        vif_map[row["Değişken"]] = row["VIF"]
-                break
-    summary["VIF"] = summary["Değişken"].map(
-        lambda v: round(vif_map[v], 1) if v in vif_map else "—"
-    )
-
-    # ── 5. PSI (batch) ────────────────────────────────────────────────────────
-    psi_map: dict[str, float] = {}
-    psi_label_map: dict[str, str] = {}
-    if date_col:
+    # ── PSI — Train WoE vs OOT WoE ──────────────────────────────────────────
+    psi_map = {}
+    psi_label_map = {}
+    if train_woe is not None and oot_woe is not None and not oot_woe.empty:
         for var in var_list:
+            if var not in train_woe.columns:
+                continue
+            if var not in oot_woe.columns:
+                continue
             try:
-                try:
-                    _, _, _bin_edges = get_woe_detail(df_train, var, target)
-                except Exception:
-                    _bin_edges = None
-                res = compute_psi(df_active, var, target,
-                                  date_col=date_col, cutoff_date=oot_date,
-                                  bin_edges=_bin_edges)
-                if res.get("psi") is not None:
-                    psi_map[var]       = res["psi"]
-                    psi_label_map[var] = res["label"]
+                tr_vals = train_woe[var].values
+                oot_vals = oot_woe[var].values
+                psi_val = round(calc_psi(tr_vals, oot_vals), 4)
+                psi_map[var] = psi_val
+                psi_label_map[var] = psi_label(psi_val)
             except Exception:
                 pass
-    summary["PSI"] = summary["Değişken"].map(
-        lambda v: round(psi_map[v], 4) if v in psi_map else ("—" if not date_col else "Hata")
-    )
-    summary["PSI Durum"] = summary["Değişken"].map(lambda v: psi_label_map.get(v, "—"))
 
-    # ── 5b. Monotonluk (Test / OOT) ───────────────────────────────────────────
+    summary["PSI Değeri"] = summary["Değişken"].map(
+        lambda v: psi_map.get(v, "—")
+    )
+    summary["PSI Durumu"] = summary["Değişken"].map(
+        lambda v: psi_label_map.get(v, "—")
+    )
+
+    # ── Monotonluk (Test / OOT) — train'in fitted optb'si ile ────────────────
     def _check_monotonic(df_split, var, target_col):
         if df_split is None or len(df_split) < 50:
             return None
         try:
-            woe_df, iv_val, _ = get_woe_detail(df_split, var, target_col)
+            _fitted = optb_dict.get(var)
+            woe_df, iv_val, _, _ = get_woe_detail(df_split, var, target_col,
+                                                    fitted_optb=_fitted)
             if woe_df.empty or iv_val == 0:
                 return None
             main = woe_df[~woe_df["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
@@ -153,24 +84,56 @@ def compute_var_summary_table(df_active, df_train, config, key,
         except Exception:
             return None
 
-    mono_test: dict[str, str] = {}
-    mono_oot:  dict[str, str] = {}
-
-    _, df_test_split, df_oot_split = get_splits(df_active, config)
+    mono_test = {}
+    mono_oot  = {}
     for var in var_list:
-        mono_test[var] = _check_monotonic(df_test_split, var, target) or "—"
-        mono_oot[var]  = _check_monotonic(df_oot_split,  var, target) or "—"
+        mono_test[var] = _check_monotonic(df_test, var, target) or "—"
+        mono_oot[var]  = _check_monotonic(df_oot,  var, target) or "—"
 
     summary["Test Monoton"] = summary["Değişken"].map(lambda v: mono_test.get(v, "—"))
     summary["OOT Monoton"]  = summary["Değişken"].map(lambda v: mono_oot.get(v, "—"))
 
-    # ── 6. Öneri mantığı ──────────────────────────────────────────────────────
+    # ── Korelasyon — Train WoE, tüm değişkenler ─────────────────────────────
+    corr_map = {}
+    if train_woe is not None and not train_woe.empty:
+        try:
+            num_cols = [v for v in var_list if v in train_woe.columns]
+            if len(num_cols) >= 2:
+                corr_df = compute_correlation_matrix(train_woe[num_cols], num_cols)
+                high_pairs = find_high_corr_pairs(corr_df, threshold=0.0)
+                for _, row in high_pairs.iterrows():
+                    v1, v2 = row["Değişken 1"], row["Değişken 2"]
+                    r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
+                    for v in (v1, v2):
+                        if v not in corr_map or r > corr_map[v]:
+                            corr_map[v] = round(r, 2)
+        except Exception:
+            pass
+    summary["Korr Değeri"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
+
+    # ── VIF — Train WoE, tüm değişkenler ─────────────────────────────────────
+    vif_map = {}
+    if train_woe is not None and not train_woe.empty:
+        try:
+            num_cols_vif = [v for v in var_list if v in train_woe.columns]
+            if len(num_cols_vif) >= 2:
+                vif_res = compute_vif(train_woe[num_cols_vif], num_cols_vif)
+                if not vif_res.empty and "Değişken" in vif_res.columns:
+                    for _, row in vif_res.iterrows():
+                        vif_map[row["Değişken"]] = row["VIF"]
+        except Exception:
+            pass
+    summary["Train VIF"] = summary["Değişken"].map(
+        lambda v: round(vif_map[v], 1) if v in vif_map else "—"
+    )
+
+    # ── Öneri mantığı ────────────────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
-        psi_val   = row["PSI"] if isinstance(row["PSI"], (int, float)) else None
-        high_corr = row["Yüksek Korr."] != "—"
-        vif_val   = row["VIF"] if isinstance(row["VIF"], (int, float)) else None
+        psi_val   = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
+        corr_val  = row["Korr Değeri"] if isinstance(row["Korr Değeri"], (int, float)) else None
+        vif_val   = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
 
         cik_reasons = []
         if iv_val < 0.02:
@@ -190,8 +153,8 @@ def compute_var_summary_table(df_active, df_train, config, key,
             inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
         if psi_val is not None and psi_val > 0.10:
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
-        if high_corr:
-            inc_reasons.append(f"Korr.{row['Yüksek Korr.']}")
+        if corr_val is not None and corr_val >= 0.75:
+            inc_reasons.append(f"Korr={corr_val:.2f}≥0.75")
         if vif_val is not None and vif_val > 5.0:
             inc_reasons.append(f"VIF={vif_val:.1f}>5")
 
@@ -204,14 +167,20 @@ def compute_var_summary_table(df_active, df_train, config, key,
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
 
-    col_order = ["Değişken", "Öneri", "Sebep", "IV", "Güç", "Eksik %",
-                 "PSI", "PSI Durum", "Test Monoton", "OOT Monoton",
-                 "Yüksek Korr.", "VIF"]
+    # Sıralama: Tut > İncele > Çıkar
+    _oneri_order = {"✅ Tut": 0, "⚠️ İncele": 1, "❌ Çıkar": 2}
+    summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
+    summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
+    summary = summary.reset_index(drop=True)
+
+    col_order = ["Değişken", "Öneri", "Sebep", "IV",
+                 "Test Monoton", "OOT Monoton",
+                 "Korr Değeri", "PSI Değeri", "PSI Durumu",
+                 "Train VIF", "Eksik %"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
     # Cache'e yaz
     _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary.copy()
-    # Playground önizlemesi için de yaz
     _SERVER_STORE[f"{key}_summary_{seg_col}_{seg_val}"] = summary.copy()
 
     return summary
@@ -226,18 +195,16 @@ def _render_var_summary(summary, use_woe):
         {"if": {"filter_query": '{Öneri} = "❌ Çıkar"',  "column_id": "Öneri"}, "color": "#ef4444", "fontWeight": "700"},
         {"if": {"filter_query": '{Öneri} = "⚠️ İncele"', "column_id": "Sebep"}, "color": "#f59e0b"},
         {"if": {"filter_query": '{Öneri} = "❌ Çıkar"',  "column_id": "Sebep"}, "color": "#ef4444"},
-        {"if": {"filter_query": '{Güç} = "Güçlü"',      "column_id": "Güç"},   "color": "#10b981"},
-        {"if": {"filter_query": '{Güç} = "Orta"',       "column_id": "Güç"},   "color": "#4F8EF7"},
-        {"if": {"filter_query": '{Güç} = "Zayıf"',      "column_id": "Güç"},   "color": "#f59e0b"},
-        {"if": {"filter_query": '{Güç} = "Çok Zayıf"',  "column_id": "Güç"},   "color": "#7e8fa4"},
-        {"if": {"filter_query": '{Güç} = "Şüpheli"',    "column_id": "Güç"},   "color": "#ef4444"},
-        {"if": {"filter_query": '{PSI Durum} = "Kritik Kayma"',  "column_id": "PSI Durum"}, "color": "#ef4444"},
-        {"if": {"filter_query": '{PSI Durum} = "Hafif Kayma"',   "column_id": "PSI Durum"}, "color": "#f59e0b"},
-        {"if": {"filter_query": '{PSI Durum} = "Stabil"',        "column_id": "PSI Durum"}, "color": "#10b981"},
+        {"if": {"filter_query": '{PSI Durumu} = "Kritik Kayma"',  "column_id": "PSI Durumu"}, "color": "#ef4444"},
+        {"if": {"filter_query": '{PSI Durumu} = "Hafif Kayma"',   "column_id": "PSI Durumu"}, "color": "#f59e0b"},
+        {"if": {"filter_query": '{PSI Durumu} = "Stabil"',        "column_id": "PSI Durumu"}, "color": "#10b981"},
         {"if": {"filter_query": '{Test Monoton} = "✅"', "column_id": "Test Monoton"}, "color": "#10b981"},
         {"if": {"filter_query": '{Test Monoton} = "❌"', "column_id": "Test Monoton"}, "color": "#ef4444"},
         {"if": {"filter_query": '{OOT Monoton} = "✅"',  "column_id": "OOT Monoton"},  "color": "#10b981"},
         {"if": {"filter_query": '{OOT Monoton} = "❌"',  "column_id": "OOT Monoton"},  "color": "#ef4444"},
+        {"if": {"filter_query": '{Korr Değeri} >= 0.75', "column_id": "Korr Değeri"}, "color": "#f59e0b", "fontWeight": "600"},
+        {"if": {"filter_query": '{Train VIF} >= 10',     "column_id": "Train VIF"},   "color": "#ef4444", "fontWeight": "600"},
+        {"if": {"filter_query": '{Train VIF} >= 5 && {Train VIF} < 10', "column_id": "Train VIF"}, "color": "#f59e0b"},
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
     ]
 
@@ -248,7 +215,7 @@ def _render_var_summary(summary, use_woe):
     tsv = summary.to_csv(sep="\t", index=False)
 
     woe_note = html.Div(
-        "★ PSI · Korelasyon · VIF — WoE dönüştürülmüş değerler üzerinden hesaplandı.",
+        "★ Korelasyon · VIF — Train WoE üzerinden  ·  Monotonluk — Train bin sınırlarıyla",
         style={"color": "#a78bfa", "fontSize": "0.75rem", "marginBottom": "0.75rem"},
     ) if use_woe else html.Div()
 
@@ -301,23 +268,26 @@ def _render_var_summary(summary, use_woe):
                                          "| 0.10–0.30 | Orta |\n"
                                          "| 0.30–0.50 | Güçlü |\n"
                                          "| > 0.50 | Şüpheli (overfit riski) |", "type": "markdown"},
-                "Güç":         {"value": "IV değerine göre değişken gücü kategorisi", "type": "markdown"},
+                "Test Monoton": {"value": "**Test** verisinde WoE bin sıralamasının monoton olup olmadığı "
+                                          "(Train'in bin sınırlarıyla).\n\n"
+                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — Test split yok veya hesaplanamadı", "type": "markdown"},
+                "OOT Monoton":  {"value": "**OOT** verisinde WoE bin sıralamasının monoton olup olmadığı "
+                                          "(Train'in bin sınırlarıyla).\n\n"
+                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — OOT split yok veya hesaplanamadı", "type": "markdown"},
+                "Korr Değeri":  {"value": "Başka bir değişkenle en yüksek **|r|** korelasyon değeri "
+                                          "(Train WoE üzerinden).\n\n"
+                                          "- **≥ 0.75** → İncele uyarısı", "type": "markdown"},
+                "PSI Değeri":   {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"
+                                          "| PSI | Durum |\n|---|---|\n"
+                                          "| < 0.10 | Stabil |\n"
+                                          "| 0.10–0.25 | Hafif Kayma |\n"
+                                          "| > 0.25 | Kritik Kayma |", "type": "markdown"},
+                "PSI Durumu":   {"value": "PSI değerine göre stabilite etiketi", "type": "markdown"},
+                "Train VIF":   {"value": "**Variance Inflation Factor** — çoklu doğrusal bağlantı ölçüsü "
+                                         "(Train WoE üzerinden)\n\n"
+                                         "- **< 5** — Normal\n- **5–10** — Dikkat\n- **> 10** — Kritik", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 80%** → Çıkar\n- **20–80%** → İncele", "type": "markdown"},
-                "PSI":         {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"
-                                         "| PSI | Durum |\n|---|---|\n"
-                                         "| < 0.10 | Stabil |\n"
-                                         "| 0.10–0.25 | Hafif Kayma |\n"
-                                         "| > 0.25 | Kritik Kayma |", "type": "markdown"},
-                "PSI Durum":   {"value": "PSI değerine göre stabilite etiketi", "type": "markdown"},
-                "Test Monoton": {"value": "**Test** verisinde WoE bin sıralamasının monoton (artan veya azalan) olup olmadığı.\n\n"
-                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — Test split yok veya hesaplanamadı", "type": "markdown"},
-                "OOT Monoton":  {"value": "**OOT** verisinde WoE bin sıralamasının monoton olup olmadığı.\n\n"
-                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — OOT split yok veya hesaplanamadı", "type": "markdown"},
-                "Yüksek Korr.": {"value": "Başka bir değişkenle **r ≥ 0.75** korelasyon varsa gösterir.\n"
-                                          "Yüksek korelasyon çoklu doğrusallık sorununa yol açabilir.", "type": "markdown"},
-                "VIF":         {"value": "**Variance Inflation Factor** — çoklu doğrusal bağlantı ölçüsü\n\n"
-                                         "- **< 5** — Normal\n- **5–10** — Dikkat\n- **> 10** — Kritik", "type": "markdown"},
             },
             tooltip_delay=0,
             tooltip_duration=None,
@@ -349,17 +319,20 @@ def _render_var_summary(summary, use_woe):
     Input("store-config", "data"),
     Input("btn-var-summary", "n_clicks"),
     Input("store-expert-exclude", "data"),
+    Input("main-tabs", "active_tab"),
     State("store-key", "data"),
     State("chk-varsummary-woe", "value"),
     prevent_initial_call=True,
 )
-def update_var_summary(config, n_clicks, expert_excluded, key, woe_toggle):
+def update_var_summary(config, n_clicks, expert_excluded, active_tab, key, woe_toggle):
+    if active_tab != "tab-var-summary":
+        return dash.no_update
     if not key or not config or not config.get("target_col"):
         return html.Div()
 
-    seg_col     = config.get("segment_col")
-    seg_val     = config.get("segment_val")
-    use_woe     = "woe" in (woe_toggle or [])
+    seg_col      = config.get("segment_col")
+    seg_val      = config.get("segment_val")
+    use_woe      = "woe" in (woe_toggle or [])
     excluded_set = set(expert_excluded or [])
 
     # Cache'den oku — precompute tarafından hazırlanmış olabilir
@@ -368,28 +341,38 @@ def update_var_summary(config, n_clicks, expert_excluded, key, woe_toggle):
 
     if cached is not None:
         summary = cached.copy()
-        # Elenen değişkenleri filtrele
         if excluded_set:
             summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
         return _render_var_summary(summary, use_woe)
 
-    # Cache yoksa hesapla (fallback — "Hesapla" butonuyla veya ilk açılışta)
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
+    # Cache yoksa: 6 DataFrame yoksa oluştur, sonra hesapla
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+    if f"{_pfx}_train" not in _SERVER_STORE:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+        target = config["target_col"]
+        date_col = config.get("date_col")
 
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    date_col  = config.get("date_col")
-    oot_date  = config.get("oot_date")
+        df_train, df_test, df_oot = get_splits(df_active, config)
+        _SERVER_STORE[f"{_pfx}_train"] = df_train
+        _SERVER_STORE[f"{_pfx}_test"]  = df_test
+        _SERVER_STORE[f"{_pfx}_oot"]   = df_oot
 
-    if oot_date and date_col and date_col in df_active.columns:
-        train_mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date)
-        df_train   = df_active[train_mask]
-    else:
-        df_train = df_active
+        var_list = [c for c in df_train.columns if c != target
+                    and c != date_col and c != seg_col]
+        woe_result = build_woe_datasets(df_train, df_test, df_oot, target, var_list)
+        _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
+        _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
+        _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]
+        _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = woe_result["iv_df"]
+        _SERVER_STORE[f"{_pfx}_optb"]      = woe_result["optb_dict"]
+        _SERVER_STORE[f"{_pfx}_bins"]      = woe_result["bins_dict"]
+        _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
+        _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
 
-    summary = compute_var_summary_table(df_active, df_train, config, key,
-                                        seg_col, seg_val, use_woe=use_woe)
+    summary = compute_var_summary_table(config, key, seg_col, seg_val)
 
     if excluded_set:
         summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)

@@ -155,17 +155,18 @@ def get_splits(df: pd.DataFrame, config: dict) -> tuple:
     df'yi config'e göre (df_train, df_test, df_oot) üçlüsüne böler.
 
     Kurallar:
-    - oot_date varsa: oot_date öncesi = train havuzu, oot_date sonrası = df_oot
-      - has_test_split True ise train havuzunu rastgele train/test'e böl
-      - Aksi hâlde df_test = None
-    - oot_date yoksa: df_oot = None, tüm veriyi rastgele train/test böl
+    - OOT: oot_date + date_col varsa tarihe göre bölünür, yoksa df_oot = None
+    - Test: has_test_split True ise config["test_size"] oranında rastgele bölünür
+      False ise df_test = None — hiçbir yerde kafasına göre split yapılmaz
+    - Train: Geri kalan veri
     """
     from sklearn.model_selection import train_test_split as _tts
 
     date_col  = config.get("date_col")
     oot_date  = config.get("oot_date")
     has_test  = bool(config.get("has_test_split"))
-    test_pct  = float(config.get("test_size") or 20) / 100
+    _ts = config.get("test_size")
+    test_pct  = float(_ts) / 100 if _ts is not None else 0.20
     target    = config.get("target_col")
 
     def _random_split(df_pool):
@@ -180,8 +181,9 @@ def get_splits(df: pd.DataFrame, config: dict) -> tuple:
         return df_pool.iloc[tr_idx].copy(), df_pool.iloc[te_idx].copy()
 
     # Tarih kolonuna göre sırala — OOT/train/test tutarlılığı için
+    # NOT: reset_index YAPILMAZ — orijinal index korunmalı ki mask eşleşmesi doğru olsun
     if date_col and date_col in df.columns:
-        df = df.sort_values(date_col, na_position="last").reset_index(drop=True)
+        df = df.sort_values(date_col, na_position="last")
 
     if oot_date and date_col and date_col in df.columns:
         dates = pd.to_datetime(df[date_col], errors="coerce")
@@ -194,7 +196,7 @@ def get_splits(df: pd.DataFrame, config: dict) -> tuple:
             df_train, df_test = df_pool, None
     else:
         df_oot = None
-        if len(df) >= 20:
+        if has_test and len(df) >= 20:
             df_train, df_test = _random_split(df)
         else:
             df_train, df_test = df.copy(), None
