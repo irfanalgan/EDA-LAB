@@ -247,6 +247,16 @@ EDA-LAB/
 
 ## Değişiklik Geçmişi
 
+### v1.5
+- **Loading Slideshow** — 8 eğitim slaytı (EDA Lab nedir, Veri Yükleme, Önizleme, Target & IV, Deep Dive, İstatistiksel Testler, Değişken Özeti, Playground); otomatik 8-saniye ilerleme; tıklanabilir navigasyon noktaları (●○○○); geçen süre sayacı
+- **CDN Reachability Check** — Google Fonts ve Bootstrap Icons iş ağında bloke olunca düşüş kalmıyor; conditional loading ile graceful fallback
+- **Playground WoE + LR** — Logistic Regression (statsmodels) için StandardScaler otomatik atlanıyor, sm.Logit doğrudan WoE değerlerine uygulanıyor
+- **Train/Test Split** — Otomatik stratify (target ≤10 unique değerse)
+- **Date Sorting** — Veri yüklendikten hemen sonra date column'a göre sıralanıyor (IV tutarlılığı)
+- **Playground Test Oranı** — UI'dan kaldırıldı, config değeri doğrudan kullanılıyor
+- **İstatistiksel Test Açıklamaları** — Tüm 5 test (Korelasyon, Chi², ANOVA, KS, VIF) yeniden yazıldı; kullanıcı-dostu "Çıktıyı nasıl okurum" bölümleri
+- **CSS v2.1** — Slideshow animasyonları, responsive tasarım, progress bar, Dash 4.0 dropdown refactor
+
 ### v1.4
 - **Target Tipi Tespiti** — `confirm_config` anında target kolonu otomatik olarak `binary | continuous | multiclass | categorical` olarak sınıflandırılır; tüm sekmeler bu bilgiyi kullanır
 - **Target & IV sekmesi** — binary dışı targetlar için IV/WoE yerine dağılım grafiği, temel istatistikler ve zaman serisi gösterilir; IV'nin binary-only olduğuna dair açıklama notu eklendi
