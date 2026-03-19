@@ -5,6 +5,7 @@ import dash
 from dash import html, Input, Output, State
 import dash_bootstrap_components as dbc
 import numpy as np
+import pandas as pd
 
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df
@@ -21,6 +22,7 @@ _PRECOMPUTE_STEPS = [
     {"key": "profiling",    "label": "Profil Analizi"},
     {"key": "iv_ranking",   "label": "IV Ranking"},
     {"key": "correlation",  "label": "Korelasyon Matrisi"},
+    {"key": "var_summary",  "label": "Değişken Özeti (WoE)"},
 ]
 
 def _precompute_step_row(step_key: str, label: str, status: str, duration: float = None):
@@ -103,7 +105,7 @@ def _build_modal_body_done(durations: dict):
 
 
 def _run_precompute_background(prog_key: str, key: str, target: str,
-                               date_col, seg_col, seg_val):
+                               date_col, seg_col, seg_val, config: dict = None):
     """Tüm precompute adımlarını background thread'de çalıştırır.
     İlerleme _PRECOMPUTE_PROGRESS[prog_key]'e yazılır, interval callback okur."""
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 0, "durations": {}, "done": False}
@@ -157,8 +159,30 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         durations["correlation"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["correlation"] = None
+    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": False}
 
-    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": True}
+    # ── Adım 4: Değişken Özeti (WoE) ───────────────────────────────────────────
+    try:
+        t0 = time.perf_counter()
+        cfg = config or {
+            "target_col": target, "date_col": date_col, "oot_date": None,
+            "segment_col": seg_col, "target_type": "binary",
+            "has_test_split": False, "test_size": 20,
+        }
+        oot_date_vs = cfg.get("oot_date")
+        if oot_date_vs and date_col and date_col in df_active.columns:
+            _mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date_vs)
+            df_train_vs = df_active[_mask]
+        else:
+            df_train_vs = df_active
+        from callbacks.var_summary import compute_var_summary_table
+        compute_var_summary_table(df_active, df_train_vs, cfg, key,
+                                  seg_col, seg_val, use_woe=True)
+        durations["var_summary"] = round(time.perf_counter() - t0, 1)
+    except Exception:
+        durations["var_summary"] = None
+
+    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": dict(durations), "done": True}
 
 
 # ── Callback: Yapılandırmayı Onayla ──────────────────────────────────────────
@@ -183,13 +207,14 @@ _FOOTER_DONE    = (_BTN_HIDDEN, {"fontSize": "0.85rem", "padding": "0.4rem 1.2re
     State("dd-date-col", "value"),
     State("dd-oot-date", "value"),
     State("dd-segment-col", "value"),
+    State("dd-segment-val", "value"),
     State("chk-train-test-split", "value"),
     State("input-test-size", "value"),
     State("store-key", "data"),
     prevent_initial_call=True,
 )
 def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
-                   train_test_val, test_size_cfg, key):
+                   segment_val, train_test_val, test_size_cfg, key):
     no_modal = (dash.no_update,) * 6  # modal, interval, body, close-style, done-style
     if not target_col or target_col == "":
         return (dash.no_update, dbc.Alert(
@@ -223,10 +248,13 @@ def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
     if segment_col:
         parts += [f"  ·  Segment: {segment_col}"]
 
+    # segment_val: kullanıcı seçtiyse onu kullan, yoksa None (tüm veri)
+    seg_val = segment_val if segment_val and segment_val != ["Tümü"] and "Tümü" not in (segment_val if isinstance(segment_val, list) else [segment_val]) else None
+
     # Background thread başlat — Dash thread'i bloklamaz
     t = threading.Thread(
         target=_run_precompute_background,
-        args=(prog_key, key, target_col, date_col, segment_col or None, None),
+        args=(prog_key, key, target_col, date_col, segment_col or None, seg_val, config),
         daemon=True,
     )
     t.start()

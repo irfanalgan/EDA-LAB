@@ -222,15 +222,18 @@ def load_csv(n_clicks,
     State("input-sql-server",     "value"),
     State("input-sql-database",   "value"),
     State("dd-sql-driver",        "value"),
+    State("chk-sql-top1000",      "value"),
     prevent_initial_call=True,
 )
 def load_data(n_clicks,
               t1, t2, t3,
               jk1_raw, jk2_raw, jk3_raw,
               table_count,
-              server, database, driver):
+              server, database, driver, top1000_val):
     if not t1 or not t1.strip():
         return dash.no_update, _warn("Lütfen bir tablo adı girin.")
+
+    top_n = 1000 if "top1000" in (top1000_val or []) else None
 
     tables = [t for t in [t1, t2, t3] if t and t.strip()]
     jk_raws = [jk1_raw, jk2_raw, jk3_raw]
@@ -248,21 +251,24 @@ def load_data(n_clicks,
                 tables=tables,
                 join_keys_per_table=jk_per_table[:len(tables)],
                 server=server, database=database, driver=driver,
+                top_n=top_n,
             )
             join_note = f"  ·  {len(tables)} tablo birleştirildi"
         else:
             df = get_data_from_sql(
                 tables[0],
                 server=server, database=database, driver=driver,
+                top_n=top_n,
             )
             join_note = ""
 
+        top_note = "  ·  TOP 1000" if top_n else ""
         df, converted = coerce_numeric_columns(df)
         key = str(uuid.uuid4())
         _SERVER_STORE[key] = df
         _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
-        return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}")
+        return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}{top_note}")
 
     except Exception as e:
         return dash.no_update, _err(str(e))

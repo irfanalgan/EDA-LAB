@@ -307,6 +307,14 @@ def build_sidebar():
                        style={"fontSize": "0.75rem", "color": "#4F8EF7",
                               "padding": "0", "marginBottom": "0.5rem"}),
 
+            dbc.Checklist(
+                id="chk-sql-top1000",
+                options=[{"label": " İlk 1000 satır (test için)", "value": "top1000"}],
+                value=[],
+                inline=True,
+                style={"fontSize": "0.73rem", "color": "#7e8fa4",
+                       "marginBottom": "0.4rem"},
+            ),
             dbc.Button("Veriyi Yükle", id="btn-load", className="btn-load mb-1", n_clicks=0),
 
             # State: kaç tablo görünür
@@ -860,7 +868,7 @@ def build_main():
                             id="chk-varsummary-woe",
                             options=[{"label": "PSI · Korelasyon · VIF — WoE dönüştürülmüş değerler üzerinden hesapla",
                                       "value": "woe"}],
-                            value=[],
+                            value=["woe"],
                             inline=True,
                             style={"color": "#c8cdd8", "fontSize": "0.83rem"},
                         ), width=10,

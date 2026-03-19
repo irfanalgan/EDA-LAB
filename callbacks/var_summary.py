@@ -6,49 +6,27 @@ from sklearn.feature_selection import mutual_info_classif, mutual_info_regressio
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _build_woe_dataset
 from modules.deep_dive import compute_iv_ranking_optimal, compute_psi, get_woe_detail
 from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
 
 
-# ── Callback: Değişken Özeti ───────────────────────────────────────────────────
-@app.callback(
-    Output("div-var-summary", "children"),
-    Input("btn-var-summary", "n_clicks"),
-    State("store-key", "data"),
-    State("store-config", "data"),
-    State("dd-segment-val", "value"),
-    State("dd-segment-col", "value"),
-    State("chk-varsummary-woe", "value"),
-    prevent_initial_call=True,
-)
-def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle):
-    if not n_clicks or not key or not config or not config.get("target_col"):
-        return html.Div()
-
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
-
+# ── Hesaplama fonksiyonu (precompute + callback ortak) ────────────────────────
+def compute_var_summary_table(df_active, df_train, config, key,
+                              seg_col, seg_val, use_woe=True):
+    """
+    Değişken özeti DataFrame'ini hesaplar ve cache'e yazar.
+    Precompute thread'inden veya callback'ten çağrılabilir.
+    Returns: summary DataFrame (tüm kolonlar dahil)
+    """
     target      = config["target_col"]
     date_col    = config.get("date_col")
     oot_date    = config.get("oot_date")
-    seg_col     = config.get("segment_col") or (seg_col_input or None)
     target_type = config.get("target_type", "binary")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
-    use_woe     = "woe" in (woe_toggle or [])
-
-    # OOT date varsa: IV/WOE sadece train (< oot_date) üzerinden hesaplanır
-    if oot_date and date_col and date_col in df_active.columns:
-        train_mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date)
-        df_train   = df_active[train_mask]
-    else:
-        df_train = df_active
+    is_binary   = target_type == "binary"
 
     # ── 1. IV (binary) veya Mutual Information (non-binary) ───────────────────
-    is_binary = target_type == "binary"
-
     if is_binary:
         iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_date}"
         if iv_cache_key in _SERVER_STORE:
@@ -60,7 +38,6 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
         var_list = summary["Değişken"].tolist()
     else:
-        # Mutual Information — binary olmayan targetlar için (train üzerinden)
         num_cols = [c for c in df_train.columns
                     if c != target and pd.api.types.is_numeric_dtype(df_train[c])]
         y_mi = pd.to_numeric(df_train[target], errors="coerce")
@@ -75,13 +52,13 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         except Exception:
             mi_scores = np.zeros(len(num_cols))
 
-        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)  # eksik % tüm veri
+        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)
         summary = pd.DataFrame({
             "Değişken": num_cols,
             "MI":        np.round(mi_scores, 6),
             "Eksik %":   eksik_pct.values,
         })
-        # MI gücü etiketleri (IV eşiklerine kaba benzeşim)
+
         def _mi_guc(v):
             if v < 0.01:  return "Çok Zayıf"
             if v < 0.05:  return "Zayıf"
@@ -91,7 +68,6 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         summary["Güç"] = summary["MI"].apply(_mi_guc)
         summary = summary.sort_values("MI", ascending=False).reset_index(drop=True)
         var_list = summary["Değişken"].tolist()
-        # IV sütununu "IV" yerine "MI" adıyla tutuyoruz — öneri mantığı aşağıda adapte
         summary = summary.rename(columns={"MI": "IV"})
 
     # ── 2. WoE dataset (gerekiyorsa) ──────────────────────────────────────────
@@ -102,11 +78,9 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
             _SERVER_STORE[woe_cache_key] = (woe_df_enc, _)
         else:
             woe_df_enc, _ = _SERVER_STORE[woe_cache_key]
-        # Analiz için df_analysis: _woe kolonları + target
         woe_cols_present = [f"{v}_woe" for v in var_list if f"{v}_woe" in woe_df_enc.columns]
         df_analysis = woe_df_enc[woe_cols_present].copy()
         df_analysis[target] = df_active[target].values
-        # Korelasyon/VIF/PSI için kolon adlarını orijinale eşle
         col_rename = {f"{v}_woe": v for v in var_list}
         df_analysis_renamed = df_analysis.rename(columns=col_rename)
     else:
@@ -115,12 +89,11 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     # ── 3. Korelasyon: yüksek korelasyon flag ─────────────────────────────────
     corr_flag: dict[str, str] = {}
     if use_woe:
-        # Taze hesapla — WoE kolonları üzerinden
         try:
-            num_cols = [v for v in var_list if v in df_analysis_renamed.columns
-                        and pd.api.types.is_numeric_dtype(df_analysis_renamed[v])]
-            if len(num_cols) >= 2:
-                corr_df_woe = compute_correlation_matrix(df_analysis_renamed, num_cols)
+            num_cols_c = [v for v in var_list if v in df_analysis_renamed.columns
+                          and pd.api.types.is_numeric_dtype(df_analysis_renamed[v])]
+            if len(num_cols_c) >= 2:
+                corr_df_woe = compute_correlation_matrix(df_analysis_renamed, num_cols_c)
                 high_pairs  = find_high_corr_pairs(corr_df_woe, threshold=0.75)
                 for _, row in high_pairs.iterrows():
                     v1, v2 = row["Değişken 1"], row["Değişken 2"]
@@ -131,7 +104,6 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         except Exception:
             pass
     else:
-        # Cache'den al
         for k in _SERVER_STORE:
             if k.startswith(f"{key}_corr_{seg_col}_{seg_val}_"):
                 try:
@@ -196,8 +168,40 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
     )
     summary["PSI Durum"] = summary["Değişken"].map(lambda v: psi_label_map.get(v, "—"))
 
-    # ── 5. Öneri mantığı ──────────────────────────────────────────────────────
-    # Non-binary: IV sütunu aslında MI — eşikler aynı (MI ölçeği benzer)
+    # ── 5b. Monotonluk (Test / OOT) ───────────────────────────────────────────
+    def _check_monotonic(df_split, var, target_col):
+        if df_split is None or len(df_split) < 50:
+            return None
+        try:
+            woe_df, iv_val, _ = get_woe_detail(df_split, var, target_col)
+            if woe_df.empty or iv_val == 0:
+                return None
+            main = woe_df[~woe_df["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
+            woes = main["WOE"].dropna().tolist()
+            if len(woes) < 2:
+                return None
+            woes_num = [float(w) for w in woes if w != ""]
+            if len(woes_num) < 2:
+                return None
+            is_asc  = all(woes_num[i] <= woes_num[i+1] for i in range(len(woes_num)-1))
+            is_desc = all(woes_num[i] >= woes_num[i+1] for i in range(len(woes_num)-1))
+            return "✅" if (is_asc or is_desc) else "❌"
+        except Exception:
+            return None
+
+    mono_test: dict[str, str] = {}
+    mono_oot:  dict[str, str] = {}
+
+    if is_binary:
+        _, df_test_split, df_oot_split = get_splits(df_active, config)
+        for var in var_list:
+            mono_test[var] = _check_monotonic(df_test_split, var, target) or "—"
+            mono_oot[var]  = _check_monotonic(df_oot_split,  var, target) or "—"
+
+    summary["Test Monoton"] = summary["Değişken"].map(lambda v: mono_test.get(v, "—"))
+    summary["OOT Monoton"]  = summary["Değişken"].map(lambda v: mono_oot.get(v, "—"))
+
+    # ── 6. Öneri mantığı ──────────────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
@@ -237,7 +241,29 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
 
-    # ── 6. Renk kodlaması ─────────────────────────────────────────────────────
+    # Non-binary: "IV" → "MI"
+    if not is_binary and "IV" in summary.columns:
+        summary = summary.rename(columns={"IV": "MI"})
+
+    iv_col_label = "IV" if is_binary else "MI"
+    col_order = ["Değişken", "Öneri", "Sebep", iv_col_label, "Güç", "Eksik %",
+                 "PSI", "PSI Durum", "Test Monoton", "OOT Monoton",
+                 "Yüksek Korr.", "VIF"]
+    summary = summary[[c for c in col_order if c in summary.columns]]
+
+    # Cache'e yaz
+    _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary.copy()
+    # Playground önizlemesi için de yaz
+    _SERVER_STORE[f"{key}_summary_{seg_col}_{seg_val}"] = summary.copy()
+
+    return summary
+
+
+# ── Render yardımcısı ─────────────────────────────────────────────────────────
+def _render_var_summary(summary, use_woe, is_binary):
+    """Cache'den veya taze hesaplamadan gelen summary DataFrame'ini HTML'e çevirir."""
+    iv_col_label = "IV" if is_binary else "MI"
+
     style_conditions = [
         {"if": {"filter_query": '{Öneri} = "✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
         {"if": {"filter_query": '{Öneri} = "⚠️ İncele"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
@@ -252,39 +278,16 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
         {"if": {"filter_query": '{PSI Durum} = "Kritik Kayma"',  "column_id": "PSI Durum"}, "color": "#ef4444"},
         {"if": {"filter_query": '{PSI Durum} = "Hafif Kayma"',   "column_id": "PSI Durum"}, "color": "#f59e0b"},
         {"if": {"filter_query": '{PSI Durum} = "Stabil"',        "column_id": "PSI Durum"}, "color": "#10b981"},
+        {"if": {"filter_query": '{Test Monoton} = "✅"', "column_id": "Test Monoton"}, "color": "#10b981"},
+        {"if": {"filter_query": '{Test Monoton} = "❌"', "column_id": "Test Monoton"}, "color": "#ef4444"},
+        {"if": {"filter_query": '{OOT Monoton} = "✅"',  "column_id": "OOT Monoton"},  "color": "#10b981"},
+        {"if": {"filter_query": '{OOT Monoton} = "❌"',  "column_id": "OOT Monoton"},  "color": "#ef4444"},
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
     ]
 
-    # Öneri ve Sebep kolonlarını öne al
-    # Non-binary: "IV" sütununun görünen adını "MI" yap (kopyalamadan rename)
-    iv_col_label = "IV" if is_binary else "MI"
-    if not is_binary and "IV" in summary.columns:
-        summary = summary.rename(columns={"IV": "MI"})
-        style_conditions = [
-            s for s in style_conditions if '"IV"' not in str(s)
-        ] + [
-            {"if": {"filter_query": '{Güç} = "Güçlü"',     "column_id": "Güç"},
-             "color": "#10b981"},
-            {"if": {"filter_query": '{Güç} = "Orta"',      "column_id": "Güç"},
-             "color": "#4F8EF7"},
-            {"if": {"filter_query": '{Güç} = "Zayıf"',     "column_id": "Güç"},
-             "color": "#f59e0b"},
-            {"if": {"filter_query": '{Güç} = "Çok Zayıf"', "column_id": "Güç"},
-             "color": "#7e8fa4"},
-            {"if": {"filter_query": '{Güç} = "Şüpheli"',   "column_id": "Güç"},
-             "color": "#ef4444"},
-        ]
-
-    col_order = ["Değişken", "Öneri", "Sebep", iv_col_label, "Güç", "Eksik %",
-                 "PSI", "PSI Durum", "Yüksek Korr.", "VIF"]
-    summary = summary[[c for c in col_order if c in summary.columns]]
-
-    # Tam özeti cache'e yaz — Playground önizlemesi buradan okur
-    _SERVER_STORE[f"{key}_summary_{seg_col}_{seg_val}"] = summary.copy()
-
-    n_cik   = (summary["Öneri"] == "❌ Çıkar").sum()
-    n_inc   = (summary["Öneri"] == "⚠️ İncele").sum()
-    n_tut   = (summary["Öneri"] == "✅ Tut").sum()
+    n_cik = (summary["Öneri"] == "❌ Çıkar").sum()
+    n_inc = (summary["Öneri"] == "⚠️ İncele").sum()
+    n_tut = (summary["Öneri"] == "✅ Tut").sum()
 
     tsv = summary.to_csv(sep="\t", index=False)
 
@@ -295,7 +298,6 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
 
     return html.Div([
         woe_note,
-        # Özet sayaçlar
         dbc.Row([
             dbc.Col(html.Div([
                 html.Div(str(n_tut), className="metric-value", style={"color": "#10b981", "fontSize": "1.4rem"}),
@@ -314,7 +316,6 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
                 html.Div("Toplam Değişken", className="metric-label"),
             ], className="metric-card"), width=3),
         ], className="mb-4"),
-        # Tablo başlığı + kopyala
         html.Div([
             dcc.Clipboard(target_id="var-summary-tsv", title="Kopyala",
                           style={"cursor": "pointer", "fontSize": "0.72rem",
@@ -360,6 +361,10 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
                                          "| 0.10–0.25 | Hafif Kayma |\n"
                                          "| > 0.25 | Kritik Kayma |", "type": "markdown"},
                 "PSI Durum":   {"value": "PSI değerine göre stabilite etiketi", "type": "markdown"},
+                "Test Monoton": {"value": "**Test** verisinde WoE bin sıralamasının monoton (artan veya azalan) olup olmadığı.\n\n"
+                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — Test split yok veya hesaplanamadı", "type": "markdown"},
+                "OOT Monoton":  {"value": "**OOT** verisinde WoE bin sıralamasının monoton olup olmadığı.\n\n"
+                                          "- ✅ Monoton\n- ❌ Monoton değil\n- — OOT split yok veya hesaplanamadı", "type": "markdown"},
                 "Yüksek Korr.": {"value": "Başka bir değişkenle **r ≥ 0.75** korelasyon varsa gösterir.\n"
                                           "Yüksek korelasyon çoklu doğrusallık sorununa yol açabilir.", "type": "markdown"},
                 "VIF":         {"value": "**Variance Inflation Factor** — çoklu doğrusal bağlantı ölçüsü\n\n"
@@ -387,3 +392,60 @@ def update_var_summary(n_clicks, key, config, seg_val, seg_col_input, woe_toggle
             style_data_conditional=style_conditions,
         ),
     ])
+
+
+# ── Callback: Değişken Özeti ───────────────────────────────────────────────────
+@app.callback(
+    Output("div-var-summary", "children"),
+    Input("store-config", "data"),
+    Input("btn-var-summary", "n_clicks"),
+    Input("store-expert-exclude", "data"),
+    Input("dd-segment-val", "value"),
+    State("store-key", "data"),
+    State("dd-segment-col", "value"),
+    State("chk-varsummary-woe", "value"),
+    prevent_initial_call=True,
+)
+def update_var_summary(config, n_clicks, expert_excluded, seg_val, key, seg_col_input, woe_toggle):
+    if not key or not config or not config.get("target_col"):
+        return html.Div()
+
+    target_type = config.get("target_type", "binary")
+    is_binary   = target_type == "binary"
+    seg_col     = config.get("segment_col") or (seg_col_input or None)
+    use_woe     = "woe" in (woe_toggle or [])
+    excluded_set = set(expert_excluded or [])
+
+    # Cache'den oku — precompute tarafından hazırlanmış olabilir
+    cache_key = f"{key}_varsummary_{seg_col}_{seg_val}"
+    cached = _SERVER_STORE.get(cache_key)
+
+    if cached is not None:
+        summary = cached.copy()
+        # Elenen değişkenleri filtrele
+        if excluded_set:
+            summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
+        return _render_var_summary(summary, use_woe, is_binary)
+
+    # Cache yoksa hesapla (fallback — "Hesapla" butonuyla veya ilk açılışta)
+    df_orig = _get_df(key)
+    if df_orig is None:
+        return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
+
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+    date_col  = config.get("date_col")
+    oot_date  = config.get("oot_date")
+
+    if oot_date and date_col and date_col in df_active.columns:
+        train_mask = pd.to_datetime(df_active[date_col], errors="coerce") < pd.to_datetime(oot_date)
+        df_train   = df_active[train_mask]
+    else:
+        df_train = df_active
+
+    summary = compute_var_summary_table(df_active, df_train, config, key,
+                                        seg_col, seg_val, use_woe=use_woe)
+
+    if excluded_set:
+        summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
+
+    return _render_var_summary(summary, use_woe, is_binary)

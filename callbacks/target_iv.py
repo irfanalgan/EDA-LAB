@@ -127,10 +127,11 @@ def _time_chart_generic(df_active, target, date_col, y_label, line_color):
     Output("tab-target-iv", "children"),
     Input("store-config", "data"),
     Input("dd-segment-val", "value"),
+    Input("store-expert-exclude", "data"),
     State("store-key", "data"),
     State("dd-segment-col", "value"),
 )
-def update_target_iv(config, seg_val, key, seg_col_input):
+def update_target_iv(config, seg_val, expert_excluded, key, seg_col_input):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
@@ -141,6 +142,7 @@ def update_target_iv(config, seg_val, key, seg_col_input):
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     target_type = config.get("target_type", "binary")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    excluded_set = set(expert_excluded or [])
 
     # IV için sadece train verisi kullan
     df_train, df_test, df_oot = get_splits(df_active, config)
@@ -188,6 +190,10 @@ def update_target_iv(config, seg_val, key, seg_col_input):
         else:
             iv_df = compute_iv_ranking_optimal(df_train, target)
             _SERVER_STORE[cache_key] = iv_df
+
+        # Elenen değişkenleri IV tablosundan çıkar
+        if excluded_set and "Değişken" in iv_df.columns:
+            iv_df = iv_df[~iv_df["Değişken"].isin(excluded_set)].reset_index(drop=True)
 
         # Train stats badge
         tr_stats  = compute_target_stats(df_train, target)

@@ -51,19 +51,22 @@ def get_data_from_sql(
     server:   str | None = None,
     database: str | None = None,
     driver:   str | None = None,
+    top_n:    int | None = None,
 ) -> pd.DataFrame:
     """
     Belirtilen tabloyu MS SQL Server'dan çeker.
     Parametreler verilmezse config.toml değerleri kullanılır.
+    top_n verilirse SELECT TOP {top_n} çeker.
     """
     cfg = _get_config().get("database", {})
     server   = server   or cfg.get("server",   "")
     database = database or cfg.get("database", "")
     driver   = driver   or cfg.get("driver",   _DRIVER_OPTIONS[0])
 
+    top_clause = f"TOP {int(top_n)} " if top_n else ""
     conn_str = _build_conn_str(server, database, driver)
     with pyodbc.connect(conn_str) as conn:
-        df = pd.read_sql(f"SELECT * FROM {_quote_table(table_name)}", conn)
+        df = pd.read_sql(f"SELECT {top_clause}* FROM {_quote_table(table_name)}", conn)
     return df
 
 
@@ -73,6 +76,7 @@ def get_data_from_sql_multi(
     server:   str | None = None,
     database: str | None = None,
     driver:   str | None = None,
+    top_n:    int | None = None,
 ) -> pd.DataFrame:
     """
     Birden fazla tabloyu LEFT JOIN mantığıyla birleştirir (pd.merge).
@@ -91,8 +95,9 @@ def get_data_from_sql_multi(
     conn_str = _build_conn_str(server, database, driver)
     left_keys = join_keys_per_table[0] if join_keys_per_table else []
 
+    top_clause = f"TOP {int(top_n)} " if top_n else ""
     with pyodbc.connect(conn_str) as conn:
-        result = pd.read_sql(f"SELECT * FROM {_quote_table(tables[0])}", conn)
+        result = pd.read_sql(f"SELECT {top_clause}* FROM {_quote_table(tables[0])}", conn)
 
         if not left_keys or len(tables) < 2:
             return result

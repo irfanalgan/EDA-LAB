@@ -176,13 +176,20 @@ def update_metrics(config, seg_val, key, seg_col_input):
 # ── Yardımcı: Ön Eleme Raporu ────────────────────────────────────────────────
 def _build_screen_report(key, df_active, config, expert_excluded=None,
                          thresholds=None, seg_val=None):
-    # Aktif (segment filtrelenmiş) veri üzerinde canlı hesapla
     target_col  = config.get("target_col")
     date_col    = config.get("date_col")
     segment_col = config.get("segment_col")
-    passed, report = screen_columns(
-        df_active, target_col, date_col, segment_col
-    )
+
+    # Precompute cache'den oku — yoksa fallback olarak canlı hesapla
+    cached = _SERVER_STORE.get(f"{key}_screen")
+    if cached:
+        passed, report = cached
+        passed = list(passed)
+        report = report.copy()
+    else:
+        passed, report = screen_columns(
+            df_active, target_col, date_col, segment_col
+        )
 
     # ── Modüler eşik elemeleri ────────────────────────────────────────────────
     thresholds = thresholds or {}
