@@ -6,14 +6,12 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.linear_model import LogisticRegression
 import statsmodels.api as sm
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (roc_auc_score, roc_curve, confusion_matrix,
-                             f1_score, precision_score, recall_score,
-                             r2_score, mean_squared_error, mean_absolute_error,
-                             accuracy_score)
+                             f1_score, precision_score, recall_score)
 from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
 import xgboost as xgb
@@ -418,7 +416,7 @@ def pg_remove_all(_):
     return []
 
 
-# ── Playground: Model dropdown'ı target_type'a göre güncelle ─────────────────
+# ── Playground: Model dropdown'ı (sabit — binary classification) ──────────────
 @app.callback(
     Output("pg-model-type", "options"),
     Output("pg-model-type", "value"),
@@ -427,24 +425,13 @@ def pg_remove_all(_):
 def update_model_type_options(config):
     if not config:
         return dash.no_update, dash.no_update
-    target_type = config.get("target_type", "binary")
-    if target_type == "continuous":
-        options = [
-            {"label": "Ridge Regression",       "value": "ridge"},
-            {"label": "LightGBM Regressor",     "value": "lgbm"},
-            {"label": "XGBoost Regressor",      "value": "xgb"},
-            {"label": "Random Forest Regressor","value": "rf"},
-        ]
-        default = "ridge"
-    else:
-        options = [
-            {"label": "Logistic Regression", "value": "lr"},
-            {"label": "LightGBM",            "value": "lgbm"},
-            {"label": "XGBoost",             "value": "xgb"},
-            {"label": "Random Forest",       "value": "rf"},
-        ]
-        default = "lr"
-    return options, default
+    options = [
+        {"label": "Logistic Regression", "value": "lr"},
+        {"label": "LightGBM",            "value": "lgbm"},
+        {"label": "XGBoost",             "value": "xgb"},
+        {"label": "Random Forest",       "value": "rf"},
+    ]
+    return options, "lr"
 
 
 # ── Playground: C ve eşik kontrollerini gizle/göster ─────────────────────────
@@ -455,10 +442,6 @@ def update_model_type_options(config):
     Input("store-config", "data"),
 )
 def toggle_classification_controls(config):
-    target_type = (config or {}).get("target_type", "binary")
-    if target_type == "continuous":
-        hidden = {"display": "none"}
-        return hidden, hidden, hidden
     return {}, {}, {}
 
 
@@ -497,10 +480,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
 
     target      = target_sel or config["target_col"]
     seg_col     = config.get("segment_col") or (seg_col_input or None)
-    target_type = config.get("target_type", "binary")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val).reset_index(drop=True)
     C           = float(c_val or 1.0)
-    is_regression = (target_type == "continuous")
 
     if target not in df_active.columns:
         return html.Div(f"Target kolonu '{target}' veri setinde bulunamadı.",
@@ -530,16 +511,14 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     # ── Base parametreler ─────────────────────────────────────────────────────
     _MODEL_PARAMS = {
         "lr":    {},
-        "ridge": {},
         "lgbm":  dict(n_estimators=200, learning_rate=0.05, num_leaves=31,
                       random_state=42, n_jobs=-1, verbose=-1),
         "xgb":   dict(n_estimators=200, learning_rate=0.05, max_depth=6,
-                      random_state=42, n_jobs=-1,
-                      eval_metric="rmse" if is_regression else "auc"),
+                      random_state=42, n_jobs=-1, eval_metric="auc"),
         "rf":    dict(n_estimators=200, max_depth=10, min_samples_leaf=5,
                       max_features="sqrt", random_state=42, n_jobs=-1),
     }
-    algo = model_type or ("ridge" if is_regression else "lr")
+    algo = model_type or "lr"
 
     def _fit_and_render(X_df, disp_names, label, accent):
         """Modeli kur, train+test+oot sonuçlarını döndür."""
@@ -568,7 +547,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         # sm.Logit + WoE: değerler zaten dar aralıkta, scaling yapılmaz
         # Ham (non-WoE) LR'de BFGS overflow riski var → sadece orada scale
         is_tree = algo in ("lgbm", "xgb", "rf")
-        _use_sm_logit = (algo == "lr" and not is_regression)
+        _use_sm_logit = (algo == "lr")
         _is_woe = all(c.endswith("_woe") for c in X_tr.columns)
         _skip_scale = is_tree or (_use_sm_logit and _is_woe)
         if not _skip_scale:
@@ -597,299 +576,23 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 return np.column_stack([1 - probs, probs])
 
         try:
-            if is_regression:
-                if algo == "ridge":
-                    mdl = Ridge(alpha=1.0 / C)
-                elif algo == "lgbm":
-                    mdl = lgb.LGBMRegressor(**_MODEL_PARAMS["lgbm"])
-                elif algo == "xgb":
-                    mdl = xgb.XGBRegressor(**_MODEL_PARAMS["xgb"])
-                else:  # rf
-                    mdl = RandomForestRegressor(**_MODEL_PARAMS["rf"])
-            else:
-                if _use_sm_logit:
-                    # statsmodels Logit — scale edilmiş features + const, BFGS
-                    X_tr_const = sm.add_constant(X_tr_s, has_constant="add")
-                    sm_res = sm.Logit(y_tr, X_tr_const).fit(disp=0, method="bfgs")
-                    mdl = _SmLogitWrapper(sm_res)
-                elif algo == "lgbm":
-                    mdl = lgb.LGBMClassifier(**_MODEL_PARAMS["lgbm"])
-                elif algo == "xgb":
-                    pos_w = float((y_tr == 0).sum()) / max(float((y_tr == 1).sum()), 1)
-                    mdl = xgb.XGBClassifier(**_MODEL_PARAMS["xgb"],
-                                            scale_pos_weight=pos_w)
-                else:  # rf
-                    mdl = RandomForestClassifier(**_MODEL_PARAMS["rf"])
+            if _use_sm_logit:
+                # statsmodels Logit — scale edilmiş features + const, BFGS
+                X_tr_const = sm.add_constant(X_tr_s, has_constant="add")
+                sm_res = sm.Logit(y_tr, X_tr_const).fit(disp=0, method="bfgs")
+                mdl = _SmLogitWrapper(sm_res)
+            elif algo == "lgbm":
+                mdl = lgb.LGBMClassifier(**_MODEL_PARAMS["lgbm"])
+            elif algo == "xgb":
+                pos_w = float((y_tr == 0).sum()) / max(float((y_tr == 1).sum()), 1)
+                mdl = xgb.XGBClassifier(**_MODEL_PARAMS["xgb"],
+                                        scale_pos_weight=pos_w)
+            else:  # rf
+                mdl = RandomForestClassifier(**_MODEL_PARAMS["rf"])
             if not _use_sm_logit:
                 mdl.fit(X_tr_s, y_tr)
         except Exception as e:
             return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom")
-
-        # ── Regression çıkışı ─────────────────────────────────────────────────
-        if is_regression:
-            tr_pred = mdl.predict(X_tr_s)
-            te_pred = mdl.predict(X_te_s) if has_test else None
-
-            def _reg_metrics(y_true, y_pred):
-                r2   = r2_score(y_true, y_pred)
-                rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
-                mae  = float(mean_absolute_error(y_true, y_pred))
-                return dict(r2=r2, rmse=rmse, mae=mae, n=len(y_true))
-
-            tr_rm = _reg_metrics(y_tr, tr_pred)
-            te_rm = _reg_metrics(y_te, te_pred) if has_test and te_pred is not None else None
-
-            def mc_r(v, l, c="#4F8EF7", w=2):
-                return dbc.Col(html.Div([
-                    html.Div(str(v), className="metric-value",
-                             style={"color": c, "fontSize": "1.25rem"}),
-                    html.Div(l, className="metric-label"),
-                ], className="metric-card"), width=w)
-
-            def _reg_row(m, title, bg):
-                r2c = "#10b981" if m["r2"] >= 0.6 else "#f59e0b" if m["r2"] >= 0.3 else "#ef4444"
-                return html.Div([
-                    html.Div(title, style={"color": "#a8b2c2", "fontSize": "0.72rem",
-                                           "fontWeight": "600", "letterSpacing": "0.06em",
-                                           "textTransform": "uppercase",
-                                           "marginBottom": "0.4rem", "paddingLeft": "0.25rem"}),
-                    dbc.Row([
-                        mc_r(f"{m['r2']:.4f}",   "R²",   r2c),
-                        mc_r(f"{m['rmse']:.4f}",  "RMSE", "#f59e0b"),
-                        mc_r(f"{m['mae']:.4f}",   "MAE",  "#a78bfa"),
-                        mc_r(f"{m['n']:,}",        "N",    "#556070"),
-                    ], className="g-2"),
-                ], style={"backgroundColor": bg, "borderRadius": "6px",
-                          "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
-
-            reg_rows = [_reg_row(tr_rm, "Train", "#0d1520")]
-            if te_rm:
-                reg_rows.append(_reg_row(te_rm, "Test", "#0e1624"))
-            if has_oot and X_oot_s is not None:
-                oot_pred_r = mdl.predict(X_oot_s)
-                oot_rm     = _reg_metrics(y_oot, oot_pred_r)
-                reg_rows.append(_reg_row(oot_rm, "OOT", "#131c30"))
-            metric_panel = html.Div(reg_rows, className="mb-3")
-
-            # Scatter: actual vs predicted (test if exists, else oot)
-            _scatter_y   = y_te   if (has_test and te_pred is not None) else (y_oot   if has_oot else y_tr)
-            _scatter_p   = te_pred if (has_test and te_pred is not None) else (mdl.predict(X_oot_s) if has_oot else tr_pred)
-            _scatter_lbl = "Test"  if (has_test and te_pred is not None) else ("OOT" if has_oot else "Train")
-            fig_scatter = go.Figure()
-            fig_scatter.add_trace(go.Scatter(
-                x=_scatter_y.values, y=_scatter_p, mode="markers",
-                marker=dict(color=accent, size=4, opacity=0.5),
-                name=_scatter_lbl,
-            ))
-            mn = min(float(_scatter_y.min()), float(_scatter_p.min()))
-            mx = max(float(_scatter_y.max()), float(_scatter_p.max()))
-            fig_scatter.add_trace(go.Scatter(
-                x=[mn, mx], y=[mn, mx], mode="lines",
-                line=dict(color="#4a5568", dash="dash", width=1),
-                showlegend=False,
-            ))
-            fig_scatter.update_layout(
-                **_PLOT_LAYOUT,
-                title=dict(text=f"Actual vs Predicted — {_scatter_lbl}",
-                           font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title="Gerçek"),
-                yaxis=dict(**_AXIS_STYLE, title="Tahmin"),
-                height=320,
-            )
-
-            # Residuals histogram
-            residuals = _scatter_y.values - _scatter_p
-            fig_resid = go.Figure(go.Histogram(
-                x=residuals, nbinsx=40,
-                marker_color=accent, opacity=0.8,
-                hovertemplate="Artık: %{x:.3f}<br>Sayı: %{y}<extra></extra>",
-            ))
-            fig_resid.update_layout(
-                **_PLOT_LAYOUT,
-                title=dict(text=f"Artık (Residual) Dağılımı — {_scatter_lbl}",
-                           font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title="Artık"),
-                yaxis=dict(**_AXIS_STYLE, title="Frekans"),
-                height=260,
-            )
-
-            # Feature importance / coefficients
-            _tbl_style_r = dict(
-                sort_action="native", page_size=15,
-                style_table={"overflowX": "auto"},
-                style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
-                              "fontWeight": "600", "fontSize": "0.7rem",
-                              "border": "1px solid #2d3a4f",
-                              "textTransform": "uppercase"},
-                style_cell={"backgroundColor": "#111827", "color": "#d1d5db",
-                            "fontSize": "0.78rem", "border": "1px solid #1f2a3c",
-                            "padding": "5px 8px", "textAlign": "left"},
-                style_data_conditional=[
-                    {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}
-                ],
-            )
-            is_tree_r = algo in ("lgbm", "xgb", "rf")
-            if not is_tree_r:
-                coef_rows = [{"Değişken": disp_names.get(c, c),
-                              "Katsayı": round(float(v), 4)}
-                             for c, v in zip(X.columns, mdl.coef_)]
-                imp_df = pd.DataFrame(coef_rows).sort_values("Katsayı", key=abs, ascending=False)
-                tbl_title = "Katsayı Tablosu (Ridge)"
-            else:
-                raw_imp = mdl.feature_importances_
-                total   = raw_imp.sum() or 1.0
-                imp_df  = pd.DataFrame([
-                    {"Değişken": disp_names.get(c, c),
-                     "Önem (%)": round(float(v / total * 100), 2)}
-                    for c, v in zip(X.columns, raw_imp)
-                ]).sort_values("Önem (%)", ascending=False)
-                tbl_title = "Feature Importance"
-
-            imp_table = dash_table.DataTable(
-                data=imp_df.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in imp_df.columns],
-                **_tbl_style_r,
-            )
-
-            # SHAP for tree regressors
-            shap_section = None
-            if is_tree_r:
-                try:
-                    _X_shap_r  = (X_te if has_test and len(X_te) > 0
-                                  else (X_oot if has_oot and X_oot is not None else X_tr))
-                    explainer  = shap.TreeExplainer(mdl)
-                    shap_vals  = explainer.shap_values(_X_shap_r.values)
-                    shap_names = [disp_names.get(c, c) for c in X.columns]
-                    fig_shap, ax_shap = plt.subplots(figsize=(8, max(4, len(shap_names) * 0.3)))
-                    fig_shap.patch.set_facecolor("#0e1117")
-                    ax_shap.set_facecolor("#0e1117")
-                    shap.summary_plot(shap_vals, _X_shap_r.values, feature_names=shap_names,
-                                      show=False, plot_size=None)
-                    buf = io.BytesIO()
-                    plt.savefig(buf, format="png", dpi=90, bbox_inches="tight",
-                                facecolor="#0e1117")
-                    plt.close(fig_shap)
-                    buf.seek(0)
-                    img_b64 = base64.b64encode(buf.read()).decode()
-                    shap_section = html.Div([
-                        html.P("SHAP Beeswarm", className="section-title",
-                               style={"marginTop": "1.5rem"}),
-                        html.Img(src=f"data:image/png;base64,{img_b64}",
-                                 style={"maxWidth": "100%", "borderRadius": "6px"}),
-                    ])
-                except Exception:
-                    pass
-
-            return html.Div([
-                html.Div(f"{label}  ·  {split_info}",
-                         style={"color": "#7e8fa4", "fontSize": "0.78rem",
-                                "marginBottom": "0.75rem"}),
-                metric_panel,
-                dbc.Row([
-                    dbc.Col(dcc.Graph(figure=fig_scatter,
-                                     config={"displayModeBar": False}), width=6),
-                    dbc.Col(dcc.Graph(figure=fig_resid,
-                                     config={"displayModeBar": False}), width=6),
-                ], className="mb-3"),
-                html.P(tbl_title, className="section-title"),
-                imp_table,
-                shap_section or html.Div(),
-            ])
-
-        # ── Multiclass çıkışı ─────────────────────────────────────────────────
-        is_multiclass = (target_type == "multiclass")
-        if is_multiclass:
-            tr_pred_cls  = mdl.predict(X_tr_s)
-            te_pred_cls  = mdl.predict(X_te_s) if has_test else None
-            oot_pred_cls = mdl.predict(X_oot_s) if has_oot and X_oot_s is not None else None
-
-            def _mc_metrics(y_t, y_p):
-                return dict(
-                    acc = accuracy_score(y_t, y_p),
-                    f1m = f1_score(y_t, y_p, average="macro",    zero_division=0),
-                    f1w = f1_score(y_t, y_p, average="weighted", zero_division=0),
-                    n   = len(y_t),
-                )
-            tr_mmc  = _mc_metrics(y_tr,  tr_pred_cls)
-            te_mmc  = _mc_metrics(y_te,  te_pred_cls)  if has_test and te_pred_cls is not None  else None
-            oot_mmc = _mc_metrics(y_oot, oot_pred_cls) if has_oot  and oot_pred_cls is not None else None
-
-            def mc_m(v, l, c="#4F8EF7", w=2):
-                return dbc.Col(html.Div([
-                    html.Div(str(v), className="metric-value",
-                             style={"color": c, "fontSize": "1.25rem"}),
-                    html.Div(l, className="metric-label"),
-                ], className="metric-card"), width=w)
-
-            def _mc_row(m, title, bg):
-                acc_c = "#10b981" if m["acc"] >= 0.8 else "#f59e0b" if m["acc"] >= 0.6 else "#ef4444"
-                return html.Div([
-                    html.Div(title, style={"color": "#a8b2c2", "fontSize": "0.72rem",
-                                           "fontWeight": "600", "letterSpacing": "0.06em",
-                                           "textTransform": "uppercase",
-                                           "marginBottom": "0.4rem", "paddingLeft": "0.25rem"}),
-                    dbc.Row([
-                        mc_m(f"{m['acc']:.4f}",  "Accuracy",    acc_c),
-                        mc_m(f"{m['f1m']:.4f}",  "F1 Macro",    "#4F8EF7"),
-                        mc_m(f"{m['f1w']:.4f}",  "F1 Weighted", "#a78bfa"),
-                        mc_m(f"{m['n']:,}",       "N",           "#556070"),
-                    ], className="g-2"),
-                ], style={"backgroundColor": bg, "borderRadius": "6px",
-                          "padding": "0.6rem 0.5rem", "marginBottom": "0.5rem"})
-
-            mc_rows = [_mc_row(tr_mmc, "Train", "#0d1520")]
-            if te_mmc:
-                mc_rows.append(_mc_row(te_mmc,  "Test", "#0e1624"))
-            if oot_mmc:
-                mc_rows.append(_mc_row(oot_mmc, "OOT",  "#131c30"))
-            metric_panel = html.Div(mc_rows, className="mb-3")
-
-            # Feature importance / coefficients
-            is_tree_mc = algo in ("lgbm", "xgb", "rf")
-            if not is_tree_mc:
-                coef_rows_mc = []
-                for i, cls in enumerate(mdl.classes_):
-                    coef_arr = mdl.coef_[i] if len(mdl.coef_) > 1 else mdl.coef_[0]
-                    for c, v in zip(X.columns, coef_arr):
-                        coef_rows_mc.append({"Sınıf": str(int(float(cls))),
-                                             "Değişken": disp_names.get(c, c),
-                                             "Katsayı": round(float(v), 4)})
-                imp_df_mc = pd.DataFrame(coef_rows_mc)
-                tbl_title_mc = "Katsayı Tablosu (Sınıf Bazlı)"
-            else:
-                raw_imp_mc = mdl.feature_importances_
-                total_mc   = raw_imp_mc.sum() or 1.0
-                imp_df_mc  = pd.DataFrame([
-                    {"Değişken": disp_names.get(c, c),
-                     "Önem (%)": round(float(v / total_mc * 100), 2)}
-                    for c, v in zip(X.columns, raw_imp_mc)
-                ]).sort_values("Önem (%)", ascending=False)
-                tbl_title_mc = "Feature Importance"
-
-            _tbl_style_mc = dict(
-                sort_action="native", page_size=15,
-                style_table={"overflowX": "auto"},
-                style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
-                              "fontWeight": "600", "fontSize": "0.7rem",
-                              "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
-                style_cell={"backgroundColor": "#111827", "color": "#d1d5db",
-                            "fontSize": "0.78rem", "border": "1px solid #1f2a3c",
-                            "padding": "5px 8px", "textAlign": "left"},
-                style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
-            )
-
-            return html.Div([
-                html.Div(f"{label}  ·  {split_info}",
-                         style={"color": "#7e8fa4", "fontSize": "0.78rem",
-                                "marginBottom": "0.75rem"}),
-                metric_panel,
-                html.P(tbl_title_mc, className="section-title"),
-                dash_table.DataTable(
-                    data=imp_df_mc.to_dict("records"),
-                    columns=[{"name": c, "id": c} for c in imp_df_mc.columns],
-                    **_tbl_style_mc,
-                ),
-            ])
 
         # ── Binary classification çıkışı ──────────────────────────────────────
         tr_prob  = mdl.predict_proba(X_tr_s)[:, 1]

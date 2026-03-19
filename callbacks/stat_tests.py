@@ -283,172 +283,8 @@ def _render_anova(df_active: pd.DataFrame, var_col: str, target: str) -> html.Di
     ])
 
 
-# ── Render: Pearson & Spearman Korelasyon (continuous target) ────────────────
-def _render_pearson_spearman(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
-    """Continuous target için sayısal değişken ~ target korelasyon testi."""
-    data = df_active[[var_col, target]].copy()
-    data[var_col] = pd.to_numeric(data[var_col], errors="coerce")
-    data[target]  = pd.to_numeric(data[target],  errors="coerce")
-    data = data.dropna()
-
-    if len(data) < 5:
-        return html.Div("Yeterli veri yok (en az 5 gözlem gerekli).",
-                        className="alert-info-custom")
-
-    pearson_r,  pearson_p  = scipy_stats.pearsonr(data[var_col], data[target])
-    spearman_r, spearman_p = scipy_stats.spearmanr(data[var_col], data[target])
-
-    def _p_color(p): return "#10b981" if p < 0.001 else "#f59e0b" if p < 0.05 else "#ef4444"
-    def _r_label(r):
-        a = abs(r)
-        return "Güçlü" if a >= 0.5 else "Orta" if a >= 0.3 else "Zayıf" if a >= 0.1 else "Önemsiz"
-
-    stat_cards = dbc.Row([
-        dbc.Col(html.Div([
-            html.Div("Pearson r", className="metric-label"),
-            html.Div(f"{pearson_r:+.4f}  ({_r_label(pearson_r)})",
-                     className="metric-value",
-                     style={"color": "#10b981" if abs(pearson_r) >= 0.3 else "#f59e0b"}),
-        ], className="metric-card"), width=3),
-        dbc.Col(html.Div([
-            html.Div("Pearson p", className="metric-label"),
-            html.Div(f"{pearson_p:.6f}", className="metric-value",
-                     style={"color": _p_color(pearson_p)}),
-        ], className="metric-card"), width=3),
-        dbc.Col(html.Div([
-            html.Div("Spearman ρ", className="metric-label"),
-            html.Div(f"{spearman_r:+.4f}  ({_r_label(spearman_r)})",
-                     className="metric-value",
-                     style={"color": "#10b981" if abs(spearman_r) >= 0.3 else "#f59e0b"}),
-        ], className="metric-card"), width=3),
-        dbc.Col(html.Div([
-            html.Div("Spearman p", className="metric-label"),
-            html.Div(f"{spearman_p:.6f}", className="metric-value",
-                     style={"color": _p_color(spearman_p)}),
-        ], className="metric-card"), width=3),
-    ], className="mb-3")
-
-    # Scatter + regresyon doğrusu (max 3000 örnek)
-    sample = data.sample(min(3000, len(data)), random_state=42)
-    coeffs  = np.polyfit(data[var_col], data[target], 1)
-    x_range = np.linspace(float(data[var_col].min()), float(data[var_col].max()), 100)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=sample[var_col], y=sample[target],
-        mode="markers",
-        marker=dict(color="#4F8EF7", opacity=0.35, size=4),
-        name="Gözlemler",
-        hovertemplate=f"{var_col}: %{{x:.3f}}<br>{target}: %{{y:.3f}}<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=x_range, y=np.polyval(coeffs, x_range),
-        mode="lines", line=dict(color="#ef4444", width=2, dash="dash"),
-        name=f"Regresyon Doğrusu (y={coeffs[0]:+.3f}x {'+' if coeffs[1]>=0 else ''}{coeffs[1]:.3f})",
-    ))
-    fig.update_layout(
-        **_PLOT_LAYOUT,
-        title=dict(text=f"{var_col}  ×  {target} — Scatter & Korelasyon",
-                   font=dict(color="#E8EAF0", size=13)),
-        xaxis=dict(title=var_col, gridcolor="#1e293b", tickfont=dict(color="#8892a4")),
-        yaxis=dict(title=target,  gridcolor="#1e293b", tickfont=dict(color="#8892a4")),
-        height=400, showlegend=True,
-        legend=dict(font=dict(color="#c8cdd8", size=10), bgcolor="rgba(0,0,0,0)"),
-    )
-
-    p_interp_txt = (
-        "p < 0.001 — İlişki istatistiksel olarak çok anlamlı" if pearson_p < 0.001 else
-        f"p = {pearson_p:.4f} — Anlamlı ilişki" if pearson_p < 0.05 else
-        f"p = {pearson_p:.4f} — Anlamlı ilişki bulunamadı"
-    )
-    return html.Div([
-        html.P(f"Korelasyon Analizi — {var_col}  ×  {target}  (Continuous Target)",
-               className="section-title"),
-        html.Div(p_interp_txt, style={"color": _p_color(pearson_p), "fontSize": "0.82rem",
-                                      "marginBottom": "1rem", "fontWeight": "600"}),
-        stat_cards,
-        dcc.Graph(figure=fig, config={"displayModeBar": False}),
-        html.Div([
-            html.Span("Not: ", style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
-            html.Span(
-                f"Scatter için en fazla 3.000 örnek gösterilir. "
-                f"Pearson doğrusal ilişkiyi, Spearman monoton ilişkiyi ölçer. "
-                f"N = {len(data):,}",
-                style={"color": "#a8b2c2", "fontSize": "0.72rem"},
-            ),
-        ], style={"marginTop": "0.5rem"}),
-    ])
-
-
-# ── Render: Kruskal-Wallis (multiclass / 3+ grup) ────────────────────────────
-def _render_kruskal(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
-    """Non-parametrik ANOVA: 3+ sınıf için grup dağılımı karşılaştırması."""
-    data = df_active[[var_col, target]].dropna()
-    data[var_col] = pd.to_numeric(data[var_col], errors="coerce")
-    data = data.dropna()
-    groups = [grp[var_col].values for _, grp in data.groupby(target)
-              if len(grp) >= 2]
-    if len(groups) < 2:
-        return html.Div("Yeterli grup yok (en az 2 sınıf gerekli).",
-                        className="alert-info-custom")
-    stat, p_val = scipy_stats.kruskal(*groups)
-    p_color = "#10b981" if p_val < 0.001 else "#f59e0b" if p_val < 0.05 else "#ef4444"
-    p_interp = (
-        "p < 0.001 — Gruplar arası medyan farklılığı istatistiksel olarak anlamlı"
-        if p_val < 0.001 else
-        f"p = {p_val:.4f} — Anlamlı farklılık" if p_val < 0.05
-        else f"p = {p_val:.4f} — Gruplar arası fark gözlenemedi (H₀ reddedilemedi)"
-    )
-    grp_stats = (data.groupby(target)[var_col]
-                 .agg(N="count", Medyan="median", Ort="mean", Std="std")
-                 .reset_index().round(4))
-    fig = go.Figure()
-    for cls, grp in data.groupby(target):
-        fig.add_trace(go.Box(
-            y=grp[var_col], name=str(int(float(cls))),
-            marker_color="#4F8EF7", boxmean="sd", opacity=0.8,
-        ))
-    fig.update_layout(
-        **_PLOT_LAYOUT,
-        title=dict(text=f"Kruskal-Wallis — {var_col} × {target}",
-                   font=dict(color="#E8EAF0", size=13)),
-        yaxis=dict(**{k: v for k, v in {
-            "gridcolor": "#1e293b", "tickfont": dict(color="#8892a4"),
-            "title": var_col,
-        }.items()}),
-        xaxis=dict(tickfont=dict(color="#8892a4"), title=target),
-        height=380,
-    )
-    return html.Div([
-        html.P("Kruskal-Wallis Testi (Multiclass)", className="section-title"),
-        html.Div(p_interp, style={"color": p_color, "fontSize": "0.82rem",
-                                  "marginBottom": "1rem", "fontWeight": "600"}),
-        dbc.Row([
-            dbc.Col(html.Div([html.Div("H İstatistiği", className="metric-label"),
-                              html.Div(f"{stat:.4f}", className="metric-value")],
-                             className="metric-card"), width=3),
-            dbc.Col(html.Div([html.Div("p-değeri", className="metric-label"),
-                              html.Div(f"{p_val:.6f}", className="metric-value",
-                                       style={"color": p_color})],
-                             className="metric-card"), width=3),
-            dbc.Col(html.Div([html.Div("Grup Sayısı", className="metric-label"),
-                              html.Div(str(len(groups)), className="metric-value")],
-                             className="metric-card"), width=3),
-        ], className="mb-3"),
-        dcc.Graph(figure=fig, config={"displayModeBar": False}),
-        html.P("Grup Medyan İstatistikleri", className="section-title",
-               style={"marginTop": "1.5rem"}),
-        dash_table.DataTable(
-            data=grp_stats.to_dict("records"),
-            columns=[{"name": c, "id": c} for c in grp_stats.columns],
-            sort_action="native", **_TABLE_STYLE,
-        ),
-    ])
-
-
 # ── Render: KS Testi ─────────────────────────────────────────────────────────
-def _render_ks(df_active: pd.DataFrame, var_col: str, target: str,
-               target_type: str = "binary") -> html.Div:
+def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
     col_data = df_active[[var_col, target]].dropna()
     col_data = col_data[pd.api.types.is_numeric_dtype(col_data[var_col]) |
                         col_data[var_col].apply(lambda x: isinstance(x, (int, float)))]
@@ -458,23 +294,9 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str,
         pass
     col_data = col_data.dropna()
 
-    # Grubu target tipine göre belirle
-    if target_type == "binary":
-        good = col_data[col_data[target] == 0][var_col].values
-        bad  = col_data[col_data[target] == 1][var_col].values
-        grp_labels = ("Good (0)", "Bad (1)")
-    elif target_type == "multiclass":
-        # En büyük sınıf vs geri kalanlar
-        dominant = col_data[target].mode()[0]
-        good = col_data[col_data[target] == dominant][var_col].values
-        bad  = col_data[col_data[target] != dominant][var_col].values
-        grp_labels = (f"Dominant ({int(dominant)})", "Diğer Sınıflar")
-    else:
-        # Continuous/categorical: medyan split
-        med  = col_data[target].median()
-        good = col_data[col_data[target] <= med][var_col].values
-        bad  = col_data[col_data[target] >  med][var_col].values
-        grp_labels = (f"Düşük (≤ {med:.2f})", f"Yüksek (> {med:.2f})")
+    good = col_data[col_data[target] == 0][var_col].values
+    bad  = col_data[col_data[target] == 1][var_col].values
+    grp_labels = ("Good (0)", "Bad (1)")
 
     if len(good) == 0 or len(bad) == 0:
         return html.Div("Yeterli veri yok — her iki grupta da gözlem gerekli.",
@@ -728,20 +550,8 @@ def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, seg_val,
     if df_orig is None:
         return html.Div()
     seg_col     = config.get("segment_col") or (seg_col_input or None)
-    target_type = config.get("target_type", "binary")
-    target      = config.get("target_col", "")
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val).copy()
     max_cats    = int(max_cats_str or 15)
-    # Continuous target: auto-bin ile 5 gruba böl
-    for col in [var1, var2]:
-        if col == target and target_type == "continuous":
-            try:
-                df_active[col] = pd.qcut(
-                    pd.to_numeric(df_active[col], errors="coerce"),
-                    q=5, duplicates="drop"
-                ).astype(str)
-            except Exception:
-                pass
     try:
         return _render_chi_square(df_active, var1, var2, max_cats)
     except Exception as exc:
@@ -768,19 +578,9 @@ def compute_anova(n_clicks, var_col, key, config, seg_val, seg_col_input):
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
-    target_type = config.get("target_type", "binary")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
     try:
-        # Continuous: Pearson/Spearman korelasyon testi
-        if target_type == "continuous":
-            return _render_pearson_spearman(df_active, var_col, target)
-        # Multiclass ve 3+ sınıf varsa Kruskal-Wallis
-        if target_type == "multiclass":
-            n_cls = df_active[target].dropna().nunique()
-            if n_cls >= 3:
-                return _render_kruskal(df_active, var_col, target)
-        # Binary / 2-sınıf multiclass: ANOVA
         return _render_anova(df_active, var_col, target)
     except Exception as exc:
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
@@ -806,11 +606,10 @@ def compute_ks_test(n_clicks, var_col, key, config, seg_val, seg_col_input):
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
-    target_type = config.get("target_type", "binary")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
     try:
-        return _render_ks(df_active, var_col, target, target_type)
+        return _render_ks(df_active, var_col, target)
     except Exception as exc:
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 

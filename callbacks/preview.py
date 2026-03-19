@@ -103,8 +103,7 @@ def update_metrics(config, seg_val, key, seg_col_input):
     df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     active_rows = len(df_active)
 
-    target      = config["target_col"]
-    target_type = config.get("target_type", "binary")
+    target = config["target_col"]
 
     def card(value, label, accent="#4F8EF7", tooltip=None):
         return dbc.Col(html.Div([
@@ -115,35 +114,15 @@ def update_metrics(config, seg_val, key, seg_col_input):
            style={"cursor": "help"} if tooltip else {}),
         width=3)
 
-    # Target kart: tipe göre farklı göster
+    # Target kart: her zaman binary bad rate
     s_target = pd.to_numeric(df_active[target], errors="coerce")
-    if target_type == "binary" and pd.api.types.is_numeric_dtype(df_active[target]):
-        target_rate    = s_target.mean() * 100
-        n_bad          = int(s_target.sum())
-        n_good         = int((s_target == 0).sum())
-        target_tooltip = f"1 (Bad):  {n_bad:,}\n0 (Good): {n_good:,}\nToplam: {active_rows:,}"
-        target_card_val   = f"%{target_rate:.2f}"
-        target_card_label = f"Bad Rate  ({target})"
-        target_card_color = "#ef4444"
-    elif target_type == "continuous":
-        target_card_val   = f"{s_target.mean():.4f}"
-        target_card_label = f"Ort. Target  ({target})"
-        target_card_color = "#4F8EF7"
-        target_tooltip    = (f"Min: {s_target.min():.4f}  |  Max: {s_target.max():.4f}\n"
-                             f"Std: {s_target.std():.4f}  |  Medyan: {s_target.median():.4f}")
-    elif target_type == "multiclass":
-        n_cls = int(s_target.dropna().nunique())
-        target_card_val   = f"{n_cls} sınıf"
-        target_card_label = f"Multiclass Target  ({target})"
-        target_card_color = "#a78bfa"
-        target_tooltip    = None
-    else:
-        target_card_val   = f"{df_active[target].nunique()} unique"
-        target_card_label = f"Kategorik Target  ({target})"
-        target_card_color = "#f59e0b"
-        target_tooltip    = None
-
-    target_rate = None  # artık aşağıda kullanılmıyor
+    target_rate    = s_target.mean() * 100
+    n_bad          = int(s_target.sum())
+    n_good         = int((s_target == 0).sum())
+    target_tooltip = f"1 (Bad):  {n_bad:,}\n0 (Good): {n_good:,}\nToplam: {active_rows:,}"
+    target_card_val   = f"%{target_rate:.2f}"
+    target_card_label = f"Bad Rate  ({target})"
+    target_card_color = "#ef4444"
 
     # Tarih aralığı kartı
     if date_col and date_col in df_active.columns:

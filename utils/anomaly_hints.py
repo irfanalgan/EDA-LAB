@@ -58,10 +58,8 @@ def build_hint_section(checks: list[tuple]) -> html.Div:
 
 # ── Kural kütüphanesi ─────────────────────────────────────────────────────────
 
-def check_iv(iv_total: float, woe_df_empty: bool, target_type: str) -> list[tuple]:
+def check_iv(iv_total: float, woe_df_empty: bool) -> list[tuple]:
     hints = []
-    if target_type != "binary":
-        return hints
     if woe_df_empty or iv_total == 0.0:
         hints.append(("error", "IV = 0 — WOE hesaplanamadı", [
             "Train setinde yeterli event veya non-event yok (genellikle < 5)",

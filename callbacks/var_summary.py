@@ -1,8 +1,6 @@
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
-import numpy as np
-from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -23,52 +21,17 @@ def compute_var_summary_table(df_active, df_train, config, key,
     target      = config["target_col"]
     date_col    = config.get("date_col")
     oot_date    = config.get("oot_date")
-    target_type = config.get("target_type", "binary")
-    is_binary   = target_type == "binary"
 
-    # ── 1. IV (binary) veya Mutual Information (non-binary) ───────────────────
-    if is_binary:
-        iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_date}"
-        if iv_cache_key in _SERVER_STORE:
-            iv_df = _SERVER_STORE[iv_cache_key]
-        else:
-            iv_df = compute_iv_ranking_optimal(df_train, target)
-            _SERVER_STORE[iv_cache_key] = iv_df
-
-        summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
-        var_list = summary["Değişken"].tolist()
+    # ── 1. IV (Information Value) ────────────────────────────────────────────
+    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}_{oot_date}"
+    if iv_cache_key in _SERVER_STORE:
+        iv_df = _SERVER_STORE[iv_cache_key]
     else:
-        num_cols = [c for c in df_train.columns
-                    if c != target and pd.api.types.is_numeric_dtype(df_train[c])]
-        y_mi = pd.to_numeric(df_train[target], errors="coerce")
-        valid_mask = y_mi.notna()
-        X_mi = df_train[num_cols].loc[valid_mask].fillna(0)
-        y_mi = y_mi[valid_mask]
+        iv_df = compute_iv_ranking_optimal(df_train, target)
+        _SERVER_STORE[iv_cache_key] = iv_df
 
-        mi_fn = (mutual_info_regression if target_type == "continuous"
-                 else mutual_info_classif)
-        try:
-            mi_scores = mi_fn(X_mi, y_mi, random_state=42)
-        except Exception:
-            mi_scores = np.zeros(len(num_cols))
-
-        eksik_pct = (df_active[num_cols].isna().mean() * 100).round(2)
-        summary = pd.DataFrame({
-            "Değişken": num_cols,
-            "MI":        np.round(mi_scores, 6),
-            "Eksik %":   eksik_pct.values,
-        })
-
-        def _mi_guc(v):
-            if v < 0.01:  return "Çok Zayıf"
-            if v < 0.05:  return "Zayıf"
-            if v < 0.15:  return "Orta"
-            if v < 0.30:  return "Güçlü"
-            return "Şüpheli"
-        summary["Güç"] = summary["MI"].apply(_mi_guc)
-        summary = summary.sort_values("MI", ascending=False).reset_index(drop=True)
-        var_list = summary["Değişken"].tolist()
-        summary = summary.rename(columns={"MI": "IV"})
+    summary = iv_df[["Değişken", "IV", "Eksik %", "Güç"]].copy()
+    var_list = summary["Değişken"].tolist()
 
     # ── 2. WoE dataset (gerekiyorsa) ──────────────────────────────────────────
     if use_woe:
@@ -192,11 +155,10 @@ def compute_var_summary_table(df_active, df_train, config, key,
     mono_test: dict[str, str] = {}
     mono_oot:  dict[str, str] = {}
 
-    if is_binary:
-        _, df_test_split, df_oot_split = get_splits(df_active, config)
-        for var in var_list:
-            mono_test[var] = _check_monotonic(df_test_split, var, target) or "—"
-            mono_oot[var]  = _check_monotonic(df_oot_split,  var, target) or "—"
+    _, df_test_split, df_oot_split = get_splits(df_active, config)
+    for var in var_list:
+        mono_test[var] = _check_monotonic(df_test_split, var, target) or "—"
+        mono_oot[var]  = _check_monotonic(df_oot_split,  var, target) or "—"
 
     summary["Test Monoton"] = summary["Değişken"].map(lambda v: mono_test.get(v, "—"))
     summary["OOT Monoton"]  = summary["Değişken"].map(lambda v: mono_oot.get(v, "—"))
@@ -241,12 +203,7 @@ def compute_var_summary_table(df_active, df_train, config, key,
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
 
-    # Non-binary: "IV" → "MI"
-    if not is_binary and "IV" in summary.columns:
-        summary = summary.rename(columns={"IV": "MI"})
-
-    iv_col_label = "IV" if is_binary else "MI"
-    col_order = ["Değişken", "Öneri", "Sebep", iv_col_label, "Güç", "Eksik %",
+    col_order = ["Değişken", "Öneri", "Sebep", "IV", "Güç", "Eksik %",
                  "PSI", "PSI Durum", "Test Monoton", "OOT Monoton",
                  "Yüksek Korr.", "VIF"]
     summary = summary[[c for c in col_order if c in summary.columns]]
@@ -260,10 +217,8 @@ def compute_var_summary_table(df_active, df_train, config, key,
 
 
 # ── Render yardımcısı ─────────────────────────────────────────────────────────
-def _render_var_summary(summary, use_woe, is_binary):
+def _render_var_summary(summary, use_woe):
     """Cache'den veya taze hesaplamadan gelen summary DataFrame'ini HTML'e çevirir."""
-    iv_col_label = "IV" if is_binary else "MI"
-
     style_conditions = [
         {"if": {"filter_query": '{Öneri} = "✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
         {"if": {"filter_query": '{Öneri} = "⚠️ İncele"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
@@ -333,7 +288,7 @@ def _render_var_summary(summary, use_woe, is_binary):
             page_size=25,
             tooltip_header={
                 "Değişken":    {"value": "Değişkenin adı", "type": "markdown"},
-                "Öneri":       {"value": "IV/MI, Eksik%, PSI, Korelasyon ve VIF'e göre otomatik öneri:\n"
+                "Öneri":       {"value": "IV, Eksik%, PSI, Korelasyon ve VIF'e göre otomatik öneri:\n"
                                          "- **✅ Tut** — Tüm kriterler tatmin edici\n"
                                          "- **⚠️ İncele** — En az bir zayıf sinyal var\n"
                                          "- **❌ Çıkar** — Kritik sorun tespit edildi", "type": "markdown"},
@@ -345,14 +300,7 @@ def _render_var_summary(summary, use_woe, is_binary):
                                          "| 0.10–0.30 | Orta |\n"
                                          "| 0.30–0.50 | Güçlü |\n"
                                          "| > 0.50 | Şüpheli (overfit riski) |", "type": "markdown"},
-                "MI":          {"value": "**Mutual Information** — target ile ilişki gücü (binary olmayan targetlar)\n\n"
-                                         "| Aralık | Güç |\n|---|---|\n"
-                                         "| < 0.01 | Çok Zayıf |\n"
-                                         "| 0.01–0.05 | Zayıf |\n"
-                                         "| 0.05–0.15 | Orta |\n"
-                                         "| 0.15–0.30 | Güçlü |\n"
-                                         "| > 0.30 | Şüpheli (overfit riski) |", "type": "markdown"},
-                "Güç":         {"value": "IV/MI değerine göre değişken gücü kategorisi", "type": "markdown"},
+                "Güç":         {"value": "IV değerine göre değişken gücü kategorisi", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 80%** → Çıkar\n- **20–80%** → İncele", "type": "markdown"},
                 "PSI":         {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"
@@ -410,8 +358,6 @@ def update_var_summary(config, n_clicks, expert_excluded, seg_val, key, seg_col_
     if not key or not config or not config.get("target_col"):
         return html.Div()
 
-    target_type = config.get("target_type", "binary")
-    is_binary   = target_type == "binary"
     seg_col     = config.get("segment_col") or (seg_col_input or None)
     use_woe     = "woe" in (woe_toggle or [])
     excluded_set = set(expert_excluded or [])
@@ -425,7 +371,7 @@ def update_var_summary(config, n_clicks, expert_excluded, seg_val, key, seg_col_
         # Elenen değişkenleri filtrele
         if excluded_set:
             summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
-        return _render_var_summary(summary, use_woe, is_binary)
+        return _render_var_summary(summary, use_woe)
 
     # Cache yoksa hesapla (fallback — "Hesapla" butonuyla veya ilk açılışta)
     df_orig = _get_df(key)
@@ -448,4 +394,4 @@ def update_var_summary(config, n_clicks, expert_excluded, seg_val, key, seg_col_
     if excluded_set:
         summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
 
-    return _render_var_summary(summary, use_woe, is_binary)
+    return _render_var_summary(summary, use_woe)

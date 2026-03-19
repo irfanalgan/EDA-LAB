@@ -120,7 +120,6 @@ def render_deep_dive_shell(config, seg_val, expert_excluded, key, seg_col_input)
         # Config'i aşağıya ilet
         dcc.Store(id="store-dd-config", data={
             "target_col":     config["target_col"],
-            "target_type":    config.get("target_type", "binary"),
             "date_col":       config.get("date_col"),
             "oot_date":       config.get("oot_date"),
             "has_test_split": config.get("has_test_split", False),
@@ -159,7 +158,6 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
         return html.Div()
 
     target      = dd_config["target_col"]
-    target_type = dd_config.get("target_type", "binary")
     date_col    = dd_config.get("date_col")
     oot_date    = dd_config.get("oot_date")
     seg_col     = dd_config.get("seg_col")
@@ -174,12 +172,9 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
     _max_bins    = int(max_n_bins) if max_n_bins and int(max_n_bins) >= 2 else 4
     _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
 
-    # WOE yalnızca binary target için anlamlı, sadece train üzerinden
-    if target_type == "binary":
-        woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(
-            df_train, col, target, _max_bins, force_dtype=_force_dtype)
-    else:
-        woe_df, iv_total_dd, woe_bin_edges = pd.DataFrame(), 0.0, None
+    # WOE — sadece train üzerinden
+    woe_df, iv_total_dd, woe_bin_edges = get_woe_detail(
+        df_train, col, target, _max_bins, force_dtype=_force_dtype)
 
     # PSI cutoff: OOT date öncelikli, yoksa manuel seçim
     cutoff_date = oot_date if oot_date else (psi_split if psi_split else None)
@@ -198,7 +193,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
     _hints = []
     _hints += check_train_size(len(df_train))
     _hints += check_variable_stats(vstats)
-    _hints += check_iv(iv_total_dd, woe_df.empty, target_type)
+    _hints += check_iv(iv_total_dd, woe_df.empty)
     _hints += check_psi(psi_res.get("psi"), date_col, cutoff_date)
     hint_section = build_hint_section(_hints)
 
@@ -215,10 +210,9 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
     stat_cards = [
         sc(vstats["dtype"],                    "Tip"),
         sc(f"{vstats['missing']:,}",           f"Eksik  (%{vstats['missing_pct']})", missing_color),
-        sc(f"{iv_total_dd:.4f}" if target_type == "binary" else f"{vstats['unique']:,}",
-           "IV" if target_type == "binary" else "Tekil Değer",
-           ("#10b981" if iv_total_dd >= 0.1 else "#f59e0b" if iv_total_dd >= 0.02 else "#ef4444")
-           if target_type == "binary" else "#4F8EF7"),
+        sc(f"{iv_total_dd:.4f}",
+           "IV",
+           "#10b981" if iv_total_dd >= 0.1 else "#f59e0b" if iv_total_dd >= 0.02 else "#ef4444"),
     ]
     if is_num:
         skew_color = "#f59e0b" if abs(vstats.get("skewness") or 0) > 1 else "#10b981"
@@ -233,41 +227,22 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
 
     # Eksik vs Target kartı
     missing_target_card = html.Div()
-    if vstats["missing"] > 0:
-        if target_type == "binary" and vstats.get("missing_bad_rate") is not None:
-            diff = vstats["missing_bad_rate"] - vstats["present_bad_rate"]
-            diff_color = "#ef4444" if abs(diff) > 3 else "#f59e0b" if abs(diff) > 1 else "#10b981"
-            missing_target_card = html.Div([
-                html.P("Eksik Değer & Target İlişkisi", className="section-title"),
-                dbc.Row([
-                    sc(f"%{vstats['present_bad_rate']}", "Dolu → Bad Rate", "#4F8EF7"),
-                    sc(f"%{vstats['missing_bad_rate']}", "Eksik → Bad Rate", "#f59e0b"),
-                    sc(f"{'+' if diff > 0 else ''}{diff:.2f}pp", "Fark", diff_color),
-                ], className="g-3 mb-4"),
-            ])
-        elif target_type in ("continuous", "multiclass"):
-            # Binary dışı: bad rate yerine ortalama target farkını göster
-            lc_m = df_active[[col, target]].copy()
-            lc_m[target] = pd.to_numeric(lc_m[target], errors="coerce")
-            present_mean = lc_m[lc_m[col].notna()][target].mean()
-            missing_mean = lc_m[lc_m[col].isna()][target].mean()
-            if pd.notna(present_mean) and pd.notna(missing_mean):
-                diff_m = missing_mean - present_mean
-                ref = abs(present_mean) or 1.0
-                diff_color = "#ef4444" if abs(diff_m) > ref * 0.1 else "#f59e0b" if abs(diff_m) > ref * 0.03 else "#10b981"
-                missing_target_card = html.Div([
-                    html.P("Eksik Değer & Target İlişkisi", className="section-title"),
-                    dbc.Row([
-                        sc(f"{present_mean:.4f}", "Dolu → Ort. Target", "#4F8EF7"),
-                        sc(f"{missing_mean:.4f}", "Eksik → Ort. Target", "#f59e0b"),
-                        sc(f"{'+' if diff_m > 0 else ''}{diff_m:.4f}", "Fark", diff_color),
-                    ], className="g-3 mb-4"),
-                ])
+    if vstats["missing"] > 0 and vstats.get("missing_bad_rate") is not None:
+        diff = vstats["missing_bad_rate"] - vstats["present_bad_rate"]
+        diff_color = "#ef4444" if abs(diff) > 3 else "#f59e0b" if abs(diff) > 1 else "#10b981"
+        missing_target_card = html.Div([
+            html.P("Eksik Değer & Target İlişkisi", className="section-title"),
+            dbc.Row([
+                sc(f"%{vstats['present_bad_rate']}", "Dolu → Bad Rate", "#4F8EF7"),
+                sc(f"%{vstats['missing_bad_rate']}", "Eksik → Bad Rate", "#f59e0b"),
+                sc(f"{'+' if diff > 0 else ''}{diff:.2f}pp", "Fark", diff_color),
+            ], className="g-3 mb-4"),
+        ])
 
     # ── 2. Dağılım Grafikleri ─────────────────────────────────────────────────
     _has_date = bool(date_col and date_col in df_active.columns)
 
-    def _build_temporal_fig(df_t, col_t, target_t, target_type_t, date_col_t, is_num_t):
+    def _build_temporal_fig(df_t, col_t, target_t, date_col_t, is_num_t):
         """Zaman bazlı dağılım: x=tarih periyodu, bar=değişken ort./sayı, line=DR."""
         tmp = df_t[[col_t, target_t, date_col_t]].copy()
         tmp[date_col_t] = pd.to_datetime(tmp[date_col_t], errors="coerce")
@@ -294,11 +269,8 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
 
         merged = bar_agg.merge(dr_agg, on="_period", how="left").sort_values("_period")
 
-        if target_type_t == "binary":
-            merged["_dr"] = (merged["_dr"] * 100).round(2)
-            dr_label, dr_suffix = "Default Rate %", "%"
-        else:
-            dr_label, dr_suffix = f"Ort. {target_t}", ""
+        merged["_dr"] = (merged["_dr"] * 100).round(2)
+        dr_label, dr_suffix = "Default Rate %", "%"
 
         fig = go.Figure()
         fig.add_trace(go.Bar(
@@ -336,33 +308,9 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
         local = df_active[[col, target]].dropna(subset=[col, target]).copy()
 
         if _has_date:
-            fig_dist = _build_temporal_fig(df_active, col, target, target_type, date_col, True)
-        elif target_type == "continuous":
-            fig_dist = go.Figure()
-            fig_dist.add_trace(go.Histogram(
-                x=local[col], name=col,
-                marker_color="#4F8EF7", opacity=0.75, nbinsx=50,
-                hovertemplate="Değer: %{x}<br>Sayı: %{y}<extra></extra>",
-            ))
-            if vstats.get("iqr_lower") is not None:
-                for x_val, lbl, clr in [
-                    (vstats["iqr_lower"], "IQR Alt", "#f59e0b"),
-                    (vstats["iqr_upper"], "IQR Üst", "#f59e0b"),
-                    (vstats["p1"],  "P1",  "#556070"),
-                    (vstats["p99"], "P99", "#556070"),
-                ]:
-                    fig_dist.add_vline(x=x_val, line_dash="dot", line_color=clr,
-                                       opacity=0.6, annotation_text=lbl,
-                                       annotation_font_color=clr, annotation_font_size=9)
-            fig_dist.update_layout(
-                **_PLOT_LAYOUT,
-                title=dict(text=f"{col} — Dağılım", font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title=col),
-                yaxis=dict(**_AXIS_STYLE, title="Frekans"),
-                height=320,
-            )
+            fig_dist = _build_temporal_fig(df_active, col, target, date_col, True)
         else:
-            # Binary / multiclass — decile fallback (tarih yok)
+            # Binary — decile bad rate fallback (tarih yok)
             local_br = local.dropna(subset=[col, target]).copy()
             local_br[target] = pd.to_numeric(local_br[target], errors="coerce")
             local_br = local_br.dropna(subset=[target])
@@ -408,110 +356,81 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
                 height=320,
             )
 
-        if target_type == "continuous" and not _has_date:
-            # Scatter: col vs target
-            sample = local.sample(min(2000, len(local)), random_state=42)
-            fig_scatter = go.Figure(go.Scatter(
-                x=sample[col], y=sample[target], mode="markers",
-                marker=dict(color="#4F8EF7", opacity=0.4, size=4),
-                hovertemplate=f"{col}: %{{x}}<br>{target}: %{{y}}<extra></extra>",
-            ))
-            fig_scatter.update_layout(
-                **_PLOT_LAYOUT,
-                title=dict(text=f"{col} vs {target} — Scatter", font=dict(color="#E8EAF0", size=13)),
-                xaxis=dict(**_AXIS_STYLE, title=col),
-                yaxis=dict(**_AXIS_STYLE, title=target),
-                height=320,
-            )
-            dist_section = dbc.Row([
-                dbc.Col(dcc.Graph(figure=fig_dist,    config={"displayModeBar": False}), width=6),
-                dbc.Col(dcc.Graph(figure=fig_scatter, config={"displayModeBar": False}), width=6),
-            ], className="mb-4")
-        else:
-            # Binary/multiclass — stat table on right
-            local_tbl = local.dropna(subset=[target]).copy()
-            local_tbl[target] = local_tbl[target].astype(str).str.replace(r'\.0$', '', regex=True)
-            grp_data = {str(int(float(tv))): g[col].dropna()
-                        for tv, g in local_tbl.groupby(local_tbl[target])}
-            stat_rows = []
-            for stat_name, fn in [
-                ("Gözlem",   lambda s: f"{len(s):,}"),
-                ("Ortalama", lambda s: f"{s.mean():.4f}"),
-                ("Std",      lambda s: f"{s.std():.4f}"),
-                ("Min",      lambda s: f"{s.min():.4f}"),
-                ("P25",      lambda s: f"{s.quantile(.25):.4f}"),
-                ("Medyan",   lambda s: f"{s.median():.4f}"),
-                ("P75",      lambda s: f"{s.quantile(.75):.4f}"),
-                ("P95",      lambda s: f"{s.quantile(.95):.4f}"),
-                ("P99",      lambda s: f"{s.quantile(.99):.4f}"),
-                ("Max",      lambda s: f"{s.max():.4f}"),
-            ]:
-                row = {"İstatistik": stat_name}
-                for tv, g in grp_data.items():
-                    row[f"Target={tv}"] = fn(g) if len(g) else "—"
-                stat_rows.append(row)
-            stat_tbl_cols = ["İstatistik"] + [f"Target={k}" for k in sorted(grp_data.keys())]
-            stat_table = dash_table.DataTable(
-                data=stat_rows,
-                columns=[{"name": c, "id": c} for c in stat_tbl_cols],
-                style_table={"overflowX": "auto"},
-                style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
-                              "fontWeight": "700", "fontSize": "0.72rem",
-                              "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
-                style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
-                            "fontSize": "0.82rem", "border": "1px solid #232d3f"},
-                style_data_conditional=[
-                    {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
-                    {"if": {"column_id": "Target=1"}, "color": "#ef4444"},
-                    {"if": {"column_id": "Target=0"}, "color": "#4F8EF7"},
-                ],
-                style_cell={"padding": "0.4rem 0.7rem"},
-                style_cell_conditional=[
-                    {"if": {"column_id": "İstatistik"}, "fontWeight": "600",
-                     "color": "#a8b2c2", "textAlign": "left"},
-                ],
-            )
-            dist_section = dbc.Row([
-                dbc.Col(dcc.Graph(figure=fig_dist, config={"displayModeBar": False}), width=8),
-                dbc.Col([
-                    html.P("Good vs Bad İstatistikleri", className="section-title",
-                           style={"marginTop": "0.5rem"}),
-                    stat_table,
-                ], width=4),
-            ], className="mb-4")
+        # Binary — stat table on right
+        local_tbl = local.dropna(subset=[target]).copy()
+        local_tbl[target] = local_tbl[target].astype(str).str.replace(r'\.0$', '', regex=True)
+        grp_data = {str(int(float(tv))): g[col].dropna()
+                    for tv, g in local_tbl.groupby(local_tbl[target])}
+        stat_rows = []
+        for stat_name, fn in [
+            ("Gözlem",   lambda s: f"{len(s):,}"),
+            ("Ortalama", lambda s: f"{s.mean():.4f}"),
+            ("Std",      lambda s: f"{s.std():.4f}"),
+            ("Min",      lambda s: f"{s.min():.4f}"),
+            ("P25",      lambda s: f"{s.quantile(.25):.4f}"),
+            ("Medyan",   lambda s: f"{s.median():.4f}"),
+            ("P75",      lambda s: f"{s.quantile(.75):.4f}"),
+            ("P95",      lambda s: f"{s.quantile(.95):.4f}"),
+            ("P99",      lambda s: f"{s.quantile(.99):.4f}"),
+            ("Max",      lambda s: f"{s.max():.4f}"),
+        ]:
+            row = {"İstatistik": stat_name}
+            for tv, g in grp_data.items():
+                row[f"Target={tv}"] = fn(g) if len(g) else "—"
+            stat_rows.append(row)
+        stat_tbl_cols = ["İstatistik"] + [f"Target={k}" for k in sorted(grp_data.keys())]
+        stat_table = dash_table.DataTable(
+            data=stat_rows,
+            columns=[{"name": c, "id": c} for c in stat_tbl_cols],
+            style_table={"overflowX": "auto"},
+            style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
+                          "fontWeight": "700", "fontSize": "0.72rem",
+                          "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
+            style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
+                        "fontSize": "0.82rem", "border": "1px solid #232d3f"},
+            style_data_conditional=[
+                {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+                {"if": {"column_id": "Target=1"}, "color": "#ef4444"},
+                {"if": {"column_id": "Target=0"}, "color": "#4F8EF7"},
+            ],
+            style_cell={"padding": "0.4rem 0.7rem"},
+            style_cell_conditional=[
+                {"if": {"column_id": "İstatistik"}, "fontWeight": "600",
+                 "color": "#a8b2c2", "textAlign": "left"},
+            ],
+        )
+        dist_section = dbc.Row([
+            dbc.Col(dcc.Graph(figure=fig_dist, config={"displayModeBar": False}), width=8),
+            dbc.Col([
+                html.P("Good vs Bad İstatistikleri", className="section-title",
+                       style={"marginTop": "0.5rem"}),
+                stat_table,
+            ], width=4),
+        ], className="mb-4")
 
     else:
         # Kategorik
         if _has_date:
-            fig_dist = _build_temporal_fig(df_active, col, target, target_type, date_col, False)
+            fig_dist = _build_temporal_fig(df_active, col, target, date_col, False)
         else:
             local = df_active[[col, target]].copy()
             local[col] = local[col].fillna("Eksik").astype(str)
             top_cats = local[col].value_counts().head(20).index
             local = local[local[col].isin(top_cats)]
             fig_dist = go.Figure()
-            if target_type == "continuous":
-                vc = local[col].value_counts().reset_index()
-                vc.columns = [col, "count"]
+            local[target] = pd.to_numeric(local[target], errors='coerce')
+            local = local.dropna(subset=[target])
+            vc = local.groupby([col, target]).size().reset_index(name="count")
+            vc[target] = vc[target].astype(str).str.replace(r'\.0$', '', regex=True)
+            colors = {"0": "#4F8EF7", "1": "#ef4444"}
+            for t_val, grp in vc.groupby(target):
                 fig_dist.add_trace(go.Bar(
-                    x=vc[col], y=vc["count"], marker_color="#4F8EF7",
+                    x=grp[col], y=grp["count"],
+                    name=f"Target={t_val}",
+                    marker_color=colors.get(str(t_val), "#8892a4"),
                     hovertemplate="%{x}<br>Sayı: %{y}<extra></extra>",
                 ))
-                bar_title = f"{col} — Değer Dağılımı (Top 20)"
-            else:
-                local[target] = pd.to_numeric(local[target], errors='coerce')
-                local = local.dropna(subset=[target])
-                vc = local.groupby([col, target]).size().reset_index(name="count")
-                vc[target] = vc[target].astype(str).str.replace(r'\.0$', '', regex=True)
-                colors = {"0": "#4F8EF7", "1": "#ef4444"}
-                for t_val, grp in vc.groupby(target):
-                    fig_dist.add_trace(go.Bar(
-                        x=grp[col], y=grp["count"],
-                        name=f"Target={t_val}",
-                        marker_color=colors.get(str(t_val), "#8892a4"),
-                        hovertemplate="%{x}<br>Sayı: %{y}<extra></extra>",
-                    ))
-                bar_title = f"{col} — Değer Dağılımı (Top 20)"
+            bar_title = f"{col} — Değer Dağılımı (Top 20)"
             fig_dist.update_layout(
                 **_PLOT_LAYOUT,
                 barmode="stack",
@@ -527,15 +446,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
 
     # ── 3. WOE / Bad Rate Grafiği (Periyot Bazlı) ────────────────────────────
     woe_section = html.Div()
-    if target_type != "binary":
-        woe_section = html.Div(
-            "ℹ WOE/IV analizi yalnızca binary (0/1) target için hesaplanır. "
-            "Değişken gücü için Değişken Özeti sekmesindeki MI skoruna bakınız.",
-            style={"color": "#7e8fa4", "fontSize": "0.80rem",
-                   "padding": "0.6rem 0.8rem", "border": "1px solid #2d3a4f",
-                   "borderRadius": "5px", "marginBottom": "1.5rem"},
-        )
-    elif not woe_df.empty:
+    if not woe_df.empty:
         iv_total = iv_total_dd
         iv_label = ("Çok Zayıf" if iv_total < 0.02 else "Zayıf" if iv_total < 0.1
                     else "Orta" if iv_total < 0.3 else "Güçlü" if iv_total < 0.5 else "Şüpheli")

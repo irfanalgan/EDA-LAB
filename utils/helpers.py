@@ -150,28 +150,6 @@ def apply_segment_filter(
     return df[df[segment_col].astype(str).isin(vals)].copy()
 
 
-def detect_target_type(s: pd.Series) -> str:
-    """
-    Target değişkeninin ölçüm tipini tespit eder.
-    Dönüş: 'binary' | 'continuous' | 'multiclass' | 'categorical'
-    """
-    if pd.api.types.is_object_dtype(s):
-        return "categorical"
-    vals = s.dropna()
-    if len(vals) == 0:
-        return "binary"
-    unique_vals = set(vals.unique())
-    if unique_vals <= {0, 1, 0.0, 1.0}:
-        return "binary"
-    if pd.api.types.is_numeric_dtype(s):
-        n_unique = vals.nunique()
-        is_integer_like = (vals % 1 == 0).all()
-        if is_integer_like and n_unique <= 20:
-            return "multiclass"
-        return "continuous"
-    return "categorical"
-
-
 def get_splits(df: pd.DataFrame, config: dict) -> tuple:
     """
     df'yi config'e göre (df_train, df_test, df_oot) üçlüsüne böler.
