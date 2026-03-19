@@ -195,24 +195,24 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 if bt_train.empty:
                     continue
 
-                # Monotonluk
-                woe_vals = bt_train[bt_train["Bin"] != "TOPLAM"]["WOE"].tolist()
-                woe_nums = [w for w in woe_vals if isinstance(w, (int, float))]
-                if len(woe_nums) >= 2:
-                    diffs = [woe_nums[i+1] - woe_nums[i] for i in range(len(woe_nums)-1)]
+                def _mono_check(bt):
+                    """WOE sütunundan monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
+                    m = bt[~bt["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
+                    nums = [float(w) for w in m["WOE"].dropna().tolist()
+                            if isinstance(w, (int, float))]
+                    if len(nums) < 2:
+                        return "–"
+                    diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
                     if all(d >= 0 for d in diffs):
-                        monoton = "Artan ↑"
-                    elif all(d <= 0 for d in diffs):
-                        monoton = "Azalan ↓"
-                    else:
-                        monoton = "Monoton Değil ✗"
-                else:
-                    monoton = "–"
+                        return "Artan ↑"
+                    if all(d <= 0 for d in diffs):
+                        return "Azalan ↓"
+                    return "Monoton Değil ✗"
 
                 entry = {
                     "train_table": bt_train.to_dict("records"),
                     "iv_train": round(iv_train, 4),
-                    "monoton": monoton,
+                    "monoton": _mono_check(bt_train),
                 }
 
                 # Test tablosu
@@ -223,6 +223,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                         if not bt_test.empty:
                             entry["test_table"] = bt_test.to_dict("records")
                             entry["iv_test"] = round(iv_test, 4)
+                            entry["monoton_test"] = _mono_check(bt_test)
                     except Exception:
                         pass
 
@@ -234,6 +235,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                         if not bt_oot.empty:
                             entry["oot_table"] = bt_oot.to_dict("records")
                             entry["iv_oot"] = round(iv_oot, 4)
+                            entry["monoton_oot"] = _mono_check(bt_oot)
                     except Exception:
                         pass
 

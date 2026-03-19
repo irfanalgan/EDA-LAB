@@ -8,7 +8,6 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import build_woe_datasets, calc_psi, psi_label
-from modules.deep_dive import get_woe_detail
 from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
 
 
@@ -26,9 +25,6 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     iv_df       = _SERVER_STORE.get(f"{key}_iv_{seg_col}_{seg_val}")
     train_woe   = _SERVER_STORE.get(f"{_pfx}_train_woe")
     oot_woe     = _SERVER_STORE.get(f"{_pfx}_oot_woe")
-    optb_dict   = _SERVER_STORE.get(f"{_pfx}_optb", {})
-    df_test     = _SERVER_STORE.get(f"{_pfx}_test")
-    df_oot      = _SERVER_STORE.get(f"{_pfx}_oot")
 
     if iv_df is None or iv_df.empty:
         return pd.DataFrame()
@@ -61,37 +57,23 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
         lambda v: psi_label_map.get(v, "—")
     )
 
-    # ── Monotonluk (Test / OOT) — train'in fitted optb'si ile ────────────────
-    def _check_monotonic(df_split, var, target_col):
-        if df_split is None or len(df_split) < 50:
-            return None
-        try:
-            _fitted = optb_dict.get(var)
-            woe_df, iv_val, _, _ = get_woe_detail(df_split, var, target_col,
-                                                    fitted_optb=_fitted)
-            if woe_df.empty or iv_val == 0:
-                return None
-            main = woe_df[~woe_df["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
-            woes = main["WOE"].dropna().tolist()
-            if len(woes) < 2:
-                return None
-            woes_num = [float(w) for w in woes if w != ""]
-            if len(woes_num) < 2:
-                return None
-            is_asc  = all(woes_num[i] <= woes_num[i+1] for i in range(len(woes_num)-1))
-            is_desc = all(woes_num[i] >= woes_num[i+1] for i in range(len(woes_num)-1))
-            return "✅" if (is_asc or is_desc) else "❌"
-        except Exception:
-            return None
+    # ── Monotonluk (Test / OOT) — precompute cache'ten oku ────────────────────
+    woe_tables = _SERVER_STORE.get(f"{_pfx}_woe_tables", {})
 
-    mono_test = {}
-    mono_oot  = {}
-    for var in var_list:
-        mono_test[var] = _check_monotonic(df_test, var, target) or "—"
-        mono_oot[var]  = _check_monotonic(df_oot,  var, target) or "—"
+    def _mono_symbol(raw):
+        """Precompute'taki metin → emoji dönüşümü."""
+        if not raw or raw == "–":
+            return "—"
+        if "Artan" in raw or "Azalan" in raw:
+            return "✅"
+        return "❌"
 
-    summary["Test Monoton"] = summary["Değişken"].map(lambda v: mono_test.get(v, "—"))
-    summary["OOT Monoton"]  = summary["Değişken"].map(lambda v: mono_oot.get(v, "—"))
+    summary["Test Monoton"] = summary["Değişken"].map(
+        lambda v: _mono_symbol(woe_tables.get(v, {}).get("monoton_test", ""))
+    )
+    summary["OOT Monoton"] = summary["Değişken"].map(
+        lambda v: _mono_symbol(woe_tables.get(v, {}).get("monoton_oot", ""))
+    )
 
     # ── Korelasyon — Train WoE, tüm değişkenler ─────────────────────────────
     corr_map = {}

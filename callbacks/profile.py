@@ -63,10 +63,14 @@ def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # 2. DataFrame → parquet
+    # 2. DataFrame → parquet (pyarrow yoksa pickle fallback)
     df = _SERVER_STORE.get(key)
     if df is not None:
-        df.to_parquet(profile_dir / "data.parquet", index=False)
+        try:
+            df.to_parquet(profile_dir / "data.parquet", index=False)
+        except Exception:
+            pickle.dump(df, open(profile_dir / "data.pkl", "wb"),
+                        protocol=pickle.HIGHEST_PROTOCOL)
 
     # 3. Cache → pickle (UUID prefix çıkar, sadece suffix sakla)
     cache = {}
@@ -90,11 +94,19 @@ def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
 
     new_key = str(uuid.uuid4())
 
-    # DataFrame
+    # DataFrame — parquet veya pickle fallback
     parquet_path = profile_dir / "data.parquet"
+    pkl_data_path = profile_dir / "data.pkl"
     df = None
     if parquet_path.exists():
-        df = pd.read_parquet(parquet_path)
+        try:
+            df = pd.read_parquet(parquet_path)
+        except ImportError:
+            pass
+    if df is None and pkl_data_path.exists():
+        with open(pkl_data_path, "rb") as f:
+            df = pickle.load(f)
+    if df is not None:
         _SERVER_STORE[new_key] = df
 
     # Cache — re-key with new UUID
