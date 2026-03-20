@@ -327,6 +327,10 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, key):
             "Özet henüz hesaplanmadı. Önce 'Target & IV' veya 'Değişken Özeti' sekmesini açın.",
             className="form-hint", style={"padding": "0.5rem 0.75rem"})
 
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    if screen_result:
+        passed_set = set(screen_result[0])
+        disp = disp[disp["Değişken"].isin(passed_set)].copy()
     excluded = set(expert_excluded or [])
     disp = disp[~disp["Değişken"].isin(excluded)].copy()
 

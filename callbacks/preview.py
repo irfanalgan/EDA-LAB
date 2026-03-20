@@ -470,7 +470,7 @@ def update_preview(config, expert_excluded, thresholds, key):
                           style={"fontSize": "0.78rem"}),
                 dbc.Input(
                     id="input-thr-iv",
-                    type="number", min=0, max=1, step=0.01,
+                    type="number", min=0, max=1, step=0.001,
                     value=iv_thr_current if iv_thr_current else None,
                     placeholder="örn: 0.10",
                     size="sm",
