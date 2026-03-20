@@ -409,7 +409,6 @@ select.form-select {
     box-shadow: var(--shadow-lg), 0 0 0 1px rgba(79,142,247,0.05) !important;
     z-index: 9999 !important;
     overflow: hidden !important;
-    animation: menuSlideDown 0.15s ease forwards !important;
     backdrop-filter: blur(8px);
 }
 
@@ -554,7 +553,6 @@ select.form-select {
     border-radius: var(--radius-md) !important;
     box-shadow: var(--shadow-lg) !important;
     z-index: 9999 !important;
-    animation: menuSlideDown 0.15s ease forwards !important;
 }
 .dark-select [class*="__menu-list"] {
     background-color: var(--bg-elevated) !important;
@@ -1114,9 +1112,30 @@ select.form-select {
     border-radius: 10px !important;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(79,142,247,0.06) !important;
     z-index: 9999 !important;
-    overflow: visible !important;
-    animation: menuSlideDown 0.15s ease forwards !important;
+    overflow: hidden !important;
     margin-top: 4px !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* Search kutusu her zaman üstte sabit kalsın */
+.dash-dropdown-content > .dash-dropdown-search {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 2 !important;
+    background: #1A2035 !important;
+    flex-shrink: 0 !important;
+    order: -2 !important;
+    margin: 8px 8px 4px 8px !important;
+}
+
+/* Aksiyon butonları (Select All / Deselect All) search'ten sonra */
+.dash-dropdown-content > .dash-dropdown-actions {
+    flex-shrink: 0 !important;
+    order: -1 !important;
+    border-bottom: 1px solid #2D3A4F !important;
+    padding-bottom: 4px !important;
+    margin-bottom: 4px !important;
 }
 
 /* ── Seçenek listesi (scroll alan) ─────────────────────────────────────── */

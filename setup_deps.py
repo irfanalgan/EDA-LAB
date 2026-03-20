@@ -29,10 +29,13 @@ PACKAGES = [
     ("sklearn",                 "scikit-learn>=1.3",                None),
     ("lightgbm",                "lightgbm>=4.0",                    None),
     ("xgboost",                 "xgboost>=2.0",                     None),
+    ("statsmodels",             "statsmodels",                      None),
+    ("optbinning",              "optbinning",                       None),
+    ("matplotlib",              "matplotlib",                       None),
     ("pyodbc",                  "pyodbc",                           None),
-    ("ydata_profiling",         "ydata-profiling",                  None),
+    ("sqlalchemy",              "sqlalchemy",                       None),
     ("shap",                    "shap",                             None),
-    ("pyarrow",                 "pyarrow",                          None),
+    ("psutil",                  "psutil",                           None),
 ]
 
 # ── Prefix dosyasını oku ──────────────────────────────────────────────────────

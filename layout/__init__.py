@@ -184,7 +184,7 @@ def _build_help_tab() -> "html.Div":
                     "WOE sütunlarında NaN/Inf var — değişken seçiminde sorunlu sütunları çıkar.",
                     "Target tüm train setinde aynı değer (all-0 veya all-1) → segment filtresi genişlet.",
                     "Çok fazla değişken az gözlem ile birleşince matris tekil (singular) olabilir — "
-                    "değişken sayısını azalt veya L2 regularization için C değerini düşür.",
+                    "değişken sayısını azalt.",
                 ], "error"),
 
                 _faq_item("Segment seçince metrikler değişmiyor", [
@@ -746,6 +746,21 @@ def build_main():
                     ], width=6),
                 ], className="mb-4"),
 
+                # ── Ham / WoE Veri Kaynağı Seçimi ──────────────────────
+                dbc.Tabs(
+                    id="stat-data-tab",
+                    active_tab="stat-tab-raw",
+                    children=[
+                        dbc.Tab(label="Ham Değerler", tab_id="stat-tab-raw",
+                                tab_style={"fontSize": "0.78rem"},
+                                active_label_style={"color": "#10b981", "fontWeight": "700"}),
+                        dbc.Tab(label="WoE Değerler", tab_id="stat-tab-woe",
+                                tab_style={"fontSize": "0.78rem"},
+                                active_label_style={"color": "#4F8EF7", "fontWeight": "700"}),
+                    ],
+                    className="mb-3",
+                ),
+
                 # ── Korelasyon Paneli ─────────────────────────────────────
                 html.Div(id="stat-corr-panel", children=[
                     html.Div([
@@ -990,29 +1005,30 @@ def build_main():
                           "doğrusallık bilgilerini yan yana görerek değişken eleme kararlarını "
                           "tek bakışta verebilirsiniz.",
                           "#10b981"),
-                dbc.Row([
-                    dbc.Col(
-                        dbc.Checklist(
-                            id="chk-varsummary-woe",
-                            options=[{"label": "PSI · Korelasyon · VIF — WoE dönüştürülmüş değerler üzerinden hesapla",
-                                      "value": "woe"}],
-                            value=["woe"],
-                            inline=True,
-                            style={"color": "#c8cdd8", "fontSize": "0.83rem"},
-                        ), width=10,
-                    ),
-                    dbc.Col(
-                        dbc.Button("Hesapla", id="btn-var-summary",
-                                   color="primary", size="sm"),
-                        width=2, className="d-flex justify-content-end",
-                    ),
-                ], align="center", className="mb-3"),
+                # Hidden — callback uyumluluğu için (eski checkbox/buton kaldırıldı)
+                dbc.Checklist(id="chk-varsummary-woe", options=[], value=["woe"],
+                              style={"display": "none"}),
+                html.Div(id="btn-var-summary", style={"display": "none"}),
+                # Ham / WoE tab ayrımı
+                dbc.Tabs(
+                    id="varsummary-data-tab",
+                    active_tab="vs-tab-woe",
+                    children=[
+                        dbc.Tab(label="WoE Değerler", tab_id="vs-tab-woe",
+                                tab_style={"fontSize": "0.78rem"},
+                                active_label_style={"color": "#4F8EF7", "fontWeight": "700"}),
+                        dbc.Tab(label="Ham Değerler", tab_id="vs-tab-raw",
+                                tab_style={"fontSize": "0.78rem"},
+                                active_label_style={"color": "#10b981", "fontWeight": "700"}),
+                    ],
+                    className="mb-3",
+                ),
                 dcc.Loading(html.Div(id="div-var-summary"), type="dot", color="#4F8EF7", delay_show=300),
             ]), label="Değişken Özeti", tab_id="tab-var-summary", className="tab-content-area"),
             dbc.Tab(html.Div([
                 _tab_info("Modelleme", "Grafik Oluşturucu · Hızlı Model · SHAP",
                           "İki bölümden oluşur: Grafik Oluşturucu ile serbest keşif yapabilir, "
-                          "Hızlı Model ile LR / LightGBM / XGBoost / Random Forest modellerini "
+                          "Hızlı Model ile LR / LightGBM / XGBoost modellerini "
                           "hızlıca eğitip AUC, Gini, KS metriklerini ve SHAP beeswarm grafiğini "
                           "görebilirsiniz. WoE encode ve ham encode sonuçlar yan yana karşılaştırılır.",
                           "#f59e0b"),
@@ -1237,18 +1253,14 @@ def build_main():
                                        {"label": "Logistic Regression", "value": "lr"},
                                        {"label": "LightGBM",            "value": "lgbm"},
                                        {"label": "XGBoost",             "value": "xgb"},
-                                       {"label": "Random Forest",       "value": "rf"},
                                    ],
                                    value="lr",
                                    style={"maxWidth": "220px"}),
                     ], width=3),
-                    dbc.Col([
-                        dbc.Label("C (Regülarizasyon)", className="form-label"),
-                        html.Div("Yalnızca Logistic Regression için", className="form-hint"),
-                        dbc.Input(id="pg-c-value", type="number",
-                                  value=1.0, min=0.001, step=0.1,
-                                  style={"maxWidth": "110px"}),
-                    ], id="pg-col-c-value", width=2),
+                    html.Div(
+                        dbc.Input(id="pg-null-strategy", type="hidden", value="median"),
+                        style={"display": "none"},
+                    ),
                     dbc.Col([
                         dbc.Label("Karar Eşiği", className="form-label"),
                         html.Div("Sınıflandırma kesim noktası", className="form-hint"),
@@ -1276,10 +1288,12 @@ def build_main():
                                    color="success", size="sm"),
                     ], width=2),
                 ], className="mb-3"),
+                html.Div(id="pg-null-review-panel"),
                 dcc.Loading(html.Div(id="pg-model-output"),
                             type="dot", color="#4F8EF7", delay_show=300),
 
                 dcc.Store(id="store-pg-model-vars", storage_type="memory"),
+                dcc.Store(id="store-pg-null-strategies", storage_type="memory"),
             ]), label="Modelleme", tab_id="tab-playground",
                className="tab-content-area"),
 
@@ -1423,7 +1437,7 @@ def _build_slideshow_modal():
             html.H4("Modelleme — Hızlı Model", className="slide-title"),
             html.P(
                 "Seçtiğiniz değişkenlerle hızlıca Logistic Regression, "
-                "LightGBM, XGBoost veya Random Forest modeli kurun. "
+                "LightGBM veya XGBoost modeli kurun. "
                 "Gini, AUC ve katsayıları anında görün. "
                 "Train / Test / OOT performansını karşılaştırın.",
                 className="slide-text",
@@ -1432,7 +1446,6 @@ def _build_slideshow_modal():
                 html.Span("Logistic Reg.", className="slide-chip"),
                 html.Span("LightGBM", className="slide-chip"),
                 html.Span("XGBoost", className="slide-chip"),
-                html.Span("Random Forest", className="slide-chip"),
             ], className="slide-chips"),
         ], className="slide-content"),
     ]

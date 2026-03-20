@@ -1,0 +1,16 @@
+dash
+dash-bootstrap-components
+pandas
+numpy
+plotly
+scipy
+scikit-learn
+statsmodels
+lightgbm
+xgboost
+shap
+matplotlib
+optbinning
+pyodbc
+sqlalchemy
+psutil

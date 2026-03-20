@@ -7,8 +7,8 @@ import numpy as np
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE
-from modules.deep_dive import get_variable_stats, get_woe_detail, compute_psi, compute_period_badrate
+from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, calc_psi as _calc_psi, psi_label as _psi_label
+from modules.deep_dive import get_variable_stats, get_woe_detail, compute_period_badrate
 from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
                                   check_variable_stats, check_train_size)
 
@@ -35,40 +35,14 @@ def render_deep_dive_shell(config, expert_excluded, key):
     cols = [c for c in base_cols if c not in expert_excluded]
     col_options = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in cols]
 
-    # PSI kesim tarihi — OOT date varsa otomatik, yoksa manuel seçim
+    # PSI kesim tarihi — OOT date config'den otomatik belirlenir
     date_col = config.get("date_col")
     oot_date = config.get("oot_date")
-    if oot_date:
-        # OOT date config'de tanımlı → picker gizle, bilgi badge'i göster
-        psi_date_col = dbc.Col([
-            dbc.Label("PSI Kesim Tarihi", className="form-label"),
-            html.Div(
-                [html.Span("OOT: ", style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
-                 html.Span(f"≥ {oot_date}", style={"color": "#a78bfa", "fontSize": "0.80rem", "fontWeight": "700"})],
-                className="form-hint",
-            ),
-            dcc.Dropdown(id="dd-psi-split", options=[{"label": oot_date, "value": oot_date}],
-                         value=oot_date, className="dark-select", disabled=True, searchable=True, placeholder="Kolon ara\u2026"),
-        ], width=3)
-    elif date_col and date_col in df.columns:
+    _psi_val = oot_date or None
+    if not _psi_val and date_col and date_col in df.columns:
         raw_dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
         distinct  = sorted(raw_dates.dt.to_period("M").unique().astype(str))
-        date_opts = [{"label": d, "value": d} for d in distinct]
-        psi_date_col = dbc.Col([
-            dbc.Label("PSI Kesim Tarihi", className="form-label"),
-            html.Div("Öncesi = Baseline  ·  Sonrası = Karşılaştırma", className="form-hint"),
-            dcc.Dropdown(id="dd-psi-split", options=date_opts,
-                         value=distinct[len(distinct)//2] if distinct else None,
-                         className="dark-select", searchable=True, placeholder="Tarih ara\u2026"),
-        ], width=3)
-    else:
-        psi_date_col = dbc.Col([
-            dbc.Label("PSI Kesim Tarihi", className="form-label"),
-            html.Div("\u00a0", className="form-hint"),
-            dcc.Dropdown(id="dd-psi-split", options=[], value=None,
-                         className="dark-select", disabled=True,
-                         placeholder="Tarih kolonu se\u00e7ilmedi"),
-        ], width=3)
+        _psi_val  = distinct[len(distinct)//2] if distinct else None
 
     return html.Div([
         _tab_info("Değişken Analizi", "WoE · PSI · Bivariate Deep Dive",
@@ -103,17 +77,28 @@ def render_deep_dive_shell(config, expert_excluded, key):
                         ),
                     ], style={"marginTop": "6px", "display": "flex", "alignItems": "center"}),
                 ], width=4),
-                psi_date_col,
-                dbc.Col([
-                    dbc.Label("Max Bin Sayısı", className="form-label"),
-                    html.Div("WOE & IV için", className="form-hint"),
-                    dbc.Input(id="dd-max-bins", type="number", value=4,
-                              min=2, max=20, step=1,
-                              style={"backgroundColor": "#1a2035", "color": "#c8cdd8",
-                                     "border": "1px solid #2d3a4f", "fontSize": "0.85rem"}),
-                ], width=2),
+                # Hidden — callback uyumluluğu için
+                html.Div([
+                    dcc.Dropdown(id="dd-psi-split", options=[], value=_psi_val,
+                                 style={"display": "none"}),
+                    dbc.Input(id="dd-max-bins", type="hidden", value=4),
+                ], style={"display": "none"}),
             ], className="mb-4"),
         ]),
+        # Ham / WoE tab ayrımı
+        dbc.Tabs(
+            id="dd-data-tab",
+            active_tab="dd-tab-woe",
+            children=[
+                dbc.Tab(label="WoE Değerler", tab_id="dd-tab-woe",
+                        tab_style={"fontSize": "0.78rem"},
+                        active_label_style={"color": "#4F8EF7", "fontWeight": "700"}),
+                dbc.Tab(label="Ham Değerler", tab_id="dd-tab-raw",
+                        tab_style={"fontSize": "0.78rem"},
+                        active_label_style={"color": "#10b981", "fontWeight": "700"}),
+            ],
+            className="mb-3",
+        ),
         dcc.Loading(html.Div(id="deep-dive-content"), type="dot", color="#4F8EF7", delay_show=300),
         # Config'i aşağıya ilet
         dcc.Store(id="store-dd-config", data={
@@ -143,11 +128,12 @@ def reset_dtype_override(_col):
     Input("dd-deepdive-col", "value"),
     Input("dd-psi-split", "value"),
     Input("dd-dtype-override", "value"),
+    Input("dd-data-tab", "active_tab"),
     State("store-dd-config", "data"),
     State("dd-max-bins", "value"),
     prevent_initial_call=False,
 )
-def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bins):
+def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd_config, max_n_bins):
     if not col or not dd_config:
         return html.Div()
 
@@ -169,20 +155,43 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
 
     _max_bins    = int(max_n_bins) if max_n_bins and int(max_n_bins) >= 2 else 4
     _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
+    _is_woe_tab  = (active_data_tab != "dd-tab-raw")
 
     # WOE — sadece train üzerinden
     woe_df, iv_total_dd, woe_bin_edges, _ = get_woe_detail(
         df_train, col, target, _max_bins, force_dtype=_force_dtype)
 
-    # PSI cutoff: OOT date öncelikli, yoksa manuel seçim
+    # PSI — TEK KAYNAK: calc_psi (train vs OOT)
+    # WoE tab → discrete=True (her unique WoE değeri bir bin)
+    # Ham tab → discrete=False, n_bins=10, np.linspace
+    _pfx = f"{dd_config['key']}_ds_{seg_col}_{seg_val}"
     cutoff_date = oot_date if oot_date else (psi_split if psi_split else None)
-    psi_res = compute_psi(
-        df_active, col, target,
-        date_col=date_col if date_col else None,
-        cutoff_date=cutoff_date,
-        bin_edges=woe_bin_edges,
-        force_dtype=_force_dtype,
-    )
+    psi_res = {"psi": None}
+    if df_oot is not None and not df_oot.empty and col in df_train.columns:
+        if _is_woe_tab:
+            _tr_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
+            _oot_woe = _SERVER_STORE.get(f"{_pfx}_oot_woe")
+            if _tr_woe is not None and _oot_woe is not None and col in _tr_woe.columns and col in _oot_woe.columns:
+                _tv = _tr_woe[col].dropna().values
+                _ov = _oot_woe[col].dropna().values
+                if len(_tv) >= 2 and len(_ov) >= 2:
+                    _d = _calc_psi(_tv, _ov, discrete=True, detail=True)
+                    psi_res = {"psi": _d["psi"], "label": _psi_label(_d["psi"]),
+                               "detail_df": pd.DataFrame(_d["rows"]),
+                               "split_label": "Train", "comp_label": "OOT",
+                               "n_baseline": len(_tv), "n_compare": len(_ov)}
+        else:
+            _tv = df_train[col].dropna().values
+            _ov = df_oot[col].dropna().values
+            if len(_tv) >= 2 and len(_ov) >= 2:
+                try:
+                    _d = _calc_psi(_tv, _ov, n_bins=10, discrete=False, detail=True)
+                    psi_res = {"psi": _d["psi"], "label": _psi_label(_d["psi"]),
+                               "detail_df": pd.DataFrame(_d["rows"]),
+                               "split_label": "Train", "comp_label": "OOT",
+                               "n_baseline": len(_tv), "n_compare": len(_ov)}
+                except Exception:
+                    pass
 
     is_num = (vstats["is_numeric"] if _force_dtype is None
               else (_force_dtype == "numerical"))
@@ -652,13 +661,17 @@ def render_deep_dive_content(col, psi_split, dtype_override, dd_config, max_n_bi
             ], style={"marginTop": "0.5rem"}),
         ], className="mb-4")
 
-    return html.Div([
+    sections = [
         hint_section,
         html.P("Özet İstatistikler", className="section-title"),
         stats_row,
         missing_target_card,
         html.P("Dağılım Analizi", className="section-title"),
         dist_section,
-        woe_section,
-        psi_section,
-    ])
+    ]
+    # WoE & Bad Rate — sadece WoE tab'da göster
+    if _is_woe_tab:
+        sections.append(woe_section)
+    sections.append(psi_section)
+
+    return html.Div(sections)

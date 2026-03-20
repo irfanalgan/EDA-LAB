@@ -1,9 +1,10 @@
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
+import pandas as pd
 
 from app_instance import app
-from server_state import get_df as _get_df
-from utils.helpers import apply_segment_filter
+from server_state import _SERVER_STORE, get_df as _get_df
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info
 from modules.profiling import compute_profile, profile_summary
 
@@ -21,10 +22,18 @@ def update_profiling(config, key):
 
     seg_col = config.get("segment_col")
     seg_val = config.get("segment_val")
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
 
-    profile = compute_profile(df_active)   # local kopya üzerinde çalışır
-    summary = profile_summary(profile, len(df_active))
+    # Raw train+test kullan (OOT hariç)
+    df_train = _SERVER_STORE.get(f"{_pfx}_train")
+    df_test  = _SERVER_STORE.get(f"{_pfx}_test")
+    if df_train is not None:
+        df_raw = pd.concat([df_train, df_test], ignore_index=True) if df_test is not None else df_train
+    else:
+        df_raw = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    profile = compute_profile(df_raw)
+    summary = profile_summary(profile, len(df_raw))
 
     # ── Özet kartları ─────────────────────────────────────────────────────────
     def scard(value, label, color="#4F8EF7"):

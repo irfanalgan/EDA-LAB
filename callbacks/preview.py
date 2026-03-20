@@ -304,7 +304,7 @@ def _build_screen_report(key, df_active, config, expert_excluded=None,
     criteria_items = [
         html.Span("Elenme kriterleri — ",
                   style={"color": "#7e8fa4", "fontSize": "0.72rem"}),
-        html.Span("> %80 eksik",
+        html.Span("> %60 eksik",
                   style={"color": "#f59e0b", "fontSize": "0.72rem",
                          "fontWeight": "600"}),
         html.Span("  ·  sabit değişken (1 tekil değer)",
@@ -369,7 +369,7 @@ def _build_quality_section(key: str, df: pd.DataFrame) -> html.Div:
     if len(df) > 0:
         null_pct = (df.isnull().sum() / len(df) * 100).sort_values(ascending=False)
 
-        high_null = null_pct[(null_pct >= 20) & (null_pct < 80)]
+        high_null = null_pct[(null_pct >= 20) & (null_pct < 60)]
         if not high_null.empty:
             bullets = [
                 f"{col}  —  %{pct:.1f} eksik ({int(len(df) * pct / 100):,} satır)"

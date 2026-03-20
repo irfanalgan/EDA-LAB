@@ -7,13 +7,13 @@ def screen_columns(
     target_col: str,
     date_col: str = None,
     segment_col: str = None,
-    missing_threshold: float = 0.80,
+    missing_threshold: float = 0.60,
 ) -> tuple[list[str], pd.DataFrame]:
     """
     Kalite kontrolü — düşük kaliteli kolonları eleyin.
 
     Kurallar (sırasıyla uygulanır):
-      1. Yüksek Eksik  : dolu oran < (1 - missing_threshold)  → varsayılan %80 üstü boş
+      1. Yüksek Eksik  : dolu oran < (1 - missing_threshold)  → varsayılan %60 üstü boş
       2. Sabit          : dolu değerler arasında tekil değer sayısı ≤ 1
 
     Returns

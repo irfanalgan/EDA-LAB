@@ -141,23 +141,27 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         durations["screening"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 1, "durations": dict(durations), "done": False}
 
-    # ── Adım 1: Profiling ────────────────────────────────────────────────────
-    try:
-        t0 = time.perf_counter()
-        prof = compute_profile(df_active)
-        _SERVER_STORE[f"{key}_profile_{seg_col}_{seg_val}"] = prof
-        durations["profiling"] = round(time.perf_counter() - t0, 1)
-    except Exception:
-        durations["profiling"] = None
-    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 2, "durations": dict(durations), "done": False}
-
-    # ── Adım 2: Split — 6 DataFrame oluştur ──────────────────────────────────
+    # ── Adım 1: Split + Profiling ────────────────────────────────────────────
+    #   Split'i önce yapıyoruz çünkü profiling raw train+test üzerinden çalışacak.
     try:
         t0 = time.perf_counter()
         df_train, df_test, df_oot = get_splits(df_active, cfg)
         _SERVER_STORE[f"{_pfx}_train"] = df_train
         _SERVER_STORE[f"{_pfx}_test"]  = df_test   # None olabilir
         _SERVER_STORE[f"{_pfx}_oot"]   = df_oot    # None olabilir
+
+        # Profiling: raw train+test (OOT hariç)
+        df_raw_train_test = pd.concat([df_train, df_test], ignore_index=True) if df_test is not None else df_train.copy()
+        prof = compute_profile(df_raw_train_test)
+        _SERVER_STORE[f"{key}_profile_{seg_col}_{seg_val}"] = prof
+        durations["profiling"] = round(time.perf_counter() - t0, 1)
+    except Exception:
+        durations["profiling"] = None
+    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 2, "durations": dict(durations), "done": False}
+
+    # ── Adım 2: WoE / IV ─────────────────────────────────────────────────────
+    try:
+        t0 = time.perf_counter()
 
         # Screening'den geçen kolonlar
         screen_data = _SERVER_STORE.get(f"{key}_screen")
@@ -182,32 +186,74 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
 
         # ── WoE dağılım tabloları (train/test/oot) — tek seferlik ──────────────
         optb_dict = woe_result["optb_dict"]
+        _iv_tables_raw = woe_result["iv_tables"]   # {col: optbinning bt DataFrame}
         iv_df = woe_result["iv_df"]
         woe_tables = {}
+
+        def _format_bt(bt_raw):
+            """Optbinning binning_table → uygulama formatına dönüştür."""
+            data_rows = bt_raw[bt_raw["Bin"].astype(str).str.len() > 0]
+            data_rows = data_rows[~data_rows["Bin"].isin(["Special", "Missing", "Totals"])]
+            rows = []
+            for _, r in data_rows.iterrows():
+                total = int(r["Count"]); bad = int(r["Event"]); good = int(r["Non-event"])
+                rows.append({
+                    "Bin": str(r["Bin"]), "Toplam": total, "Bad": bad, "Good": good,
+                    "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                    "WOE": round(float(r["WoE"]), 4),
+                    "IV Katkı": round(float(r["IV"]), 4),
+                })
+            for lbl in ["Special", "Missing"]:
+                sr = bt_raw[bt_raw["Bin"] == lbl]
+                if not sr.empty and int(sr.iloc[0]["Count"]) > 0:
+                    r = sr.iloc[0]
+                    rows.append({
+                        "Bin": "Eksik" if lbl == "Missing" else "Special",
+                        "Toplam": int(r["Count"]), "Bad": int(r["Event"]),
+                        "Good": int(r["Non-event"]),
+                        "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                        "WOE": round(float(r["WoE"]), 4),
+                        "IV Katkı": round(float(r["IV"]), 4),
+                    })
+            if not rows:
+                return pd.DataFrame()
+            result = pd.DataFrame(rows)
+            t_n = result["Toplam"].sum(); t_b = result["Bad"].sum()
+            total_row = pd.DataFrame([{
+                "Bin": "TOPLAM", "Toplam": int(t_n), "Bad": int(t_b),
+                "Good": int(result["Good"].sum()),
+                "Bad Rate %": round(t_b / t_n * 100, 2) if t_n > 0 else 0.0,
+                "WOE": "", "IV Katkı": round(float(bt_raw.loc["Totals", "IV"]), 4),
+            }])
+            return pd.concat([result, total_row], ignore_index=True)
+
+        def _mono_check(bt):
+            """Bad Rate % üzerinden monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
+            m = bt[~bt["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
+            nums = [float(w) for w in m["Bad Rate %"].dropna().tolist()
+                    if isinstance(w, (int, float))]
+            if len(nums) < 2:
+                return "–"
+            diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
+            if all(d >= 0 for d in diffs):
+                return "Artan ↑"
+            if all(d <= 0 for d in diffs):
+                return "Azalan ↓"
+            return "Monoton Değil ✗"
+
         for var in var_list:
             _optb = optb_dict.get(var)
             if _optb is None:
                 continue
             try:
-                # Train tablosu: optb.binning_table.build() → get_woe_detail formatı
-                bt_train, iv_train, _, _ = get_woe_detail(
-                    df_train, var, target, fitted_optb=_optb, use_edges=False)
+                # Train tablosu: iv_tables'tan doğrudan formatla (tekrar build() yok)
+                bt_raw = _iv_tables_raw.get(var)
+                if bt_raw is None or bt_raw.empty:
+                    continue
+                bt_train = _format_bt(bt_raw)
                 if bt_train.empty:
                     continue
-
-                def _mono_check(bt):
-                    """WOE sütunundan monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
-                    m = bt[~bt["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
-                    nums = [float(w) for w in m["WOE"].dropna().tolist()
-                            if isinstance(w, (int, float))]
-                    if len(nums) < 2:
-                        return "–"
-                    diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
-                    if all(d >= 0 for d in diffs):
-                        return "Artan ↑"
-                    if all(d <= 0 for d in diffs):
-                        return "Azalan ↓"
-                    return "Monoton Değil ✗"
+                iv_train = float(bt_raw.loc["Totals", "IV"])
 
                 entry = {
                     "train_table": bt_train.to_dict("records"),

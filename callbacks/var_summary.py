@@ -50,6 +50,10 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             except Exception:
                 pass
 
+    # PSI map'i cache'e yaz (sonuç kısmı buradan okuyacak)
+    if psi_map:
+        _SERVER_STORE[f"{_pfx}_psi_map"] = psi_map
+
     summary["PSI Değeri"] = summary["Değişken"].map(
         lambda v: psi_map.get(v, "—")
     )
@@ -120,8 +124,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
         cik_reasons = []
         if iv_val < 0.02:
             cik_reasons.append(f"IV={iv_val:.4f}<0.02")
-        if eksik_val > 80.0:
-            cik_reasons.append(f"Eksik={eksik_val:.1f}%>80%")
+        if eksik_val > 60.0:
+            cik_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
         if psi_val is not None and psi_val > 0.25:
             cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
 
@@ -165,6 +169,135 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary.copy()
     _SERVER_STORE[f"{key}_summary_{seg_col}_{seg_val}"] = summary.copy()
 
+    return summary
+
+
+def compute_var_summary_raw(config, key, seg_col, seg_val):
+    """Ham (raw) train+test üzerinden değişken özeti tablosu üretir.
+    Kolonlar: IV, Eksik %, PSI (10 parça), Korelasyon, VIF"""
+    target = config["target_col"]
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    iv_df = _SERVER_STORE.get(f"{key}_iv_{seg_col}_{seg_val}")
+    df_train = _SERVER_STORE.get(f"{_pfx}_train")
+    df_test = _SERVER_STORE.get(f"{_pfx}_test")
+    df_oot = _SERVER_STORE.get(f"{_pfx}_oot")
+
+    if iv_df is None or iv_df.empty:
+        return pd.DataFrame()
+
+    summary = iv_df[["Değişken", "IV", "Eksik %"]].copy()
+    var_list = summary["Değişken"].tolist()
+
+    # Raw train+test
+    if df_train is not None:
+        df_raw = pd.concat([df_train, df_test], ignore_index=True) if df_test is not None else df_train.copy()
+    else:
+        return pd.DataFrame()
+
+    # ── PSI — Raw 10 parça (pd.qcut) — Train vs OOT ─────────────────────
+    psi_map = {}
+    psi_label_map = {}
+    if df_train is not None and df_oot is not None and not df_oot.empty:
+        for var in var_list:
+            if var not in df_train.columns or var not in df_oot.columns:
+                continue
+            try:
+                tr_vals = df_train[var].dropna()
+                oot_vals = df_oot[var].dropna()
+                if len(tr_vals) < 10 or len(oot_vals) < 10:
+                    continue
+                psi_val = round(calc_psi(tr_vals.values, oot_vals.values, n_bins=10, discrete=False), 4)
+                psi_map[var] = psi_val
+                psi_label_map[var] = psi_label(psi_val)
+            except Exception:
+                pass
+
+    # Raw PSI map'i cache'e yaz (deep dive, sonuç kısmı buradan okuyacak)
+    if psi_map:
+        _SERVER_STORE[f"{_pfx}_raw_psi_map"] = psi_map
+
+    summary["PSI Değeri"] = summary["Değişken"].map(lambda v: psi_map.get(v, "—"))
+    summary["PSI Durumu"] = summary["Değişken"].map(lambda v: psi_label_map.get(v, "—"))
+
+    # ── Korelasyon — Raw train+test ───────────────────────────────────────
+    corr_map = {}
+    try:
+        num_cols = [v for v in var_list if v in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[v])]
+        if len(num_cols) >= 2:
+            corr_df = compute_correlation_matrix(df_raw[num_cols], num_cols)
+            high_pairs = find_high_corr_pairs(corr_df, threshold=0.0)
+            for _, row in high_pairs.iterrows():
+                v1, v2 = row["Değişken 1"], row["Değişken 2"]
+                r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
+                for v in (v1, v2):
+                    if v not in corr_map or r > corr_map[v]:
+                        corr_map[v] = round(r, 2)
+    except Exception:
+        pass
+    summary["Korr Değeri"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
+
+    # ── VIF — Raw train+test ──────────────────────────────────────────────
+    vif_map = {}
+    try:
+        num_cols_vif = [v for v in var_list if v in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[v])]
+        if len(num_cols_vif) >= 2:
+            vif_res = compute_vif(df_raw[num_cols_vif], num_cols_vif)
+            if not vif_res.empty and "Değişken" in vif_res.columns:
+                for _, row in vif_res.iterrows():
+                    vif_map[row["Değişken"]] = row["VIF"]
+    except Exception:
+        pass
+    summary["Train VIF"] = summary["Değişken"].map(
+        lambda v: round(vif_map[v], 1) if v in vif_map else "—"
+    )
+
+    # ── Öneri mantığı (aynı) ──────────────────────────────────────────────
+    def _recommend_with_reason(row):
+        iv_val = row["IV"]
+        eksik_val = row["Eksik %"]
+        psi_val = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
+        corr_val = row["Korr Değeri"] if isinstance(row["Korr Değeri"], (int, float)) else None
+        vif_val = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
+        cik_reasons = []
+        if iv_val < 0.02:
+            cik_reasons.append(f"IV={iv_val:.4f}<0.02")
+        if eksik_val > 60.0:
+            cik_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
+        if psi_val is not None and psi_val > 0.25:
+            cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
+        if cik_reasons:
+            return "❌ Çıkar", "; ".join(cik_reasons)
+        inc_reasons = []
+        if iv_val < 0.10:
+            inc_reasons.append(f"IV={iv_val:.4f}<0.10")
+        if eksik_val > 20.0:
+            inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
+        if psi_val is not None and psi_val > 0.10:
+            inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
+        if corr_val is not None and corr_val >= 0.75:
+            inc_reasons.append(f"Korr={corr_val:.2f}≥0.75")
+        if vif_val is not None and vif_val > 5.0:
+            inc_reasons.append(f"VIF={vif_val:.1f}>5")
+        if inc_reasons:
+            return "⚠️ İncele", "; ".join(inc_reasons)
+        return "✅ Tut", "—"
+
+    summary[["Öneri", "Sebep"]] = summary.apply(
+        lambda r: pd.Series(_recommend_with_reason(r)), axis=1
+    )
+    _oneri_order = {"✅ Tut": 0, "⚠️ İncele": 1, "❌ Çıkar": 2}
+    summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
+    summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
+    summary = summary.reset_index(drop=True)
+
+    # Ham tab: Monoton kolonları yok
+    col_order = ["Değişken", "Öneri", "Sebep", "IV",
+                 "Korr Değeri", "PSI Değeri", "PSI Durumu",
+                 "Train VIF", "Eksik %"]
+    summary = summary[[c for c in col_order if c in summary.columns]]
+
+    _SERVER_STORE[f"{key}_varsummary_raw_{seg_col}_{seg_val}"] = summary.copy()
     return summary
 
 
@@ -269,7 +402,7 @@ def _render_var_summary(summary, use_woe):
                                          "(Train WoE üzerinden)\n\n"
                                          "- **< 5** — Normal\n- **5–10** — Dikkat\n- **> 10** — Kritik", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
-                                         "- **> 80%** → Çıkar\n- **20–80%** → İncele", "type": "markdown"},
+                                         "- **> 60%** → Çıkar\n- **20–60%** → İncele", "type": "markdown"},
             },
             tooltip_delay=0,
             tooltip_duration=None,
@@ -302,11 +435,12 @@ def _render_var_summary(summary, use_woe):
     Input("btn-var-summary", "n_clicks"),
     Input("store-expert-exclude", "data"),
     Input("main-tabs", "active_tab"),
+    Input("varsummary-data-tab", "active_tab"),
     State("store-key", "data"),
     State("chk-varsummary-woe", "value"),
     prevent_initial_call=True,
 )
-def update_var_summary(config, n_clicks, expert_excluded, active_tab, key, woe_toggle):
+def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, key, woe_toggle):
     if active_tab != "tab-var-summary":
         return dash.no_update
     if not key or not config or not config.get("target_col"):
@@ -314,20 +448,10 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, key, woe_t
 
     seg_col      = config.get("segment_col")
     seg_val      = config.get("segment_val")
-    use_woe      = "woe" in (woe_toggle or [])
+    use_woe      = (vs_tab == "vs-tab-woe")
     excluded_set = set(expert_excluded or [])
 
-    # Cache'den oku — precompute tarafından hazırlanmış olabilir
-    cache_key = f"{key}_varsummary_{seg_col}_{seg_val}"
-    cached = _SERVER_STORE.get(cache_key)
-
-    if cached is not None:
-        summary = cached.copy()
-        if excluded_set:
-            summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
-        return _render_var_summary(summary, use_woe)
-
-    # Cache yoksa: 6 DataFrame yoksa oluştur, sonra hesapla
+    # Cache yoksa: 6 DataFrame yoksa oluştur
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
     if f"{_pfx}_train" not in _SERVER_STORE:
         df_orig = _get_df(key)
@@ -354,7 +478,25 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, key, woe_t
         _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
         _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
 
-    summary = compute_var_summary_table(config, key, seg_col, seg_val)
+    if use_woe:
+        # WoE tab: mevcut hesaplama (cache'den veya taze)
+        cache_key = f"{key}_varsummary_{seg_col}_{seg_val}"
+        cached = _SERVER_STORE.get(cache_key)
+        if cached is not None:
+            summary = cached.copy()
+        else:
+            summary = compute_var_summary_table(config, key, seg_col, seg_val)
+    else:
+        # Ham tab: raw train+test üzerinden
+        cache_key_raw = f"{key}_varsummary_raw_{seg_col}_{seg_val}"
+        cached_raw = _SERVER_STORE.get(cache_key_raw)
+        if cached_raw is not None:
+            summary = cached_raw.copy()
+        else:
+            summary = compute_var_summary_raw(config, key, seg_col, seg_val)
+
+    if summary.empty:
+        return html.Div("Özet tablosu oluşturulamadı.", className="alert-info-custom")
 
     if excluded_set:
         summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)

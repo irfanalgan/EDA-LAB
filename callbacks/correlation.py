@@ -6,9 +6,42 @@ import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _PLOT_LAYOUT, _AXIS_STYLE, _make_r_badge, _safe_pair_scatter, _make_pair_scatter
 from modules.correlation import get_numeric_cols, compute_correlation_matrix, find_high_corr_pairs, compute_vif
+
+
+def _get_stat_data(key, config, use_woe=False):
+    """İstatistiksel testler için veri kaynağı döndürür.
+    use_woe=False → raw train+test, use_woe=True → woe train+test
+    WoE verisinde target kolonu yoksa raw'dan eklenir."""
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+    target  = config.get("target_col")
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    if use_woe:
+        train = _SERVER_STORE.get(f"{_pfx}_train_woe")
+        test  = _SERVER_STORE.get(f"{_pfx}_test_woe")
+    else:
+        train = _SERVER_STORE.get(f"{_pfx}_train")
+        test  = _SERVER_STORE.get(f"{_pfx}_test")
+
+    if train is None:
+        return None
+
+    df = pd.concat([train, test], ignore_index=True) if test is not None else train.copy()
+
+    # WoE verisinde target yoksa raw'dan ekle
+    if use_woe and target and target not in df.columns:
+        raw_train = _SERVER_STORE.get(f"{_pfx}_train")
+        raw_test  = _SERVER_STORE.get(f"{_pfx}_test")
+        if raw_train is not None:
+            raw = pd.concat([raw_train, raw_test], ignore_index=True) if raw_test is not None else raw_train
+            if target in raw.columns and len(raw) == len(df):
+                df[target] = raw[target].values
+
+    return df
 
 
 # ── Callback: Korelasyon ──────────────────────────────────────────────────────
@@ -18,26 +51,32 @@ from modules.correlation import get_numeric_cols, compute_correlation_matrix, fi
     Input("corr-threshold", "value"),
     Input("corr-max-cols", "value"),
     Input("store-expert-exclude", "data"),
+    Input("stat-data-tab", "active_tab"),
     State("store-key", "data"),
 )
-def render_correlation_content(config, threshold, max_cols_str, expert_excluded, key):
+def render_correlation_content(config, threshold, max_cols_str, expert_excluded, stat_tab, key):
     if not key or not config or not config.get("target_col"):
         return html.Div()
 
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div()
-
+    _use_woe = (stat_tab == "stat-tab-woe")
     threshold  = float(threshold or 0.75)
     max_cols   = int(max_cols_str or 20)
     target     = config["target_col"]
     seg_col    = config.get("segment_col")
     seg_val    = config.get("segment_val")
-    df_active  = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    # Veri kaynağı: aktif tab'a göre raw veya woe train+test
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div()
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     expert_excluded_set = set(expert_excluded or [])
 
     # ── Cache: Korelasyon Matrisi ─────────────────────────────────────────────
-    cache_key = f"{key}_corr_{seg_col}_{seg_val}_{max_cols}"
+    _tab_sfx = "woe" if _use_woe else "raw"
+    cache_key = f"{key}_corr_{seg_col}_{seg_val}_{max_cols}_{_tab_sfx}"
     if cache_key in _SERVER_STORE:
         corr_df, cols = _SERVER_STORE[cache_key]
         cols = [c for c in cols if c not in expert_excluded_set]
@@ -68,7 +107,7 @@ def render_correlation_content(config, threshold, max_cols_str, expert_excluded,
             vif_cols = filtered
             iv_filtered = True
 
-    vif_cache_key = f"{key}_vif_{seg_col}_{seg_val}_{max_cols}"
+    vif_cache_key = f"{key}_vif_{seg_col}_{seg_val}_{max_cols}_{_tab_sfx}"
     if vif_cache_key in _SERVER_STORE:
         vif_df = _SERVER_STORE[vif_cache_key]
         # iv_filtered durumunu cache'den türet
@@ -328,18 +367,23 @@ def render_correlation_content(config, threshold, max_cols_str, expert_excluded,
     Input("corr-var2", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
+    State("stat-data-tab", "active_tab"),
     prevent_initial_call=True,
 )
-def render_pair_scatter(var1, var2, key, config):
+def render_pair_scatter(var1, var2, key, config, stat_tab):
     if not var1 or not var2 or not key or not config:
         return html.Div(), html.Div()
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div(), html.Div()
-    seg_col   = config.get("segment_col")
-    seg_val   = config.get("segment_val")
+    _use_woe = (stat_tab == "stat-tab-woe")
     target    = config["target_col"]
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div(), html.Div()
+        seg_col   = config.get("segment_col")
+        seg_val   = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
     is_num1 = pd.api.types.is_numeric_dtype(df_active[var1]) if var1 in df_active.columns else False
     is_num2 = pd.api.types.is_numeric_dtype(df_active[var2]) if var2 in df_active.columns else False

@@ -5,8 +5,8 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 
 from app_instance import app
-from server_state import get_df as _get_df
-from utils.helpers import apply_segment_filter
+from server_state import _SERVER_STORE, get_df as _get_df
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, _TABLE_STYLE
 
 
@@ -129,7 +129,18 @@ def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
 
     seg_col = config.get("segment_col")
     seg_val = config.get("segment_val")
-    df = apply_segment_filter(df_orig, seg_col, seg_val).copy()
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    # Raw train+test kullan (OOT hariç)
+    df_train = _SERVER_STORE.get(f"{_pfx}_train")
+    df_test  = _SERVER_STORE.get(f"{_pfx}_test")
+    if df_train is not None:
+        df = pd.concat([df_train, df_test], ignore_index=True) if df_test is not None else df_train.copy()
+    else:
+        # Fallback: cache yoksa segment filtreli veriyi split et
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+        df_train_fb, df_test_fb, _ = get_splits(df_active, config)
+        df = pd.concat([df_train_fb, df_test_fb], ignore_index=True) if df_test_fb is not None else df_train_fb.copy()
 
     cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
                              config.get("segment_col")] if c}

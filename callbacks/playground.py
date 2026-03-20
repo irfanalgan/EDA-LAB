@@ -1,5 +1,5 @@
 import dash
-from dash import dcc, html, Input, Output, State, dash_table
+from dash import dcc, html, Input, Output, State, dash_table, ALL, MATCH
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 import statsmodels.api as sm
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (roc_auc_score, roc_curve, confusion_matrix,
                              f1_score, precision_score, recall_score)
@@ -444,7 +443,6 @@ def update_model_type_options(config):
         {"label": "Logistic Regression", "value": "lr"},
         {"label": "LightGBM",            "value": "lgbm"},
         {"label": "XGBoost",             "value": "xgb"},
-        {"label": "Random Forest",       "value": "rf"},
     ]
     return options, "lr"
 
@@ -462,50 +460,155 @@ def toggle_classification_controls(config):
 
 
 
-# ── Playground: Model kur ─────────────────────────────────────────────────────
-@app.callback(
-    Output("pg-model-output", "children", allow_duplicate=True),
-    Output("store-model-signal", "data", allow_duplicate=True),
-    Input("btn-pg-build", "n_clicks"),
-    State("store-pg-model-vars", "data"),
-    State("chk-use-woe",         "value"),
-    State("pg-test-size",        "value"),
-    State("pg-c-value",            "value"),
-    State("pg-model-type",         "value"),
-    State("pg-threshold-method",   "value"),
-    State("pg-threshold-val",      "value"),
-    State("pg-target-col",         "value"),
-    State("pg-split-method",     "value"),
-    State("pg-split-date",       "value"),
-    State("store-key",           "data"),
-    State("store-config",        "data"),
-    State("store-pending-note",  "data"),
-    prevent_initial_call=True,
-)
-def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
-                   threshold_method, threshold_val,
-                   target_sel, split_method, split_date,
-                   key, config, pending_note):
+# ── Null strateji seçenekleri ─────────────────────────────────────────────────
+_NULL_OPTIONS_LR = [
+    {"label": "Medyan",        "value": "median"},
+    {"label": "Ortalama",      "value": "mean"},
+    {"label": "Mod (En sık)",  "value": "mode"},
+    {"label": "0 ile doldur",  "value": "zero"},
+    {"label": "Modele alma",   "value": "reject"},
+]
+
+_NULL_OPTIONS_TREE = [
+    {"label": "Olduğu gibi bırak (null)", "value": "keep"},
+    {"label": "Medyan",                    "value": "median"},
+    {"label": "Ortalama",                  "value": "mean"},
+    {"label": "Mod (En sık)",              "value": "mode"},
+    {"label": "0 ile doldur",              "value": "zero"},
+    {"label": "Modele alma",               "value": "reject"},
+]
+
+
+def _build_null_review_ui(null_info, default_strategy, is_lr=True):
+    """Null içeren değişkenleri accordion ile listeleyen inceleme paneli üretir."""
+    options_lr   = _NULL_OPTIONS_LR
+    options_tree = _NULL_OPTIONS_TREE
+    options = options_lr if is_lr else options_tree
+    default = "mean" if is_lr else "keep"
+    default_label = "Ortalama" if is_lr else "Olduğu gibi bırak"
+
+    rows = []
+    for col, pct in null_info:
+        rows.append(
+            dbc.Row([
+                dbc.Col(html.Span(col, style={"color": "#d1d5db", "fontWeight": "600"}),
+                        width=4),
+                dbc.Col(html.Span(f"%{pct:.1f}",
+                        style={"color": "#f59e0b" if pct < 30 else "#ef4444",
+                                "fontWeight": "600"}), width=2),
+                dbc.Col(dbc.Select(
+                    id={"type": "null-col-strategy", "col": col},
+                    className="dark-select",
+                    options=options,
+                    value=default,
+                    style={"maxWidth": "220px"},
+                ), width=4),
+            ], className="mb-2 align-items-center")
+        )
+
+    if is_lr:
+        note = html.Div(
+            f"LR null kabul etmez — varsayılan: {default_label}. "
+            "Değiştirmek isterseniz aşağıdan seçip Uygula'ya basın.",
+            style={"color": "#f59e0b", "fontSize": "0.72rem", "marginBottom": "0.6rem",
+                   "fontStyle": "italic"})
+    else:
+        note = html.Div(
+            f"Tree modeller null kabul eder — varsayılan: {default_label}. "
+            "Değiştirmek isterseniz aşağıdan seçip Uygula'ya basın.",
+            style={"color": "#94a3b8", "fontSize": "0.72rem", "marginBottom": "0.6rem",
+                   "fontStyle": "italic"})
+
+    accordion_body = html.Div([
+        note,
+        html.Div([
+            dbc.Row([
+                dbc.Col(html.Span("Değişken", style={"color": "#8892a4",
+                        "fontSize": "0.72rem", "textTransform": "uppercase"}), width=4),
+                dbc.Col(html.Span("Null %", style={"color": "#8892a4",
+                        "fontSize": "0.72rem", "textTransform": "uppercase"}), width=2),
+                dbc.Col(html.Span("Strateji", style={"color": "#8892a4",
+                        "fontSize": "0.72rem", "textTransform": "uppercase"}), width=4),
+            ], className="mb-2"),
+            *rows,
+        ], style={"backgroundColor": "#111827", "padding": "1rem",
+                  "borderRadius": "8px", "border": "1px solid #1f2a3c"}),
+        html.Div([
+            dbc.Button("Uygula", id="btn-pg-null-confirm",
+                       color="success", size="sm"),
+        ], style={"marginTop": "0.75rem"}),
+        html.Div(id="pg-null-status"),
+    ])
+
+    title = html.Span([
+        html.Span(f"{len(null_info)} değişkende null tespit edildi",
+                   style={"color": "#e2e8f0"}),
+        html.Span(f"  —  varsayılan: {default_label}",
+                   style={"color": "#8892a4", "fontSize": "0.78rem"}),
+    ])
+
+    return dbc.Accordion([
+        dbc.AccordionItem(accordion_body, title=title, item_id="null-review"),
+    ], start_collapsed=True, flush=True,
+       style={"marginBottom": "0.75rem",
+              "--bs-accordion-bg": "#0e1117",
+              "--bs-accordion-active-bg": "#0e1117",
+              "--bs-accordion-btn-bg": "#161d2e",
+              "--bs-accordion-btn-active-color": "#e2e8f0",
+              "--bs-accordion-btn-color": "#e2e8f0",
+              "--bs-accordion-border-color": "#1f2a3c"})
+
+
+def _apply_null_strategies(X, col_strategies):
+    """Her kolona belirlenen strateji ile null doldurma uygular.
+    reject kolonlarını X'ten düşürür, kalan null'ları doldurur.
+    Returns: (X_filled, rejected_cols)
+    """
+    rejected = []
+    for col, strat in col_strategies.items():
+        if col not in X.columns or not X[col].isna().any():
+            continue
+        if strat == "reject":
+            rejected.append(col)
+            continue
+        if strat == "keep":
+            continue
+        if strat == "mean":
+            fill = X[col].mean() if pd.api.types.is_numeric_dtype(X[col]) \
+                   else X[col].mode().iloc[0]
+        elif strat == "mode":
+            _m = X[col].mode()
+            fill = _m.iloc[0] if len(_m) > 0 else 0
+        elif strat == "zero":
+            fill = 0
+        else:  # median
+            fill = X[col].median() if pd.api.types.is_numeric_dtype(X[col]) \
+                   else X[col].mode().iloc[0]
+        X[col] = X[col].fillna(fill)
+    if rejected:
+        X = X.drop(columns=rejected)
+    return X, rejected
+
+
+def _run_model_pipeline(model_vars, key, config, model_type,
+                        threshold_method, threshold_val,
+                        pending_note, col_strategies, target_sel=None):
+    """Model kurma pipeline'ı — null inceleme sonrası veya direkt çağrılır."""
     _no = dash.no_update
-    if not model_vars or not key or not config:
-        return html.Div("Model listesi boş veya konfigürasyon eksik.",
-                        className="alert-info-custom"), _no
     df_orig = _get_df(key)
     if df_orig is None:
         return html.Div("Veri yüklenmemiş.", className="alert-info-custom"), _no
 
-    target      = target_sel or config["target_col"]
-    seg_col     = config.get("segment_col")
-    seg_val     = config.get("segment_val")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
-    C           = float(c_val or 1.0)
+    target  = target_sel or config["target_col"]
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
 
     if target not in df_active.columns:
         return html.Div(f"Target kolonu '{target}' veri setinde bulunamadı.",
                         className="alert-info-custom"), _no
     y_all = pd.to_numeric(df_active[target], errors='coerce')
 
-    # ── Train / Test / OOT split — cache'ten oku ─────────────────────────────
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
     if f"{_pfx}_train" in _SERVER_STORE:
         _df_tr  = _SERVER_STORE[f"{_pfx}_train"]
@@ -531,26 +634,24 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         return html.Div(f"Yetersiz train verisi: {n_tr:,} satır.",
                         className="alert-info-custom"), _no
 
-    # ── Base parametreler ─────────────────────────────────────────────────────
     _MODEL_PARAMS = {
         "lr":    {},
         "lgbm":  dict(n_estimators=200, learning_rate=0.05, num_leaves=31,
                       random_state=42, n_jobs=-1, verbose=-1),
         "xgb":   dict(n_estimators=200, learning_rate=0.05, max_depth=6,
                       random_state=42, n_jobs=-1, eval_metric="auc"),
-        "rf":    dict(n_estimators=200, max_depth=10, min_samples_leaf=5,
-                      max_features="sqrt", random_state=42, n_jobs=-1),
     }
     algo = model_type or "lr"
 
     def _fit_and_render(X_df, disp_names, label, accent):
         """Modeli kur, (compact_html, results_dict, model_obj, scaler_obj) döndür."""
         X = X_df.copy()
-        for col in X.columns:
-            if X[col].isna().any():
-                fill = X[col].median() if pd.api.types.is_numeric_dtype(X[col]) \
-                       else X[col].mode().iloc[0]
-                X[col] = X[col].fillna(fill)
+        # Null doldurma — sadece ham model için (WoE'de missing bin'e düşer)
+        if label == "Ham":
+            X, _rejected = _apply_null_strategies(X, col_strategies)
+            if len(X.columns) == 0:
+                return (html.Div("Tüm değişkenler null nedeniyle çıkarıldı.",
+                        className="alert-info-custom"), None, None, None)
         X_tr = X.iloc[train_mask].reset_index(drop=True)
         X_te = X.iloc[test_mask].reset_index(drop=True)
         y_tr = y_all.iloc[train_mask].reset_index(drop=True)
@@ -596,8 +697,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 pos_w = float((y_tr == 0).sum()) / max(float((y_tr == 1).sum()), 1)
                 mdl = xgb.XGBClassifier(**_MODEL_PARAMS["xgb"],
                                         scale_pos_weight=pos_w)
-            else:  # rf
-                mdl = RandomForestClassifier(**_MODEL_PARAMS["rf"])
+            else:
+                raise ValueError(f"Bilinmeyen model tipi: {algo}")
             if not _use_sm_logit:
                 mdl.fit(X_tr_s, y_tr)
         except Exception as e:
@@ -811,8 +912,8 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 html.Div(f"{title} Gini", style={"color": "#8892a4", "fontSize": "0.72rem"}),
             ], className="metric-card"), width=3))
 
-        # Top-5 importance mini tablo
-        top5 = imp_records[:6] if imp_records[0].get("Değişken") == "const" else imp_records[:5]
+        # Katsayı / importance tablosu (tüm değişkenler)
+        all_imp = imp_records
         _tbl_style_mini = dict(
             style_table={"overflowX": "auto"},
             style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
@@ -825,7 +926,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
                 {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}
             ],
         )
-        mini_cols = [{"name": k, "id": k} for k in top5[0].keys()] if top5 else []
+        mini_cols = [{"name": k, "id": k} for k in all_imp[0].keys()] if all_imp else []
         mini_tbl_title = "Katsayı Tablosu (özet)" if importance_type == "coef" else "Feature Importance (özet)"
 
         compact_html = html.Div([
@@ -835,7 +936,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
             dbc.Row(gini_cards, className="g-2 mb-3"),
             html.P(mini_tbl_title, className="section-title",
                    style={"marginBottom": "0.4rem"}),
-            dash_table.DataTable(data=top5, columns=mini_cols, **_tbl_style_mini),
+            dash_table.DataTable(data=all_imp, columns=mini_cols, **_tbl_style_mini),
             html.Div([
                 html.Span("ℹ ", style={"color": "#4F8EF7"}),
                 html.Span("Detaylı sonuçlar için "),
@@ -849,9 +950,14 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         _scaler_obj = scaler if not _skip_scale else None
         return compact_html, results_dict, mdl, _scaler_obj
 
-    # ── Ham model ─────────────────────────────────────────────────────────────
+    # ── Ham veriyi null stratejilerine göre doldur ─────────────────────────────
     raw_cols = [v for v in model_vars if v in df_active.columns]
-    X_raw    = pd.get_dummies(df_active[raw_cols].copy(), drop_first=True)
+    df_raw_filled = df_active[raw_cols].copy()
+    df_raw_filled, _rejected_cols = _apply_null_strategies(df_raw_filled, col_strategies)
+    _raw_model_vars = [v for v in raw_cols if v not in _rejected_cols]
+
+    # ── Ham model ─────────────────────────────────────────────────────────────
+    X_raw    = pd.get_dummies(df_raw_filled[_raw_model_vars].copy(), drop_first=True)
     raw_disp = {c: c for c in X_raw.columns}
     raw_html, raw_results, raw_mdl, raw_scaler = _fit_and_render(X_raw, raw_disp, "Ham", "#4F8EF7")
 
@@ -861,7 +967,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     _oot_woe   = _SERVER_STORE.get(f"{_pfx}_oot_woe")
     _opt_dict  = _SERVER_STORE.get(f"{_pfx}_optb", {})
 
-    # Cache yoksa veya model değişkenleri cache'te eksikse → fallback
     if _train_woe is None:
         from utils.chart_helpers import build_woe_datasets
         woe_result = build_woe_datasets(_df_tr, _df_te, _df_oot, target, model_vars)
@@ -874,7 +979,6 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         _SERVER_STORE[f"{_pfx}_oot_woe"]   = _oot_woe
         _SERVER_STORE[f"{_pfx}_optb"]      = _opt_dict
 
-    # df_active boyutunda WoE DataFrame oluştur (model fit için mask'lerle çalışır)
     woe_parts = [_train_woe]
     if _test_woe is not None:
         woe_parts.append(_test_woe)
@@ -911,24 +1015,31 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         woe_dist = {v: _all_woe_tables[v] for v in woe_feat_cols
                     if v in _all_woe_tables}
 
-    # ── Korelasyon — Train WoE üzerinden (tek çıktı) ────────────────────────
+    # ── Korelasyon — Train üzerinden (WoE + ham ayrı) ────────────────────────
     woe_corr = None
+    raw_corr = None
     if woe_feat_cols and len(woe_feat_cols) > 1:
         _woe_train = woe_df_enc.loc[train_mask, woe_feat_cols]
         _woe_corr_df = _woe_train.corr().round(4)
         woe_corr = _woe_corr_df.to_dict()
+    _raw_corr_cols = [v for v in _raw_model_vars if v in df_raw_filled.columns]
+    if len(_raw_corr_cols) > 1:
+        _raw_train = df_raw_filled.loc[train_mask, _raw_corr_cols].select_dtypes(include="number")
+        if len(_raw_train.columns) > 1:
+            raw_corr = _raw_train.corr().round(4).to_dict()
 
-    # ── PSI — Train WoE vs OOT WoE (tek çıktı) ──────────────────────────────
-    from utils.chart_helpers import calc_psi
+    # ── PSI — TEK KAYNAK: var_summary cache'den oku ────────────────────────
     psi_data = None
-    if woe_feat_cols and oot_mask.any():
-        psi_data = []
-        for vc in woe_feat_cols:
-            _tr_vals = woe_df_enc.loc[train_mask, vc].dropna().values
-            _oot_vals = woe_df_enc.loc[oot_mask, vc].dropna().values
-            if len(_tr_vals) > 0 and len(_oot_vals) > 0:
-                psi_val = round(calc_psi(_tr_vals, _oot_vals), 4)
-                psi_data.append({"Değişken": vc, "PSI (OOT)": psi_val})
+    _psi_map = _SERVER_STORE.get(f"{_pfx}_psi_map", {})
+    if _psi_map and woe_feat_cols:
+        psi_data = [{"Değişken": vc, "PSI (OOT)": _psi_map[vc]}
+                    for vc in woe_feat_cols if vc in _psi_map]
+
+    raw_psi_data = None
+    _raw_psi_map = _SERVER_STORE.get(f"{_pfx}_raw_psi_map", {})
+    if _raw_psi_map and _raw_model_vars:
+        raw_psi_data = [{"Değişken": rv, "PSI (OOT)": _raw_psi_map[rv]}
+                        for rv in _raw_model_vars if rv in _raw_psi_map]
 
     # ── VIF — Train / Test / OOT ayrı, WoE üzerinden (tek çıktı) ─────────
     def _calc_vif(X_df):
@@ -972,22 +1083,54 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         except Exception:
             vif_data = None
 
-    # ── Describe — Train+Test, ham veri ───────────────────────────────────────
-    from modules.profiling import compute_profile
-    _desc_cols = [v for v in model_vars if v in df_active.columns]
-    describe_data = None
-    if _desc_cols:
+    # ── Raw VIF — Train / Test / OOT, ham değerler üzerinden ─────────────────
+    raw_vif_data = None
+    _num_raw_cols = list(df_raw_filled[_raw_model_vars].select_dtypes(include="number").columns)
+    if len(_num_raw_cols) >= 2:
         try:
-            _desc_mask = train_mask | test_mask
-            _desc_df = compute_profile(df_active.loc[_desc_mask, _desc_cols])
-            describe_data = _desc_df.to_dict("records")
+            _raw_tr = df_raw_filled.loc[train_mask, _num_raw_cols].dropna()
+            _rvif_tr = _calc_vif(_raw_tr)
+
+            _rvif_te = None
+            if test_mask.any():
+                _raw_te = df_raw_filled.loc[test_mask, _num_raw_cols].dropna()
+                if len(_raw_te) >= 2:
+                    _rvif_te = _calc_vif(_raw_te)
+
+            _rvif_oot = None
+            if oot_mask.any():
+                _raw_oot = df_raw_filled.loc[oot_mask, _num_raw_cols].dropna()
+                if len(_raw_oot) >= 2:
+                    _rvif_oot = _calc_vif(_raw_oot)
+
+            raw_vif_data = []
+            for i, rc in enumerate(_num_raw_cols):
+                row = {"Değişken": rc, "Train VIF": _rvif_tr[i]}
+                if _rvif_te is not None:
+                    row["Test VIF"] = _rvif_te[i]
+                if _rvif_oot is not None:
+                    row["OOT VIF"] = _rvif_oot[i]
+                raw_vif_data.append(row)
+        except Exception:
+            raw_vif_data = None
+
+    # ── Describe — cache'den oku (precompute'da hesaplandı) ──────────────────
+    describe_data = None
+    _cached_profile = _SERVER_STORE.get(f"{key}_profile_{seg_col}_{seg_val}")
+    if _cached_profile is not None:
+        try:
+            _desc_cols = [v for v in model_vars if v in _cached_profile["Kolon"].values]
+            if _desc_cols:
+                _desc_df = _cached_profile[_cached_profile["Kolon"].isin(_desc_cols)]
+                describe_data = _desc_df.to_dict("records")
         except Exception:
             describe_data = None
 
     # ── Sonuçları cache'e yaz ─────────────────────────────────────────────────
     cache_key = f"{key}_model_results"
-    _thr_label = raw_results["thr_label"] if raw_results else ""
-    _opt_thr   = raw_results["opt_thr"] if raw_results else 0.5
+    _first_results = raw_results or woe_results
+    _thr_label = _first_results["thr_label"] if _first_results else ""
+    _opt_thr   = _first_results["opt_thr"] if _first_results else 0.5
     _SERVER_STORE[cache_key] = {
         "algo": algo,
         "model_vars": list(model_vars),
@@ -995,19 +1138,21 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
         "thr_label": _thr_label,
         "opt_thr": _opt_thr,
         "corr": woe_corr,
+        "raw_corr": raw_corr,
         "woe_dist": woe_dist,
         "psi_data": psi_data,
+        "raw_psi_data": raw_psi_data,
         "vif_data": vif_data,
+        "raw_vif_data": raw_vif_data,
         "describe_data": describe_data,
         "model_note": pending_note or "",
         "tabs": {
             "raw": raw_results,
             "woe": woe_results,
         },
-        # SQL & Pickle için ek objeler
         "_models": {"raw": raw_mdl, "woe": woe_mdl if woe_feat_cols else None},
         "_scalers": {"raw": raw_scaler, "woe": woe_scaler if woe_feat_cols else None},
-        "_opt_dict": _opt_dict,  # {col_name: OptimalBinning} — WoE pickle
+        "_opt_dict": _opt_dict,
         "_split_masks": {
             "train": train_mask.tolist(),
             "test": test_mask.tolist(),
@@ -1027,3 +1172,158 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, c_val, model_type,
     ], active_tab="res-raw")
 
     return pg_tabs, cache_key
+
+
+# ── Playground: Değişken seçimi / model tipi değişince null inceleme paneli ──
+@app.callback(
+    Output("pg-null-review-panel", "children"),
+    Output("store-pg-null-strategies", "data", allow_duplicate=True),
+    Input("store-pg-model-vars", "data"),
+    Input("pg-model-type",       "value"),
+    State("store-key",           "data"),
+    State("store-config",        "data"),
+    prevent_initial_call=True,
+)
+def update_null_review_panel(model_vars, model_type, key, config):
+    if not model_vars or not key or not config:
+        return html.Div(), {}
+    df_orig = _get_df(key)
+    if df_orig is None:
+        return html.Div(), {}
+
+    seg_col   = config.get("segment_col")
+    seg_val   = config.get("segment_val")
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+
+    raw_cols = [v for v in model_vars if v in df_active.columns]
+    if not raw_cols:
+        return html.Div(), {}
+
+    null_pct = (df_active[raw_cols].isnull().sum() / len(df_active) * 100)
+    null_cols_info = [(col, pct) for col, pct in null_pct.items() if pct > 0]
+
+    if not null_cols_info:
+        return html.Div(), {}
+
+    null_cols_info.sort(key=lambda x: -x[1])
+    is_lr = (model_type or "lr") == "lr"
+    # Model tipi değişince store'u sıfırla — kullanıcı tekrar "Uygula" bassın
+    return _build_null_review_ui(null_cols_info, "median", is_lr=is_lr), {}
+
+
+# ── Playground: Null strateji "Uygula" → store'a yaz ────────────────────────
+@app.callback(
+    Output("store-pg-null-strategies", "data"),
+    Output("pg-null-status", "children"),
+    Input("btn-pg-null-confirm", "n_clicks"),
+    State({"type": "null-col-strategy", "col": ALL}, "value"),
+    State({"type": "null-col-strategy", "col": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def apply_null_strategies_to_store(_, strategy_values, strategy_ids):
+    col_strategies = {}
+    missing_selection = []
+    for sid, val in zip(strategy_ids, strategy_values):
+        if not val:
+            missing_selection.append(sid["col"])
+        else:
+            col_strategies[sid["col"]] = val
+
+    if missing_selection:
+        warn_msg = html.Div([
+            html.Span("⚠ ", style={"color": "#ef4444"}),
+            html.Span("Strateji seçilmemiş değişkenler: ",
+                       style={"color": "#e2e8f0", "fontWeight": "600"}),
+            html.Span(", ".join(missing_selection), style={"color": "#f59e0b"}),
+        ], style={"padding": "0.6rem 0.8rem", "backgroundColor": "#1a1020",
+                  "borderRadius": "6px", "border": "1px solid #3a1e2a",
+                  "marginBottom": "0.75rem"})
+        return dash.no_update, warn_msg
+
+    # Onay mesajı — per-column detay
+    _strat_labels = {"median": "Medyan", "mean": "Ortalama", "mode": "Mod",
+                     "zero": "0", "reject": "Modele alma", "keep": "Null bırak"}
+    detail_items = []
+    for col, strat in col_strategies.items():
+        lbl = _strat_labels.get(strat, strat)
+        clr = "#ef4444" if strat == "reject" else "#94a3b8"
+        detail_items.append(
+            html.Div([
+                html.Span(col, style={"color": "#d1d5db", "fontWeight": "600"}),
+                html.Span(f" → {lbl}", style={"color": clr}),
+            ], style={"fontSize": "0.75rem"})
+        )
+
+    confirm_msg = html.Div([
+        html.Div([
+            html.Span("✓ ", style={"color": "#10b981"}),
+            html.Span("Null stratejileri kaydedildi",
+                       style={"color": "#e2e8f0", "fontWeight": "600"}),
+        ], style={"marginBottom": "0.4rem"}),
+        html.Div(detail_items, style={"display": "flex", "flexWrap": "wrap",
+                                       "gap": "0.4rem 1.2rem"}),
+    ], style={"padding": "0.6rem 0.8rem", "backgroundColor": "#0d1520",
+              "borderRadius": "6px", "border": "1px solid #1e3a2a",
+              "marginBottom": "0.75rem"})
+
+    return col_strategies, confirm_msg
+
+
+# ── Playground: Model Kur — store'daki stratejilerle model kur ───────────────
+@app.callback(
+    Output("pg-model-output", "children", allow_duplicate=True),
+    Output("store-model-signal", "data", allow_duplicate=True),
+    Input("btn-pg-build", "n_clicks"),
+    State("store-pg-model-vars",       "data"),
+    State("chk-use-woe",               "value"),
+    State("pg-test-size",              "value"),
+    State("pg-null-strategy",          "value"),
+    State("store-pg-null-strategies",  "data"),
+    State("pg-model-type",             "value"),
+    State("pg-threshold-method",       "value"),
+    State("pg-threshold-val",          "value"),
+    State("pg-target-col",             "value"),
+    State("pg-split-method",           "value"),
+    State("pg-split-date",             "value"),
+    State("store-key",                 "data"),
+    State("store-config",              "data"),
+    State("store-pending-note",        "data"),
+    prevent_initial_call=True,
+)
+def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
+                   per_col_strategies, model_type,
+                   threshold_method, threshold_val,
+                   target_sel, split_method, split_date,
+                   key, config, pending_note):
+    _no = dash.no_update
+    if not model_vars or not key or not config:
+        return html.Div("Model listesi boş veya konfigürasyon eksik.",
+                        className="alert-info-custom"), _no
+
+    algo = model_type or "lr"
+    is_lr = algo == "lr"
+    col_strategies = per_col_strategies or {}
+
+    # Null var mı kontrol et
+    df_orig = _get_df(key)
+    _has_nulls = False
+    if df_orig is not None:
+        seg_col   = config.get("segment_col")
+        seg_val   = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+        raw_cols  = [v for v in model_vars if v in df_active.columns]
+        _has_nulls = any(df_active[c].isna().any() for c in raw_cols)
+
+    if _has_nulls and not col_strategies:
+        # Store boş — default stratejileri otomatik ata
+        _default = "mean" if is_lr else "keep"
+        for c in raw_cols:
+            if df_active[c].isna().any():
+                col_strategies[c] = _default
+
+    return _run_model_pipeline(
+        model_vars, key, config, model_type,
+        threshold_method, threshold_val,
+        pending_note, col_strategies=col_strategies,
+        target_sel=target_sel,
+    )

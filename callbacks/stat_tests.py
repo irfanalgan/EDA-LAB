@@ -7,9 +7,10 @@ from scipy import stats as scipy_stats
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter
+from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _PLOT_LAYOUT, _TABLE_STYLE
 from modules.correlation import get_numeric_cols, compute_vif
+from callbacks.correlation import _get_stat_data
 
 
 # ── Callback: Test Paneli Göster/Gizle ───────────────────────────────────────
@@ -539,17 +540,22 @@ def _render_vif_sandbox(df_active: pd.DataFrame, var_set: str, max_cols: int,
     State("chi-max-cats", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
+    State("stat-data-tab", "active_tab"),
     prevent_initial_call=True,
 )
-def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config):
+def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, stat_tab):
     if not all([var1, var2, key, config]):
         return html.Div()
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div()
-    seg_col     = config.get("segment_col")
-    seg_val     = config.get("segment_val")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val).copy()
+    _use_woe = (stat_tab == "stat-tab-woe")
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div()
+        seg_col = config.get("segment_col")
+        seg_val = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+    df_active = df_active.copy()
     max_cats    = int(max_cats_str or 15)
     try:
         return _render_chi_square(df_active, var1, var2, max_cats)
@@ -564,17 +570,21 @@ def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config):
     State("anova-var", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
+    State("stat-data-tab", "active_tab"),
     prevent_initial_call=True,
 )
-def compute_anova(n_clicks, var_col, key, config):
+def compute_anova(n_clicks, var_col, key, config, stat_tab):
     if not all([var_col, key, config]):
         return html.Div()
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div()
-    seg_col     = config.get("segment_col")
-    seg_val     = config.get("segment_val")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    _use_woe = (stat_tab == "stat-tab-woe")
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div()
+        seg_col = config.get("segment_col")
+        seg_val = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
@@ -591,17 +601,21 @@ def compute_anova(n_clicks, var_col, key, config):
     State("ks-var", "value"),
     State("store-key", "data"),
     State("store-config", "data"),
+    State("stat-data-tab", "active_tab"),
     prevent_initial_call=True,
 )
-def compute_ks_test(n_clicks, var_col, key, config):
+def compute_ks_test(n_clicks, var_col, key, config, stat_tab):
     if not all([var_col, key, config]):
         return html.Div()
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div()
-    seg_col     = config.get("segment_col")
-    seg_val     = config.get("segment_val")
-    df_active   = apply_segment_filter(df_orig, seg_col, seg_val)
+    _use_woe = (stat_tab == "stat-tab-woe")
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div()
+        seg_col = config.get("segment_col")
+        seg_val = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     target      = config.get("target_col")
     if not target:
         return html.Div("Config'de target kolonu tanımlanmamış.", className="alert-info-custom")
@@ -620,17 +634,21 @@ def compute_ks_test(n_clicks, var_col, key, config):
     State("store-key", "data"),
     State("store-config", "data"),
     State("store-expert-exclude", "data"),
+    State("stat-data-tab", "active_tab"),
     prevent_initial_call=True,
 )
-def compute_vif_sandbox(n_clicks, var_set, max_cols_str, key, config, expert_excluded):
+def compute_vif_sandbox(n_clicks, var_set, max_cols_str, key, config, expert_excluded, stat_tab):
     if not key or not config:
         return html.Div()
-    df_orig = _get_df(key)
-    if df_orig is None:
-        return html.Div()
-    seg_col   = config.get("segment_col")
-    seg_val   = config.get("segment_val")
-    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+    _use_woe = (stat_tab == "stat-tab-woe")
+    df_active = _get_stat_data(key, config, use_woe=_use_woe)
+    if df_active is None:
+        df_orig = _get_df(key)
+        if df_orig is None:
+            return html.Div()
+        seg_col = config.get("segment_col")
+        seg_val = config.get("segment_val")
+        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
     max_cols  = int(max_cols_str or 20)
     try:
         return _render_vif_sandbox(df_active, var_set or "iv_filtered", max_cols,

@@ -550,40 +550,43 @@ def _build_woe_dist_section(woe_dist):
     if not woe_dist:
         return None
 
+    def _mono_color(m):
+        if "Değil" in m or "✗" in m:
+            return "#ef4444"
+        if "Artan" in m or "Azalan" in m:
+            return "#10b981"
+        return "#8892a4"
+
+    _iv_style = {"color": "#a78bfa", "fontSize": "0.75rem", "marginRight": "0.5rem"}
+    _mono_style_base = {"fontSize": "0.75rem", "fontWeight": "600", "marginRight": "1rem"}
+
     sections = []
     for var_name, info in woe_dist.items():
         train_rows = info.get("train_table")
-        monoton = info.get("monoton", "–")
-        iv_train = info.get("iv_train", 0)
         if not train_rows:
             continue
 
-        # Monotonluk rengi
-        if "Değil" in monoton or "✗" in monoton:
-            m_color = "#ef4444"
-        elif "Artan" in monoton or "Azalan" in monoton:
-            m_color = "#10b981"
-        else:
-            m_color = "#8892a4"
+        iv_train = info.get("iv_train", 0)
+        mono_train = info.get("monoton", "–")
 
-        header = html.Div([
+        # Header: değişken adı + her split için IV ve monotonluk yan yana
+        header_children = [
             html.Span(var_name, style={"color": "#E8EAF0", "fontWeight": "700",
                                        "fontSize": "0.85rem", "marginRight": "1rem"}),
-            html.Span(f"IV (Train): {iv_train}", style={"color": "#a78bfa",
-                                                         "fontSize": "0.75rem",
-                                                         "marginRight": "1rem"}),
-            html.Span(monoton, style={"color": m_color, "fontSize": "0.75rem",
-                                       "fontWeight": "600"}),
-        ], style={"marginBottom": "0.4rem", "marginTop": "0.75rem"})
+            html.Span(f"IV (Train): {iv_train}", style=_iv_style),
+            html.Span(mono_train, style={**_mono_style_base, "color": _mono_color(mono_train)}),
+        ]
 
         train_cols = [{"name": k, "id": k} for k in train_rows[0].keys()]
         train_tbl = dash_table.DataTable(data=train_rows, columns=train_cols, **_TBL_STYLE)
 
-        # Test ve OOT tabloları (ayrı ayrı, train'in bin sınırlarıyla)
+        # Test ve OOT tabloları
         test_rows = info.get("test_table")
         iv_test   = info.get("iv_test")
+        mono_test = info.get("monoton_test", "–")
         oot_rows  = info.get("oot_table")
         iv_oot    = info.get("iv_oot")
+        mono_oot  = info.get("monoton_oot", "–")
 
         _lbl_style = {"color": "#8892a4", "fontSize": "0.72rem",
                       "fontWeight": "600", "marginBottom": "0.3rem",
@@ -602,22 +605,25 @@ def _build_woe_dist_section(woe_dist):
                     html.Div("Test", style=_lbl_style),
                     dash_table.DataTable(data=test_rows, columns=_tc, **_TBL_STYLE),
                 ], md=col_w))
-                header.children.insert(2, html.Span(
-                    f"IV (Test): {iv_test}",
-                    style={"color": "#a78bfa", "fontSize": "0.75rem", "marginRight": "1rem"}))
+                header_children.extend([
+                    html.Span(f"IV (Test): {iv_test}", style=_iv_style),
+                    html.Span(mono_test, style={**_mono_style_base, "color": _mono_color(mono_test)}),
+                ])
             if has_oot_tbl:
                 _oc = [{"name": k, "id": k} for k in oot_rows[0].keys()]
                 cols.append(dbc.Col([
                     html.Div("OOT", style=_lbl_style),
                     dash_table.DataTable(data=oot_rows, columns=_oc, **_TBL_STYLE),
                 ], md=col_w))
-                header.children.insert(len(header.children) - 1, html.Span(
-                    f"IV (OOT): {iv_oot}",
-                    style={"color": "#a78bfa", "fontSize": "0.75rem", "marginRight": "1rem"}))
+                header_children.extend([
+                    html.Span(f"IV (OOT): {iv_oot}", style=_iv_style),
+                    html.Span(mono_oot, style={**_mono_style_base, "color": _mono_color(mono_oot)}),
+                ])
             row_content = dbc.Row(cols, className="g-2")
         else:
             row_content = train_tbl
 
+        header = html.Div(header_children, style={"marginBottom": "0.4rem", "marginTop": "0.75rem"})
         sections.append(html.Div([header, row_content]))
 
     if not sections:
@@ -630,8 +636,8 @@ def _build_woe_dist_section(woe_dist):
     )
 
 
-def _build_vif_section(vif_data):
-    """VIF (Variance Inflation Factor) tablosu — WoE, Train/Test/OOT ayrı."""
+def _build_vif_section(vif_data, is_woe=False):
+    """VIF (Variance Inflation Factor) tablosu — Train/Test/OOT ayrı."""
     if not vif_data:
         return None
 
@@ -653,31 +659,115 @@ def _build_vif_section(vif_data):
         **{**_TBL_STYLE, "style_data_conditional": vif_cond},
     )
 
-    return dbc.AccordionItem(tbl, title="VIF", item_id="item-vif")
+    children = [tbl]
+    if is_woe:
+        children.insert(0, html.Div(
+            "WoE değişkenleri az sayıda kesikli değer aldığından VIF genellikle düşük çıkar. "
+            "Multicollinearity değerlendirmesi için ham değerler sekmesindeki VIF'i kullanın.",
+            style={"color": "#7e8fa4", "fontSize": "0.73rem", "fontStyle": "italic",
+                   "marginBottom": "0.5rem", "padding": "0.3rem 0.5rem",
+                   "backgroundColor": "#0d1520", "borderRadius": "4px",
+                   "border": "1px solid #1e2a3a"},
+        ))
+
+    return dbc.AccordionItem(children, title="VIF", item_id="item-vif")
 
 
-def _build_psi_section(psi_data):
-    """PSI (Population Stability Index) tablosu — Train WoE vs OOT WoE."""
-    if not psi_data:
+def _build_psi_section(psi_data, tab_data=None):
+    """PSI accordion — Değişken PSI + Rating PSI."""
+    import numpy as np
+
+    has_var_psi = bool(psi_data)
+    has_rating_psi = False
+    rating_psi_tbl = None
+
+    # ── Rating PSI ─────────────────────────────────────────────────────────────
+    if tab_data is not None:
+        probas = tab_data.get("probabilities", {})
+        p_train = probas.get("train")
+        p_oot = probas.get("oot")
+        if p_train and p_oot:
+            tr_arr = np.array(p_train)
+            oot_arr = np.array(p_oot)
+            tr_ratings = _assign_rating_thresholds(tr_arr, _RATING_26_THRESHOLDS)
+            oot_ratings = _assign_rating_thresholds(oot_arr, _RATING_26_THRESHOLDS)
+
+            eps = 1e-4
+            n_tr, n_oot = len(tr_arr), len(oot_arr)
+            rows = []
+            total_psi = 0.0
+            for r in range(1, 26):
+                tr_cnt = int((tr_ratings == r).sum())
+                oot_cnt = int((oot_ratings == r).sum())
+                tr_pct = tr_cnt / n_tr if n_tr > 0 else 0.0
+                oot_pct = oot_cnt / n_oot if n_oot > 0 else 0.0
+                tr_pct_safe = max(tr_pct, eps)
+                oot_pct_safe = max(oot_pct, eps)
+                psi_contrib = (oot_pct_safe - tr_pct_safe) * np.log(oot_pct_safe / tr_pct_safe)
+                total_psi += psi_contrib
+                rows.append({
+                    "Rating": r,
+                    "Train Adet": tr_cnt,
+                    "Train %": round(tr_pct * 100, 2),
+                    "OOT Adet": oot_cnt,
+                    "OOT %": round(oot_pct * 100, 2),
+                    "PSI Katkı": round(float(psi_contrib), 6),
+                })
+            # Toplam satırı
+            rows.append({
+                "Rating": "TOPLAM",
+                "Train Adet": n_tr,
+                "Train %": 100.0,
+                "OOT Adet": n_oot,
+                "OOT %": 100.0,
+                "PSI Katkı": round(float(total_psi), 4),
+            })
+
+            r_cols = [{"name": k, "id": k} for k in rows[0].keys()]
+            r_cond = list(_TBL_STYLE["style_data_conditional"]) + [
+                {"if": {"filter_query": '{PSI Katkı} >= 0.01', "column_id": "PSI Katkı"},
+                 "color": "#ef4444", "fontWeight": "600"},
+                {"if": {"filter_query": '{Rating} = "TOPLAM"'},
+                 "fontWeight": "700", "backgroundColor": "#1a2035",
+                 "borderTop": "2px solid #4F8EF7"},
+            ]
+            rating_psi_tbl = dash_table.DataTable(
+                data=rows, columns=r_cols,
+                **{**_TBL_STYLE, "style_data_conditional": r_cond,
+                   "page_size": 30},
+            )
+            has_rating_psi = True
+
+    if not has_var_psi and not has_rating_psi:
         return None
 
-    cols = [{"name": k, "id": k} for k in psi_data[0].keys()]
+    # ── Accordion içeriği ──────────────────────────────────────────────────────
+    _section_title = {"color": "#a8b2c2", "fontSize": "0.78rem", "fontWeight": "600",
+                      "textTransform": "uppercase", "marginBottom": "0.5rem",
+                      "marginTop": "0.75rem"}
+    children = []
 
-    cond = list(_TBL_STYLE["style_data_conditional"])
-    for cid in [c["id"] for c in cols if "PSI" in c["id"]]:
-        cond += [
-            {"if": {"filter_query": f"{{{cid}}} >= 0.25", "column_id": cid},
-             "color": "#ef4444", "fontWeight": "600"},
-            {"if": {"filter_query": f"{{{cid}}} >= 0.10 && {{{cid}}} < 0.25",
-                    "column_id": cid},
-             "color": "#f59e0b", "fontWeight": "600"},
-        ]
+    if has_var_psi:
+        cols = [{"name": k, "id": k} for k in psi_data[0].keys()]
+        cond = list(_TBL_STYLE["style_data_conditional"])
+        for cid in [c["id"] for c in cols if "PSI" in c["id"]]:
+            cond += [
+                {"if": {"filter_query": f"{{{cid}}} >= 0.25", "column_id": cid},
+                 "color": "#ef4444", "fontWeight": "600"},
+                {"if": {"filter_query": f"{{{cid}}} >= 0.10 && {{{cid}}} < 0.25",
+                        "column_id": cid},
+                 "color": "#f59e0b", "fontWeight": "600"},
+            ]
+        children.append(html.Div("Değişken PSI", style=_section_title))
+        children.append(dash_table.DataTable(
+            data=psi_data, columns=cols, **{**_TBL_STYLE, "style_data_conditional": cond},
+        ))
 
-    tbl = dash_table.DataTable(
-        data=psi_data, columns=cols, **{**_TBL_STYLE, "style_data_conditional": cond},
-    )
+    if has_rating_psi:
+        children.append(html.Div("Rating PSI (26 Segment)", style={**_section_title, "marginTop": "1.5rem"}))
+        children.append(rating_psi_tbl)
 
-    return dbc.AccordionItem(tbl, title="PSI", item_id="item-psi")
+    return dbc.AccordionItem(html.Div(children), title="PSI", item_id="item-psi")
 
 
 def _build_weight_section(tab_data):
@@ -761,13 +851,14 @@ def _build_results_content(tab_data, results, corr_dict=None, woe_dist=None,
     if weight_item:
         items.append(weight_item)
 
-    # VIF — top-level, WoE Train/Test/OOT
-    vif_item = _build_vif_section(vif_data)
+    # VIF — Train/Test/OOT
+    _is_woe = woe_dist is not None
+    vif_item = _build_vif_section(vif_data, is_woe=_is_woe)
     if vif_item:
         items.append(vif_item)
 
-    # PSI — top-level, Train WoE vs OOT WoE
-    psi_item = _build_psi_section(psi_data)
+    # PSI — Değişken PSI + Rating PSI
+    psi_item = _build_psi_section(psi_data, tab_data)
     if psi_item:
         items.append(psi_item)
 
@@ -832,10 +923,13 @@ def render_results_tab(active_tab, model_signal, key, _srv, _db, _drv):
               "backgroundColor": "#0d1520", "borderRadius": "6px",
               "border": "1px solid #1e2a3a"})
 
-    woe_corr_data = results.get("corr")  # tek korelasyon (Train WoE)
+    woe_corr_data = results.get("corr")  # WoE korelasyon (Train WoE)
+    raw_corr_data = results.get("raw_corr")  # Ham korelasyon (Train ham)
     woe_dist_data = results.get("woe_dist")
-    psi_data = results.get("psi_data")
-    vif_data = results.get("vif_data")
+    woe_psi_data = results.get("psi_data")
+    raw_psi_data = results.get("raw_psi_data")
+    woe_vif_data = results.get("vif_data")
+    raw_vif_data = results.get("raw_vif_data")
     describe_data = results.get("describe_data")
     note_text = results.get("model_note", "")
 
@@ -844,12 +938,15 @@ def render_results_tab(active_tab, model_signal, key, _srv, _db, _drv):
         tab_data = tabs_data.get(tab_key)
         if tab_data is None:
             continue
+        _corr = raw_corr_data if tab_key == "raw" else woe_corr_data
+        _psi = raw_psi_data if tab_key == "raw" else woe_psi_data
+        _vif = raw_vif_data if tab_key == "raw" else woe_vif_data
         content = _build_results_content(
             tab_data, results,
-            corr_dict=woe_corr_data,
+            corr_dict=_corr,
             woe_dist=woe_dist_data if tab_key == "woe" else None,
-            psi_data=psi_data,
-            vif_data=vif_data,
+            psi_data=_psi,
+            vif_data=_vif,
             describe_data=describe_data,
             note_text=note_text,
         )
@@ -1081,9 +1178,10 @@ def _build_sql_pickle_section(extra_col_opts, server="", database="", driver="")
     State("input-sql-table-name", "value"),
     State("dd-sql-extra-cols", "value"),
     State("store-config", "data"),
+    State("results-sub-tabs", "active_tab"),
     prevent_initial_call=True,
 )
-def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config):
+def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config, active_tab):
     import pandas as pd
     import numpy as np
     _A = {"padding": "0.4rem 0.75rem", "fontSize": "0.78rem"}
@@ -1152,16 +1250,18 @@ def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config
         flag[np.array(oot_mask, dtype=bool)] = "OOT"
     out_df["TRAIN_OOT_FLAG"] = flag.values
 
-    # 4) Model değişkenleri — ham + woe yan yana
+    # 4) Model değişkenleri — aktif tab'a göre
+    _is_woe_tab = active_tab == "res-woe"
     for v in model_vars:
         if v in df_active.columns:
             out_df[v] = df_active[v].values
-        if woe_df is not None and v in woe_df.columns:
+        if _is_woe_tab and woe_df is not None and v in woe_df.columns:
             out_df[f"{v}_woe"] = woe_df[v].values
 
-    # 5) Predict proba (varsa)
+    # 5) Predict proba — aktif tab'a göre
     tabs = results.get("tabs", {})
-    for tk, suffix in [("raw", "_PROBA_RAW"), ("woe", "_PROBA_WOE")]:
+    _proba_pairs = [("woe", "_PROBA_WOE")] if _is_woe_tab else [("raw", "_PROBA_RAW")]
+    for tk, suffix in _proba_pairs:
         td = tabs.get(tk)
         if td and "probabilities" in td:
             probs = td["probabilities"]
@@ -1838,6 +1938,66 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
 
         _xl_auto_width(ws_p, len(df_psi.columns))
 
+        # ── Rating PSI (26 Segment) — aynı sheet'e devam ──────────────────────
+        probas = tab_data.get("probabilities", {})
+        p_train = probas.get("train")
+        p_oot = probas.get("oot")
+        if p_train and p_oot:
+            import numpy as np
+            tr_arr = np.array(p_train)
+            oot_arr = np.array(p_oot)
+            tr_ratings = _assign_rating_thresholds(tr_arr, _RATING_26_THRESHOLDS)
+            oot_ratings = _assign_rating_thresholds(oot_arr, _RATING_26_THRESHOLDS)
+            eps = 1e-4
+            n_tr, n_oot = len(tr_arr), len(oot_arr)
+            rpsi_rows = []
+            total_psi = 0.0
+            for r in range(1, 26):
+                tr_cnt = int((tr_ratings == r).sum())
+                oot_cnt = int((oot_ratings == r).sum())
+                tr_pct = tr_cnt / n_tr if n_tr > 0 else 0.0
+                oot_pct = oot_cnt / n_oot if n_oot > 0 else 0.0
+                tr_safe = max(tr_pct, eps)
+                oot_safe = max(oot_pct, eps)
+                psi_c = float((oot_safe - tr_safe) * np.log(oot_safe / tr_safe))
+                total_psi += psi_c
+                rpsi_rows.append({
+                    "Rating": r, "Train Adet": tr_cnt,
+                    "Train %": round(tr_pct * 100, 2),
+                    "OOT Adet": oot_cnt, "OOT %": round(oot_pct * 100, 2),
+                    "PSI Katkı": round(psi_c, 6),
+                })
+            rpsi_rows.append({
+                "Rating": "TOPLAM", "Train Adet": n_tr,
+                "Train %": 100.0, "OOT Adet": n_oot,
+                "OOT %": 100.0, "PSI Katkı": round(total_psi, 4),
+            })
+
+            rpsi_start = legend_r + 4
+            ws_p.cell(row=rpsi_start, column=1, value="Rating PSI (26 Segment)").font = Font(
+                name="Segoe UI", bold=True, color="FFFFFF", size=12)
+            ws_p.cell(row=rpsi_start, column=1).fill = PatternFill("solid", fgColor="1E293B")
+            for ci in range(2, 7):
+                ws_p.cell(row=rpsi_start, column=ci).fill = PatternFill("solid", fgColor="1E293B")
+
+            df_rpsi = pd.DataFrame(rpsi_rows)
+            end_rpsi = _xl_write_df(ws_p, df_rpsi, rpsi_start + 1, S, left_align_cols={1},
+                                    num_fmt_cols={6: "0.000000"})
+
+            # TOPLAM satırını kalın yap
+            for ci in range(1, 7):
+                cell = ws_p.cell(row=end_rpsi, column=ci)
+                cell.font = Font(name="Segoe UI", bold=True, color="FFFFFF", size=10)
+                cell.fill = PatternFill("solid", fgColor="1a2035")
+
+            # PSI Katkı renklendirme
+            for r in range(rpsi_start + 2, end_rpsi):
+                cell = ws_p.cell(row=r, column=6)
+                if isinstance(cell.value, (int, float)) and cell.value >= 0.01:
+                    cell.font = S["red_font"]
+
+            _xl_auto_width(ws_p, 6, min_w=12)
+
     # ═══════════════════════════════════════════════════════════════════════════
     # SHEET 8 — ROC Eğrisi (veri + grafik)
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2171,7 +2331,7 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     # ═══════════════════════════════════════════════════════════════════════════
     # SHEET 13 — Korelasyon
     # ═══════════════════════════════════════════════════════════════════════════
-    corr_dict = results.get("corr")
+    corr_dict = results.get("raw_corr") if tab_key == "raw" else results.get("corr")
     if corr_dict:
         vars_ = list(corr_dict.keys())
         n_vars = len(vars_)
@@ -2238,10 +2398,19 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
                 train_rows = info.get("train_table")
                 if not train_rows:
                     continue
-                monoton = info.get("monoton", "–")
+                mono_train = info.get("monoton", "–")
+                mono_test  = info.get("monoton_test", "–")
+                mono_oot   = info.get("monoton_oot", "–")
                 iv_train = info.get("iv_train", 0)
                 iv_test  = info.get("iv_test")
                 iv_oot   = info.get("iv_oot")
+
+                def _xl_mono_color(m):
+                    if "Artan" in m or "Azalan" in m:
+                        return S["GREEN"]
+                    if "Değil" in m or "\u2717" in m:
+                        return S["RED"]
+                    return "6B7280"
 
                 # Değişken başlığı
                 ws_woe.cell(row=current_row, column=1, value=var_name).font = Font(
@@ -2249,18 +2418,14 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
                 ws_woe.cell(row=current_row, column=1).fill = PatternFill(
                     "solid", fgColor="374151")
 
-                iv_text = f"IV (Train): {iv_train}"
+                # IV + monotonluk: her split yan yana
+                iv_text = f"IV (Train): {iv_train}  [{mono_train}]"
                 if iv_test is not None:
-                    iv_text += f"  |  IV (Test): {iv_test}"
+                    iv_text += f"  |  IV (Test): {iv_test}  [{mono_test}]"
                 if iv_oot is not None:
-                    iv_text += f"  |  IV (OOT): {iv_oot}"
+                    iv_text += f"  |  IV (OOT): {iv_oot}  [{mono_oot}]"
                 ws_woe.cell(row=current_row, column=3, value=iv_text).font = Font(
                     name="Segoe UI", color="8B5CF6", size=10)
-
-                mono_color = S["GREEN"] if ("Artan" in monoton or "Azalan" in monoton) else (
-                    S["RED"] if "Değil" in monoton or "\u2717" in monoton else "6B7280")
-                ws_woe.cell(row=current_row, column=6, value=monoton).font = Font(
-                    name="Segoe UI", bold=True, color=mono_color, size=10)
 
                 current_row += 1
 

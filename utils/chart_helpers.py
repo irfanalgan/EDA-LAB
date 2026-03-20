@@ -194,23 +194,80 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
 
 
 # ── PSI — Train WoE vs OOT WoE ───────────────────────────────────────────────
-def calc_psi(base: np.ndarray, comp: np.ndarray, n_bins: int = 10) -> float:
+def calc_psi(base: np.ndarray, comp: np.ndarray,
+             n_bins: int = 10, discrete: bool = True,
+             detail: bool = False):
     """
-    Population Stability Index: base (train WoE) vs comp (OOT WoE).
-    Tek kaynak — var_summary ve playground aynı fonksiyonu kullanır.
+    Population Stability Index — TEK KAYNAK.
+    Tüm PSI hesaplamaları bu fonksiyondan geçer.
+
+    discrete=True  → WoE değerleri (kesikli): her unique değere düşen oran karşılaştırılır.
+    discrete=False → Ham değerler (sürekli): n_bins eşit aralıklı bin ile histogram karşılaştırması.
+    detail=False   → float döndürür (toplam PSI).
+    detail=True    → dict döndürür: {"psi": float, "rows": [{"Bin", "Baseline %", "Karşılaştırma %", "Δ (pp)", "PSI Katkı"}, ...]}
     """
     eps = 1e-4
-    mn, mx = float(base.min()), float(base.max())
-    if mn == mx:
-        return 0.0
-    bins = np.linspace(mn, mx, n_bins + 1)
-    bins[0] = -np.inf
-    bins[-1] = np.inf
-    b_pct = np.histogram(base, bins=bins)[0] / len(base)
-    c_pct = np.histogram(comp, bins=bins)[0] / len(comp)
-    b_pct = np.where(b_pct < eps, eps, b_pct)
-    c_pct = np.where(c_pct < eps, eps, c_pct)
-    return float(np.sum((c_pct - b_pct) * np.log(c_pct / b_pct)))
+
+    if discrete:
+        # ── WoE: her unique değer bir bin ──────────────────────────────────
+        all_vals = np.union1d(np.unique(base), np.unique(comp))
+        if len(all_vals) < 2:
+            return {"psi": 0.0, "rows": []} if detail else 0.0
+        n_base, n_comp = len(base), len(comp)
+        base_counts = {v: 0 for v in all_vals}
+        comp_counts = {v: 0 for v in all_vals}
+        for v in base:
+            base_counts[v] = base_counts.get(v, 0) + 1
+        for v in comp:
+            comp_counts[v] = comp_counts.get(v, 0) + 1
+        psi = 0.0
+        rows = []
+        for v in all_vals:
+            b_pct = max(base_counts[v] / n_base, eps)
+            c_pct = max(comp_counts[v] / n_comp, eps)
+            contrib = (c_pct - b_pct) * np.log(c_pct / b_pct)
+            psi += contrib
+            if detail:
+                rows.append({
+                    "Bin": str(round(float(v), 4)),
+                    "Baseline %": round(b_pct * 100, 2),
+                    "Karşılaştırma %": round(c_pct * 100, 2),
+                    "Δ (pp)": round((c_pct - b_pct) * 100, 2),
+                    "PSI Katkı": round(float(contrib), 5),
+                })
+        if detail:
+            return {"psi": float(psi), "rows": rows}
+        return float(psi)
+    else:
+        # ── Ham değerler: linspace binning ─────────────────────────────────
+        mn, mx = float(base.min()), float(base.max())
+        if mn == mx:
+            return {"psi": 0.0, "rows": []} if detail else 0.0
+        bins = np.linspace(mn, mx, n_bins + 1)
+        bins[0] = -np.inf
+        bins[-1] = np.inf
+        b_hist = np.histogram(base, bins=bins)[0]
+        c_hist = np.histogram(comp, bins=bins)[0]
+        b_pct = b_hist / len(base)
+        c_pct = c_hist / len(comp)
+        b_pct = np.where(b_pct < eps, eps, b_pct)
+        c_pct = np.where(c_pct < eps, eps, c_pct)
+        contribs = (c_pct - b_pct) * np.log(c_pct / b_pct)
+        psi_total = float(np.sum(contribs))
+        if not detail:
+            return psi_total
+        rows = []
+        for i in range(len(contribs)):
+            lo = f"{bins[i]:.2f}" if not np.isinf(bins[i]) else "-∞"
+            hi = f"{bins[i+1]:.2f}" if not np.isinf(bins[i+1]) else "∞"
+            rows.append({
+                "Bin": f"({lo}, {hi}]",
+                "Baseline %": round(float(b_pct[i]) * 100, 2),
+                "Karşılaştırma %": round(float(c_pct[i]) * 100, 2),
+                "Δ (pp)": round(float(c_pct[i] - b_pct[i]) * 100, 2),
+                "PSI Katkı": round(float(contribs[i]), 5),
+            })
+        return {"psi": psi_total, "rows": rows}
 
 
 def psi_label(psi_val: float) -> str:
