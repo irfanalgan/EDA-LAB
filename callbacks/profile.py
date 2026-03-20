@@ -551,7 +551,6 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
     State("store-pg-model-vars", "data"),
     State("pg-model-type", "value"),
     State("pg-test-size", "value"),
-    State("pg-c-value", "value"),
     State("pg-threshold-method", "value"),
     State("pg-threshold-val", "value"),
     State("pg-target-col", "value"),
@@ -562,8 +561,9 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
     prevent_initial_call=True,
 )
 def save_model_cb(_, profile_name, model_vars, model_type, test_size,
-                  c_val, thr_method, thr_val, pg_target, split_method,
+                  thr_method, thr_val, pg_target, split_method,
                   split_date, key, loaded_idx):
+    c_val = 1.0
     no = dash.no_update
     if not profile_name:
         return (
@@ -627,7 +627,6 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     State("store-pg-model-vars", "data"),
     State("pg-model-type", "value"),
     State("pg-test-size", "value"),
-    State("pg-c-value", "value"),
     State("pg-threshold-method", "value"),
     State("pg-threshold-val", "value"),
     State("pg-target-col", "value"),
@@ -638,8 +637,9 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     prevent_initial_call=True,
 )
 def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
-                       c_val, thr_method, thr_val, pg_target,
+                       thr_method, thr_val, pg_target,
                        split_method, split_date, key, loaded_idx):
+    c_val = 1.0
     no = dash.no_update
     if not profile_name or loaded_idx is None or not model_vars:
         return no, no, no, False, no
@@ -680,7 +680,6 @@ def cancel_overwrite(_):
     Output("pg-var-dropdown", "value", allow_duplicate=True),
     Output("store-pg-model-vars", "data", allow_duplicate=True),
     Output("pg-model-type", "value", allow_duplicate=True),
-    Output("pg-c-value", "value", allow_duplicate=True),
     Output("pg-threshold-method", "value", allow_duplicate=True),
     Output("pg-threshold-val", "value", allow_duplicate=True),
     Output("pg-target-col", "value", allow_duplicate=True),
@@ -697,14 +696,14 @@ def cancel_overwrite(_):
 )
 def load_model_cb(_, profile_name, model_index):
     no = dash.no_update
-    _N = 13
+    _N = 12
     if not profile_name or model_index is None:
         return (no,) * _N
 
     models = _get_saved_models(profile_name)
     if model_index < 0 or model_index >= len(models):
         out = [no] * _N
-        out[10] = dbc.Alert("Model bulunamadı.", color="warning", style=_ALERT_STYLE)
+        out[9] = dbc.Alert("Model bulunamadı.", color="warning", style=_ALERT_STYLE)
         return tuple(out)
 
     p = models[model_index]["params"]
@@ -716,7 +715,6 @@ def load_model_cb(_, profile_name, model_index):
         mvars,                             # pg-var-dropdown
         mvars,                             # store-pg-model-vars
         p.get("model_type", "lr"),         # pg-model-type
-        p.get("c_val", 1.0),              # pg-c-value
         p.get("threshold_method", "fixed"),# pg-threshold-method
         p.get("threshold_val", 0.50),     # pg-threshold-val
         p.get("pg_target"),               # pg-target-col

@@ -1278,7 +1278,8 @@ def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config
     try:
         from sqlalchemy import create_engine
         drv = driver or "ODBC Driver 17 for SQL Server"
-        conn_str = f"mssql+pyodbc://{server}/{database}?trusted_connection=yes&driver={drv}"
+        conn_str = (f"mssql+pyodbc://{server}/{database}"
+                    f"?trusted_connection=yes&driver={drv}&TrustServerCertificate=yes")
         engine = create_engine(conn_str)
         tbl = table_name.strip()
         with engine.connect() as conn:
@@ -1305,6 +1306,7 @@ def save_model_pickle(_, key, profile_name, active_tab):
     import pickle
     from pathlib import Path
     _A = {"padding": "0.4rem 0.75rem", "fontSize": "0.78rem"}
+
 
     if not key:
         return dbc.Alert("Veri yüklenmemiş.", color="warning", style=_A)
