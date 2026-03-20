@@ -10,7 +10,7 @@ import pandas as pd
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import build_woe_datasets
+from utils.chart_helpers import build_woe_datasets, format_bt, mono_check
 from modules.profiling import compute_profile
 from modules.correlation import compute_correlation_matrix
 from modules.screening import screen_columns
@@ -192,89 +192,6 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         iv_df = woe_result["iv_df"]
         woe_tables = {}
 
-        def _format_bt(bt_raw, col_name=None):
-            """Optbinning binning_table → uygulama formatına dönüştür."""
-            data_rows = bt_raw[bt_raw["Bin"].astype(str).str.len() > 0]
-            data_rows = data_rows[~data_rows["Bin"].isin(["Special", "Missing", "Totals"])]
-            rows = []
-            for _, r in data_rows.iterrows():
-                total = int(r["Count"]); bad = int(r["Event"]); good = int(r["Non-event"])
-                rows.append({
-                    "Bin": str(r["Bin"]), "Toplam": total, "Bad": bad, "Good": good,
-                    "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                    "WOE": round(float(r["WoE"]), 4),
-                    "IV Katkı": round(float(r["IV"]), 4),
-                })
-            # Special — her değer ayrı satır
-            sr_sp = bt_raw[bt_raw["Bin"] == "Special"]
-            if not sr_sp.empty and int(sr_sp.iloc[0]["Count"]) > 0:
-                sp_woe = round(float(sr_sp.iloc[0]["WoE"]), 4)
-                sp_iv  = float(sr_sp.iloc[0]["IV"])
-                sp_n   = int(sr_sp.iloc[0]["Count"])
-                sv_found = False
-                if col_name and col_name in df_train.columns:
-                    from modules.deep_dive import SPECIAL_VALUES
-                    y_tr = pd.to_numeric(df_train[target], errors="coerce")
-                    for sv in sorted(SPECIAL_VALUES):
-                        sv_mask = df_train[col_name] == sv
-                        if not sv_mask.any():
-                            continue
-                        sv_found = True
-                        n_sv = int(sv_mask.sum())
-                        bad_sv = int(y_tr[sv_mask].sum())
-                        good_sv = n_sv - bad_sv
-                        iv_share = round(sp_iv * (n_sv / sp_n), 4) if sp_n > 0 else 0.0
-                        rows.append({
-                            "Bin": f"Special ({int(sv)})", "Toplam": n_sv,
-                            "Bad": bad_sv, "Good": good_sv,
-                            "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
-                            "WOE": sp_woe, "IV Katkı": iv_share,
-                        })
-                if not sv_found:
-                    r = sr_sp.iloc[0]
-                    rows.append({
-                        "Bin": "Special", "Toplam": int(r["Count"]),
-                        "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
-                        "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                        "WOE": sp_woe, "IV Katkı": round(sp_iv, 4),
-                    })
-            # Missing
-            sr_ms = bt_raw[bt_raw["Bin"] == "Missing"]
-            if not sr_ms.empty and int(sr_ms.iloc[0]["Count"]) > 0:
-                r = sr_ms.iloc[0]
-                rows.append({
-                    "Bin": "Eksik", "Toplam": int(r["Count"]),
-                    "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
-                    "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                    "WOE": round(float(r["WoE"]), 4),
-                    "IV Katkı": round(float(r["IV"]), 4),
-                })
-            if not rows:
-                return pd.DataFrame()
-            result = pd.DataFrame(rows)
-            t_n = result["Toplam"].sum(); t_b = result["Bad"].sum()
-            total_row = pd.DataFrame([{
-                "Bin": "TOPLAM", "Toplam": int(t_n), "Bad": int(t_b),
-                "Good": int(result["Good"].sum()),
-                "Bad Rate %": round(t_b / t_n * 100, 2) if t_n > 0 else 0.0,
-                "WOE": "", "IV Katkı": round(float(bt_raw.loc["Totals", "IV"]), 4),
-            }])
-            return pd.concat([result, total_row], ignore_index=True)
-
-        def _mono_check(bt):
-            """Bad Rate % üzerinden monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
-            m = bt[~bt["Bin"].astype(str).str.match(r"^(TOPLAM|Eksik|Special)")]
-            nums = [float(w) for w in m["Bad Rate %"].dropna().tolist()
-                    if isinstance(w, (int, float))]
-            if len(nums) < 2:
-                return "–"
-            diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
-            if all(d >= 0 for d in diffs):
-                return "Artan ↑"
-            if all(d <= 0 for d in diffs):
-                return "Azalan ↓"
-            return "Monoton Değil ✗"
-
         for var in var_list:
             _optb = optb_dict.get(var)
             if _optb is None:
@@ -284,7 +201,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 bt_raw = _iv_tables_raw.get(var)
                 if bt_raw is None or bt_raw.empty:
                     continue
-                bt_train = _format_bt(bt_raw, col_name=var)
+                bt_train = format_bt(bt_raw, col_name=var, df_train=df_train, target=target)
                 if bt_train.empty:
                     continue
                 iv_train = float(bt_raw.loc["Totals", "IV"])
@@ -292,7 +209,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 entry = {
                     "train_table": bt_train.to_dict("records"),
                     "iv_train": round(iv_train, 4),
-                    "monoton": _mono_check(bt_train),
+                    "monoton": mono_check(bt_train),
                 }
 
                 # Test tablosu
@@ -303,7 +220,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                         if not bt_test.empty:
                             entry["test_table"] = bt_test.to_dict("records")
                             entry["iv_test"] = round(iv_test, 4)
-                            entry["monoton_test"] = _mono_check(bt_test)
+                            entry["monoton_test"] = mono_check(bt_test)
                     except Exception:
                         pass
 
@@ -315,7 +232,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                         if not bt_oot.empty:
                             entry["oot_table"] = bt_oot.to_dict("records")
                             entry["iv_oot"] = round(iv_oot, 4)
-                            entry["monoton_oot"] = _mono_check(bt_oot)
+                            entry["monoton_oot"] = mono_check(bt_oot)
                     except Exception:
                         pass
 

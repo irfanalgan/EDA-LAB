@@ -32,6 +32,24 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     summary = iv_df[["Değişken", "IV", "Eksik %"]].copy()
     var_list = summary["Değişken"].tolist()
 
+    # ── Bin sayısı — bins_dict veya optb_dict'ten ────────────────────────────
+    bins_dict = _SERVER_STORE.get(f"{_pfx}_bins", {})
+    optb_dict = _SERVER_STORE.get(f"{_pfx}_optb", {})
+
+    def _get_n_bins(var):
+        if var in bins_dict:
+            return len(bins_dict[var]) - 1  # edges - 1 = bin sayısı
+        _ob = optb_dict.get(var)
+        if _ob is not None:
+            try:
+                _bt = _ob.binning_table.build()
+                _data = _bt[~_bt["Bin"].isin(["Totals", "Special", "Missing"])]
+                return len(_data)
+            except Exception:
+                pass
+        return "—"
+    summary["Bin"] = summary["Değişken"].map(_get_n_bins)
+
     # ── PSI — Train WoE vs OOT WoE ──────────────────────────────────────────
     psi_map = {}
     psi_label_map = {}
@@ -159,7 +177,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
     summary = summary.reset_index(drop=True)
 
-    col_order = ["Değişken", "Öneri", "Sebep", "IV",
+    col_order = ["Değişken", "Öneri", "Sebep", "IV", "Bin",
                  "Test Monoton", "OOT Monoton",
                  "Korr Değeri", "PSI Değeri", "PSI Durumu",
                  "Train VIF", "Eksik %"]
@@ -418,6 +436,8 @@ def _render_var_summary(summary, use_woe):
                                          "- **< 5** — Normal\n- **5–10** — Dikkat\n- **> 10** — Kritik", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 60%** → Çıkar\n- **20–60%** → İncele", "type": "markdown"},
+                "Bin":         {"value": "OptBinning'in oluşturduğu **WoE bin sayısı**\n\n"
+                                         "Aşağıdaki panelden değişken bazında değiştirilebilir", "type": "markdown"},
             },
             tooltip_delay=0,
             tooltip_duration=None,
@@ -440,7 +460,141 @@ def _render_var_summary(summary, use_woe):
                   "rule": "color: #4a5568 !important;"}],
             style_data_conditional=style_conditions,
         ),
+        # ── Bin Ayar Paneli (sadece WoE tab'ında) ────────────────────────────
+        html.Div([
+            html.Hr(style={"borderColor": "#2d3a4f", "margin": "1.2rem 0 0.8rem"}),
+            html.Div("Bin Sayısı Ayarı", style={
+                "color": "#a78bfa", "fontSize": "0.82rem", "fontWeight": "600",
+                "marginBottom": "0.5rem"}),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Değişken", style={"fontSize": "0.75rem", "color": "#7e8fa4"}),
+                    dcc.Dropdown(
+                        id="vs-bin-var-dropdown",
+                        options=[{"label": v, "value": v} for v in summary["Değişken"].tolist()],
+                        placeholder="Değişken seçin…",
+                        style={"fontSize": "0.82rem"},
+                        className="dark-select",
+                    ),
+                ], width=4),
+                dbc.Col([
+                    dbc.Label("Mevcut", style={"fontSize": "0.75rem", "color": "#7e8fa4"}),
+                    html.Div(id="vs-bin-current", children="—",
+                             style={"fontSize": "0.95rem", "color": "#d1d5db",
+                                    "padding": "0.35rem 0"}),
+                ], width=2),
+                dbc.Col([
+                    dbc.Label("Yeni Bin", style={"fontSize": "0.75rem", "color": "#7e8fa4"}),
+                    dbc.Input(id="vs-bin-new-input", type="number",
+                              min=2, max=20, step=1, placeholder="ör: 6",
+                              style={"maxWidth": "90px", "fontSize": "0.82rem"}),
+                ], width=2),
+                dbc.Col([
+                    html.Div(style={"height": "1.3rem"}),  # spacer for label alignment
+                    dbc.Button("Uygula", id="vs-bin-apply-btn", color="primary",
+                               size="sm", style={"fontSize": "0.78rem"}),
+                ], width=2),
+            ], className="align-items-end"),
+            html.Div(id="vs-bin-result-msg", style={
+                "fontSize": "0.78rem", "marginTop": "0.5rem", "color": "#7e8fa4"}),
+        ], style={"marginTop": "0"}) if use_woe else html.Div(),
     ])
+
+
+# ── Callback: Bin Değişken Seçildiğinde Mevcut Bin Göster ─────────────────────
+@app.callback(
+    Output("vs-bin-current", "children"),
+    Input("vs-bin-var-dropdown", "value"),
+    State("store-config", "data"),
+    State("store-key", "data"),
+    prevent_initial_call=True,
+)
+def show_current_bin(selected_var, config, key):
+    if not selected_var or not config or not key:
+        return "—"
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    bins_dict = _SERVER_STORE.get(f"{_pfx}_bins", {})
+    if selected_var in bins_dict:
+        return str(len(bins_dict[selected_var]) - 1)
+
+    optb_dict = _SERVER_STORE.get(f"{_pfx}_optb", {})
+    _ob = optb_dict.get(selected_var)
+    if _ob is not None:
+        try:
+            _bt = _ob.binning_table.build()
+            _data = _bt[~_bt["Bin"].isin(["Totals", "Special", "Missing"])]
+            return str(len(_data))
+        except Exception:
+            pass
+    return "—"
+
+
+# ── Callback: Bin Uygula ──────────────────────────────────────────────────────
+@app.callback(
+    Output("vs-bin-result-msg", "children"),
+    Output("div-var-summary", "children", allow_duplicate=True),
+    Input("vs-bin-apply-btn", "n_clicks"),
+    State("vs-bin-var-dropdown", "value"),
+    State("vs-bin-new-input", "value"),
+    State("store-config", "data"),
+    State("store-key", "data"),
+    State("varsummary-data-tab", "active_tab"),
+    State("store-expert-exclude", "data"),
+    prevent_initial_call=True,
+)
+def apply_bin_change(n_clicks, selected_var, new_bins, config, key, vs_tab, expert_excluded):
+    if not n_clicks or not selected_var or not new_bins or not config or not key:
+        return dash.no_update, dash.no_update
+
+    new_bins = int(new_bins)
+    if new_bins < 2 or new_bins > 20:
+        return html.Span("Bin sayısı 2–20 arasında olmalı.", style={"color": "#ef4444"}), dash.no_update
+
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+    target  = config["target_col"]
+    _pfx    = f"{key}_ds_{seg_col}_{seg_val}"
+
+    df_train = _SERVER_STORE.get(f"{_pfx}_train")
+    df_test  = _SERVER_STORE.get(f"{_pfx}_test")
+    df_oot   = _SERVER_STORE.get(f"{_pfx}_oot")
+
+    if df_train is None:
+        return html.Span("Train verisi bulunamadı.", style={"color": "#ef4444"}), dash.no_update
+
+    try:
+        from utils.chart_helpers import refit_single_variable
+        new_iv, actual_bins, old_iv = refit_single_variable(
+            selected_var, new_bins, df_train, df_test, df_oot,
+            target, key, seg_col, seg_val)
+
+        old_iv_str = f"{old_iv:.4f}" if old_iv is not None else "?"
+        msg = (f"✓ {selected_var}: {old_iv_str} → {new_iv:.4f} IV, "
+               f"bin: {actual_bins} (istenen: {new_bins})")
+
+        # Var summary tablosunu yeniden render et
+        use_woe = (vs_tab == "vs-tab-woe")
+        if use_woe:
+            summary = compute_var_summary_table(config, key, seg_col, seg_val)
+        else:
+            summary = compute_var_summary_raw(config, key, seg_col, seg_val)
+
+        excluded_set = set(expert_excluded or [])
+        screen_result = _SERVER_STORE.get(f"{key}_screen")
+        if screen_result:
+            passed_set = set(screen_result[0])
+            summary = summary[summary["Değişken"].isin(passed_set)].reset_index(drop=True)
+        if excluded_set:
+            summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
+
+        return (html.Span(msg, style={"color": "#10b981"}),
+                _render_var_summary(summary, use_woe))
+
+    except Exception as e:
+        return html.Span(f"Hata: {str(e)}", style={"color": "#ef4444"}), dash.no_update
 
 
 # ── Callback: Değişken Özeti ───────────────────────────────────────────────────

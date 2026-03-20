@@ -289,6 +289,254 @@ def psi_label(psi_val: float) -> str:
     return "Kritik Kayma"
 
 
+def _iv_label(iv: float) -> str:
+    if iv < 0.02:  return "Çok Zayıf"
+    if iv < 0.10:  return "Zayıf"
+    if iv < 0.30:  return "Orta"
+    if iv < 0.50:  return "Güçlü"
+    return "Şüpheli"
+
+
+# ── Ortak WoE yardımcıları (precompute + refit paylaşır) ────────────────────
+def format_bt(bt_raw, col_name=None, df_train=None, target=None):
+    """Optbinning binning_table → uygulama formatına dönüştür."""
+    data_rows = bt_raw[bt_raw["Bin"].astype(str).str.len() > 0]
+    data_rows = data_rows[~data_rows["Bin"].isin(["Special", "Missing", "Totals"])]
+    rows = []
+    for _, r in data_rows.iterrows():
+        total = int(r["Count"]); bad = int(r["Event"]); good = int(r["Non-event"])
+        rows.append({
+            "Bin": str(r["Bin"]), "Toplam": total, "Bad": bad, "Good": good,
+            "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+            "WOE": round(float(r["WoE"]), 4),
+            "IV Katkı": round(float(r["IV"]), 4),
+        })
+    # Special — her değer ayrı satır
+    sr_sp = bt_raw[bt_raw["Bin"] == "Special"]
+    if not sr_sp.empty and int(sr_sp.iloc[0]["Count"]) > 0:
+        sp_woe = round(float(sr_sp.iloc[0]["WoE"]), 4)
+        sp_iv  = float(sr_sp.iloc[0]["IV"])
+        sp_n   = int(sr_sp.iloc[0]["Count"])
+        sv_found = False
+        if col_name and df_train is not None and col_name in df_train.columns:
+            from modules.deep_dive import SPECIAL_VALUES
+            y_tr = pd.to_numeric(df_train[target], errors="coerce")
+            for sv in sorted(SPECIAL_VALUES):
+                sv_mask = df_train[col_name] == sv
+                if not sv_mask.any():
+                    continue
+                sv_found = True
+                n_sv = int(sv_mask.sum())
+                bad_sv = int(y_tr[sv_mask].sum())
+                good_sv = n_sv - bad_sv
+                iv_share = round(sp_iv * (n_sv / sp_n), 4) if sp_n > 0 else 0.0
+                rows.append({
+                    "Bin": f"Special ({int(sv)})", "Toplam": n_sv,
+                    "Bad": bad_sv, "Good": good_sv,
+                    "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
+                    "WOE": sp_woe, "IV Katkı": iv_share,
+                })
+        if not sv_found:
+            r = sr_sp.iloc[0]
+            rows.append({
+                "Bin": "Special", "Toplam": int(r["Count"]),
+                "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
+                "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                "WOE": sp_woe, "IV Katkı": round(sp_iv, 4),
+            })
+    # Missing
+    sr_ms = bt_raw[bt_raw["Bin"] == "Missing"]
+    if not sr_ms.empty and int(sr_ms.iloc[0]["Count"]) > 0:
+        r = sr_ms.iloc[0]
+        rows.append({
+            "Bin": "Eksik", "Toplam": int(r["Count"]),
+            "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
+            "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+            "WOE": round(float(r["WoE"]), 4),
+            "IV Katkı": round(float(r["IV"]), 4),
+        })
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows)
+    t_n = result["Toplam"].sum(); t_b = result["Bad"].sum()
+    total_row = pd.DataFrame([{
+        "Bin": "TOPLAM", "Toplam": int(t_n), "Bad": int(t_b),
+        "Good": int(result["Good"].sum()),
+        "Bad Rate %": round(t_b / t_n * 100, 2) if t_n > 0 else 0.0,
+        "WOE": "", "IV Katkı": round(float(bt_raw.loc["Totals", "IV"]), 4),
+    }])
+    return pd.concat([result, total_row], ignore_index=True)
+
+
+def mono_check(bt):
+    """Bad Rate % üzerinden monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
+    m = bt[~bt["Bin"].astype(str).str.match(r"^(TOPLAM|Eksik|Special)")]
+    nums = [float(w) for w in m["Bad Rate %"].dropna().tolist()
+            if isinstance(w, (int, float))]
+    if len(nums) < 2:
+        return "–"
+    diffs = [nums[i+1] - nums[i] for i in range(len(nums)-1)]
+    if all(d >= 0 for d in diffs):
+        return "Artan ↑"
+    if all(d <= 0 for d in diffs):
+        return "Azalan ↓"
+    return "Monoton Değil ✗"
+
+
+# ── Tek değişken için bin sayısını değiştirip tüm cache'i güncelle ──────────
+def refit_single_variable(col, new_max_bins, df_train, df_test, df_oot,
+                          target, key, seg_col, seg_val):
+    """
+    Tek değişken için OptBinning yeniden fit et,
+    8 cache key'ini atomik olarak güncelle.
+    Diğer değişkenler hiç etkilenmez.
+
+    Returns: (new_iv, actual_n_bins, old_iv)
+    """
+    from optbinning import OptimalBinning as _OB
+    from modules.deep_dive import SPECIAL_VALUES, is_special_column, get_woe_detail
+    from server_state import _SERVER_STORE
+
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+
+    # ── 1. OptBinning fit (train) ────────────────────────────────────────────
+    y_train = pd.to_numeric(df_train[target], errors="coerce")
+    _clean = y_train.notna()
+    _local = df_train.loc[_clean, [col, target]].copy()
+    _local[target] = y_train[_clean].astype(int)
+
+    is_numeric = pd.api.types.is_numeric_dtype(df_train[col])
+    _special_col = is_numeric and is_special_column(_local[col])
+    _bins = 2 if _special_col else new_max_bins
+
+    kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
+                  max_n_bins=_bins, solver="cp",
+                  dtype="numerical" if is_numeric else "categorical")
+    if is_numeric:
+        kwargs["special_codes"] = list(SPECIAL_VALUES)
+
+    optb = _OB(**kwargs)
+    optb.fit(_local[col].values, _local[target].values)
+
+    # ── 2. Binning table + IV ────────────────────────────────────────────────
+    bt = optb.binning_table.build(show_digits=8)
+    new_iv = float(bt.loc["Totals", "IV"])
+
+    # ── 3. Bin edges ─────────────────────────────────────────────────────────
+    new_edges = None
+    if is_numeric and hasattr(optb, "splits") and optb.splits is not None:
+        new_edges = [-np.inf] + list(optb.splits) + [np.inf]
+
+    # Gerçek bin sayısı (OptBinning üst sınırdan az verebilir)
+    n_data_bins = len(bt) - 3  # Totals, Special, Missing hariç
+    # Special/Missing boşsa sayma
+    if bt[bt["Bin"] == "Special"].empty or int(bt[bt["Bin"] == "Special"].iloc[0]["Count"]) == 0:
+        n_data_bins = len(bt) - 2  # sadece Totals ve Missing
+    actual_n_bins = max(n_data_bins, 1)
+
+    # ── 4. WoE transform ────────────────────────────────────────────────────
+    tr_woe = optb.transform(df_train[col].values, metric="woe",
+                            metric_missing="empirical",
+                            metric_special="empirical")
+
+    te_woe = None
+    if df_test is not None and len(df_test) > 0:
+        te_woe = optb.transform(df_test[col].values, metric="woe",
+                                metric_missing="empirical",
+                                metric_special="empirical")
+
+    oot_woe = None
+    if df_oot is not None and len(df_oot) > 0:
+        oot_woe = optb.transform(df_oot[col].values, metric="woe",
+                                 metric_missing="empirical",
+                                 metric_special="empirical")
+
+    # ── 5. Cache güncelleme (per-column, atomik) ─────────────────────────────
+    # 5a. optb_dict
+    optb_dict = _SERVER_STORE.get(f"{_pfx}_optb", {})
+    optb_dict[col] = optb
+    _SERVER_STORE[f"{_pfx}_optb"] = optb_dict
+
+    # 5b. bins_dict
+    bins_dict = _SERVER_STORE.get(f"{_pfx}_bins", {})
+    if new_edges:
+        bins_dict[col] = new_edges
+    _SERVER_STORE[f"{_pfx}_bins"] = bins_dict
+
+    # 5c. iv_tables
+    iv_tables = _SERVER_STORE.get(f"{_pfx}_iv_tables", {})
+    iv_tables[col] = bt
+    _SERVER_STORE[f"{_pfx}_iv_tables"] = iv_tables
+
+    # 5d. train_woe DataFrame — sadece o kolonu güncelle
+    train_woe_df = _SERVER_STORE.get(f"{_pfx}_train_woe")
+    old_iv = None
+    if train_woe_df is not None:
+        train_woe_df[col] = pd.Series(tr_woe, index=df_train.index).fillna(0.0)
+
+    # 5e. test_woe DataFrame
+    test_woe_df = _SERVER_STORE.get(f"{_pfx}_test_woe")
+    if test_woe_df is not None and te_woe is not None:
+        test_woe_df[col] = pd.Series(te_woe, index=df_test.index).fillna(0.0)
+
+    # 5f. oot_woe DataFrame
+    oot_woe_df = _SERVER_STORE.get(f"{_pfx}_oot_woe")
+    if oot_woe_df is not None and oot_woe is not None:
+        oot_woe_df[col] = pd.Series(oot_woe, index=df_oot.index).fillna(0.0)
+
+    # 5g. iv_df — o satırın IV'ünü güncelle
+    iv_key = f"{key}_iv_{seg_col}_{seg_val}"
+    iv_df = _SERVER_STORE.get(iv_key)
+    if iv_df is not None:
+        mask = iv_df["Değişken"] == col
+        if mask.any():
+            old_iv = float(iv_df.loc[mask, "IV"].iloc[0])
+        iv_df.loc[mask, "IV"] = round(new_iv, 4)
+        iv_df.loc[mask, "Güç"] = _iv_label(new_iv)
+        _SERVER_STORE[iv_key] = iv_df
+
+    # 5h. woe_tables[col] — train + test + oot tabloları
+    woe_tables = _SERVER_STORE.get(f"{_pfx}_woe_tables", {})
+    bt_train = format_bt(bt, col_name=col, df_train=df_train, target=target)
+    if not bt_train.empty:
+        entry = {
+            "train_table": bt_train.to_dict("records"),
+            "iv_train": round(new_iv, 4),
+            "monoton": mono_check(bt_train),
+        }
+        # Test tablosu
+        if df_test is not None and len(df_test) > 0:
+            try:
+                bt_test, iv_test, _, _ = get_woe_detail(
+                    df_test, col, target, fitted_optb=optb, use_edges=True)
+                if not bt_test.empty:
+                    entry["test_table"] = bt_test.to_dict("records")
+                    entry["iv_test"] = round(iv_test, 4)
+                    entry["monoton_test"] = mono_check(bt_test)
+            except Exception:
+                pass
+        # OOT tablosu
+        if df_oot is not None and len(df_oot) > 0:
+            try:
+                bt_oot, iv_oot, _, _ = get_woe_detail(
+                    df_oot, col, target, fitted_optb=optb, use_edges=True)
+                if not bt_oot.empty:
+                    entry["oot_table"] = bt_oot.to_dict("records")
+                    entry["iv_oot"] = round(iv_oot, 4)
+                    entry["monoton_oot"] = mono_check(bt_oot)
+            except Exception:
+                pass
+        woe_tables[col] = entry
+        _SERVER_STORE[f"{_pfx}_woe_tables"] = woe_tables
+
+    # ── 6. var_summary cache'ini invalidate et (next render'da taze hesaplansın)
+    _SERVER_STORE.pop(f"{key}_varsummary_{seg_col}_{seg_val}", None)
+    _SERVER_STORE.pop(f"{key}_summary_{seg_col}_{seg_val}", None)
+    _SERVER_STORE.pop(f"{_pfx}_psi_map", None)
+
+    return new_iv, actual_n_bins, old_iv
+
+
 # ── Yardımcı: r Badge ────────────────────────────────────────────────────────
 def _make_r_badge(r):
     if np.isnan(r):
