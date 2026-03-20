@@ -968,16 +968,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
     _opt_dict  = _SERVER_STORE.get(f"{_pfx}_optb", {})
 
     if _train_woe is None:
-        from utils.chart_helpers import build_woe_datasets
-        woe_result = build_woe_datasets(_df_tr, _df_te, _df_oot, target, model_vars)
-        _train_woe = woe_result["train_woe"]
-        _test_woe  = woe_result["test_woe"]
-        _oot_woe   = woe_result["oot_woe"]
-        _opt_dict  = woe_result["optb_dict"]
-        _SERVER_STORE[f"{_pfx}_train_woe"] = _train_woe
-        _SERVER_STORE[f"{_pfx}_test_woe"]  = _test_woe
-        _SERVER_STORE[f"{_pfx}_oot_woe"]   = _oot_woe
-        _SERVER_STORE[f"{_pfx}_optb"]      = _opt_dict
+        return html.Div("WoE verileri henüz hesaplanmamış. Lütfen önce yapılandırmayı onaylayın.",
+                        className="alert-info-custom"), dash.no_update
 
     woe_parts = [_train_woe]
     if _test_woe is not None:

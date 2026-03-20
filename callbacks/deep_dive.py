@@ -81,7 +81,6 @@ def render_deep_dive_shell(config, expert_excluded, key):
                 html.Div([
                     dcc.Dropdown(id="dd-psi-split", options=[], value=_psi_val,
                                  style={"display": "none"}),
-                    dbc.Input(id="dd-max-bins", type="hidden", value=4),
                 ], style={"display": "none"}),
             ], className="mb-4"),
         ]),
@@ -107,6 +106,7 @@ def render_deep_dive_shell(config, expert_excluded, key):
             "oot_date":       config.get("oot_date"),
             "has_test_split": config.get("has_test_split", False),
             "test_size":      config.get("test_size", 20),
+            "max_bins":       config.get("max_bins", 4),
             "seg_col":        config.get("segment_col"),
             "seg_val":        config.get("segment_val"),
             "key":            key,
@@ -130,10 +130,9 @@ def reset_dtype_override(_col):
     Input("dd-dtype-override", "value"),
     Input("dd-data-tab", "active_tab"),
     State("store-dd-config", "data"),
-    State("dd-max-bins", "value"),
     prevent_initial_call=False,
 )
-def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd_config, max_n_bins):
+def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd_config):
     if not col or not dd_config:
         return html.Div()
 
@@ -153,7 +152,7 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
 
     vstats = get_variable_stats(df_active, col, target)
 
-    _max_bins    = int(max_n_bins) if max_n_bins and int(max_n_bins) >= 2 else 4
+    _max_bins    = int(dd_config.get("max_bins", 4))
     _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
     _is_woe_tab  = (active_data_tab != "dd-tab-raw")
 

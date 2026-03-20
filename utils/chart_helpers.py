@@ -77,7 +77,7 @@ def _build_woe_dataset(df: pd.DataFrame, target: str, cols: list) -> tuple:
 
 
 def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
-                       target: str, cols: list) -> dict:
+                       target: str, cols: list, max_bins: int = 4) -> dict:
     """
     Train üzerinde OptimalBinning fit → tek döngüde IV, optb, bin_edges,
     WoE transform (train + test + oot) üretir.
@@ -93,7 +93,7 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
         "failed":     list          — encode edilemeyen kolonlar
     """
     from optbinning import OptimalBinning as _OB
-    from modules.deep_dive import SPECIAL_VALUES
+    from modules.deep_dive import SPECIAL_VALUES, is_special_column
 
     train_woe_data = {}
     test_woe_data = {}
@@ -123,8 +123,10 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
             _local = df_train.loc[_clean_mask, [col, target]].copy()
             _local[target] = y_train[_clean_mask].astype(int)
 
+            _special_col = is_numeric and is_special_column(_local[col])
+            _bins = 2 if _special_col else max_bins
             kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
-                          max_n_bins=4, solver="cp",
+                          max_n_bins=_bins, solver="cp",
                           dtype="numerical" if is_numeric else "categorical")
             if is_numeric:
                 kwargs["special_codes"] = list(SPECIAL_VALUES)

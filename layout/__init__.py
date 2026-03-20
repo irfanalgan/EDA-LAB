@@ -518,10 +518,24 @@ def build_sidebar():
                     className="dark-dd mb-3",
                 ),
 
-                dbc.Label("Tarih Kolonu", className="form-label"),
-                html.Div("opsiyonel", className="form-hint"),
+                dbc.Label([
+                    "Tarih Kolonu",
+                    html.Span("*", style={"color": "#ef4444", "marginLeft": "3px"}),
+                ], className="form-label"),
                 dcc.Dropdown(
                     id="dd-date-col",
+                    options=[],
+                    value=None,
+                    placeholder="Kolon ara…",
+                    searchable=True,
+                    className="dark-dd mb-3",
+                ),
+
+                dbc.Label("Sıralama Kolonu", className="form-label"),
+                html.Div("opsiyonel — split öncesi veriyi sıralamak için (default: tarih kolonu)",
+                         className="form-hint"),
+                dcc.Dropdown(
+                    id="dd-sort-col",
                     options=[],
                     value=None,
                     placeholder="Kolon ara…",
@@ -556,7 +570,7 @@ def build_sidebar():
                                     dbc.Input(id="input-test-size", type="number",
                                               value=20, min=10, max=50, step=5,
                                               style={"maxWidth": "90px", "fontSize": "0.82rem"}),
-                                ]),
+                                ], width="auto"),
                             ], className="mb-2"),
                             id="collapse-test-size-cfg",
                             is_open=False,
@@ -565,6 +579,13 @@ def build_sidebar():
                     id="collapse-oot-date",
                     is_open=False,
                 ),
+
+                dbc.Label("Maks Bin Sayısı", className="form-label"),
+                html.Div("WoE binleme için maksimum aralık sayısı", className="form-hint"),
+                dbc.Input(id="input-max-bins", type="number",
+                          value=4, min=2, max=20, step=1,
+                          style={"maxWidth": "90px", "fontSize": "0.82rem"},
+                          className="mb-3"),
 
                 dbc.Label("Segment Kolonu", className="form-label"),
                 html.Div("opsiyonel", className="form-hint"),

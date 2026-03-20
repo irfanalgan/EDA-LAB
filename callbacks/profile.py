@@ -226,6 +226,8 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     Output("dd-target-col", "value", allow_duplicate=True),
     Output("dd-date-col", "options", allow_duplicate=True),
     Output("dd-date-col", "value", allow_duplicate=True),
+    Output("dd-sort-col", "options", allow_duplicate=True),
+    Output("dd-sort-col", "value", allow_duplicate=True),
     Output("dd-segment-col", "options", allow_duplicate=True),
     Output("dd-segment-col", "value", allow_duplicate=True),
     Output("dd-segment-val", "options", allow_duplicate=True),
@@ -234,6 +236,7 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     Output("dd-oot-date", "options", allow_duplicate=True),
     Output("dd-oot-date", "value", allow_duplicate=True),
     Output("collapse-oot-date", "is_open", allow_duplicate=True),
+    Output("input-max-bins", "value", allow_duplicate=True),
     Output("profile-status", "children"),
     Output("load-status", "children", allow_duplicate=True),
     Output("collapse-profile-actions", "is_open", allow_duplicate=True),
@@ -345,6 +348,8 @@ def load_profile_cb(_, profile_name):
         config.get("target_col"),                       # dd-target-col value
         all_opts,                                       # dd-date-col options
         config.get("date_col"),                         # dd-date-col value
+        all_opts,                                       # dd-sort-col options
+        config.get("sort_col"),                         # dd-sort-col value
         all_opts,                                       # dd-segment-col options
         seg_col,                                        # dd-segment-col value
         seg_opts,                                       # dd-segment-val options
@@ -353,6 +358,7 @@ def load_profile_cb(_, profile_name):
         oot_opts,                                       # dd-oot-date options
         config.get("oot_date"),                         # dd-oot-date value
         bool(config.get("oot_date")),                   # collapse-oot-date is_open
+        config.get("max_bins", 4),                      # input-max-bins value
         profile_msg,                                    # profile-status
         load_msg,                                       # load-status
         True,                                           # collapse-profile-actions

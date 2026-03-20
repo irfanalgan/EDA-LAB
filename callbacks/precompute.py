@@ -173,8 +173,9 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                         and c != date_col and c != seg_col]
 
         # Tek döngüde WoE fit (train) + IV + transform (train/test/oot)
+        _max_bins = int(cfg.get("max_bins", 4))
         woe_result = build_woe_datasets(df_train, df_test, df_oot,
-                                         target, var_list)
+                                         target, var_list, max_bins=_max_bins)
 
         _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
         _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
@@ -191,7 +192,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         iv_df = woe_result["iv_df"]
         woe_tables = {}
 
-        def _format_bt(bt_raw):
+        def _format_bt(bt_raw, col_name=None):
             """Optbinning binning_table → uygulama formatına dönüştür."""
             data_rows = bt_raw[bt_raw["Bin"].astype(str).str.len() > 0]
             data_rows = data_rows[~data_rows["Bin"].isin(["Special", "Missing", "Totals"])]
@@ -204,18 +205,50 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                     "WOE": round(float(r["WoE"]), 4),
                     "IV Katkı": round(float(r["IV"]), 4),
                 })
-            for lbl in ["Special", "Missing"]:
-                sr = bt_raw[bt_raw["Bin"] == lbl]
-                if not sr.empty and int(sr.iloc[0]["Count"]) > 0:
-                    r = sr.iloc[0]
+            # Special — her değer ayrı satır
+            sr_sp = bt_raw[bt_raw["Bin"] == "Special"]
+            if not sr_sp.empty and int(sr_sp.iloc[0]["Count"]) > 0:
+                sp_woe = round(float(sr_sp.iloc[0]["WoE"]), 4)
+                sp_iv  = float(sr_sp.iloc[0]["IV"])
+                sp_n   = int(sr_sp.iloc[0]["Count"])
+                sv_found = False
+                if col_name and col_name in df_train.columns:
+                    from modules.deep_dive import SPECIAL_VALUES
+                    y_tr = pd.to_numeric(df_train[target], errors="coerce")
+                    for sv in sorted(SPECIAL_VALUES):
+                        sv_mask = df_train[col_name] == sv
+                        if not sv_mask.any():
+                            continue
+                        sv_found = True
+                        n_sv = int(sv_mask.sum())
+                        bad_sv = int(y_tr[sv_mask].sum())
+                        good_sv = n_sv - bad_sv
+                        iv_share = round(sp_iv * (n_sv / sp_n), 4) if sp_n > 0 else 0.0
+                        rows.append({
+                            "Bin": f"Special ({int(sv)})", "Toplam": n_sv,
+                            "Bad": bad_sv, "Good": good_sv,
+                            "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
+                            "WOE": sp_woe, "IV Katkı": iv_share,
+                        })
+                if not sv_found:
+                    r = sr_sp.iloc[0]
                     rows.append({
-                        "Bin": "Eksik" if lbl == "Missing" else "Special",
-                        "Toplam": int(r["Count"]), "Bad": int(r["Event"]),
-                        "Good": int(r["Non-event"]),
+                        "Bin": "Special", "Toplam": int(r["Count"]),
+                        "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
                         "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                        "WOE": round(float(r["WoE"]), 4),
-                        "IV Katkı": round(float(r["IV"]), 4),
+                        "WOE": sp_woe, "IV Katkı": round(sp_iv, 4),
                     })
+            # Missing
+            sr_ms = bt_raw[bt_raw["Bin"] == "Missing"]
+            if not sr_ms.empty and int(sr_ms.iloc[0]["Count"]) > 0:
+                r = sr_ms.iloc[0]
+                rows.append({
+                    "Bin": "Eksik", "Toplam": int(r["Count"]),
+                    "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
+                    "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                    "WOE": round(float(r["WoE"]), 4),
+                    "IV Katkı": round(float(r["IV"]), 4),
+                })
             if not rows:
                 return pd.DataFrame()
             result = pd.DataFrame(rows)
@@ -230,7 +263,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
 
         def _mono_check(bt):
             """Bad Rate % üzerinden monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
-            m = bt[~bt["Bin"].isin(["TOPLAM", "Eksik", "Special"])]
+            m = bt[~bt["Bin"].astype(str).str.match(r"^(TOPLAM|Eksik|Special)")]
             nums = [float(w) for w in m["Bad Rate %"].dropna().tolist()
                     if isinstance(w, (int, float))]
             if len(nums) < 2:
@@ -251,7 +284,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 bt_raw = _iv_tables_raw.get(var)
                 if bt_raw is None or bt_raw.empty:
                     continue
-                bt_train = _format_bt(bt_raw)
+                bt_train = _format_bt(bt_raw, col_name=var)
                 if bt_train.empty:
                     continue
                 iv_train = float(bt_raw.loc["Totals", "IV"])
@@ -349,16 +382,18 @@ _FOOTER_DONE    = (_BTN_HIDDEN, {"fontSize": "0.85rem", "padding": "0.4rem 1.2re
     Input("btn-confirm", "n_clicks"),
     State("dd-target-col", "value"),
     State("dd-date-col", "value"),
+    State("dd-sort-col", "value"),
     State("dd-oot-date", "value"),
     State("dd-segment-col", "value"),
     State("dd-segment-val", "value"),
     State("chk-train-test-split", "value"),
     State("input-test-size", "value"),
+    State("input-max-bins", "value"),
     State("store-key", "data"),
     prevent_initial_call=True,
 )
-def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
-                   segment_val, train_test_val, test_size_cfg, key):
+def confirm_config(n_clicks, target_col, date_col, sort_col, oot_date, segment_col,
+                   segment_val, train_test_val, test_size_cfg, max_bins_cfg, key):
     _MODEL_RESET = (None, "", None, None, None, None, "")  # model-signal, pg-output, model-index, note, profile-loaded, dd-profile, profile-status
     no_modal = (dash.no_update,) * 6  # modal, interval, body, close-style, done-style
     if not target_col or target_col == "":
@@ -367,15 +402,23 @@ def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
             style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
         ), *no_modal, *_MODEL_RESET)
 
+    if not date_col or date_col == "":
+        return (dash.no_update, dbc.Alert(
+            "Tarih kolonu zorunludur.", color="warning",
+            style={"padding": "0.4rem 0.75rem", "fontSize": "0.8rem"},
+        ), *no_modal, *_MODEL_RESET)
+
     df_orig = _get_df(key)
     config = {
         "target_col":      target_col,
         "date_col":        date_col or None,
+        "sort_col":        sort_col or None,
         "oot_date":        oot_date or None,
         "segment_col":     segment_col or None,
         "target_type":     "binary",
         "has_test_split":  bool(train_test_val),
         "test_size":       int(test_size_cfg or 20),
+        "max_bins":        int(max_bins_cfg or 4),
     }
 
     prog_key = f"{key}_precompute"
@@ -384,6 +427,8 @@ def confirm_config(n_clicks, target_col, date_col, oot_date, segment_col,
     parts = [html.Strong("✓ Onaylandı")]
     if date_col:
         parts += [f"  ·  Tarih: {date_col}"]
+    if sort_col:
+        parts += [f"  ·  Sıralama: {sort_col}"]
     if oot_date:
         parts += [f"  ·  OOT: ≥ {oot_date}"]
         if bool(train_test_val):

@@ -340,20 +340,35 @@ def _render_var_summary(summary, use_woe):
             dbc.Col(html.Div([
                 html.Div(str(n_tut), className="metric-value", style={"color": "#10b981", "fontSize": "1.4rem"}),
                 html.Div("Tut", className="metric-label"),
-            ], className="metric-card"), width=2),
+            ], className="metric-card", id="card-tut"), width=2),
             dbc.Col(html.Div([
                 html.Div(str(n_inc), className="metric-value", style={"color": "#f59e0b", "fontSize": "1.4rem"}),
                 html.Div("İncele", className="metric-label"),
-            ], className="metric-card"), width=2),
+            ], className="metric-card", id="card-incele"), width=2),
             dbc.Col(html.Div([
                 html.Div(str(n_cik), className="metric-value", style={"color": "#ef4444", "fontSize": "1.4rem"}),
                 html.Div("Çıkar", className="metric-label"),
-            ], className="metric-card"), width=2),
+            ], className="metric-card", id="card-cikar"), width=2),
             dbc.Col(html.Div([
                 html.Div(str(len(summary)), className="metric-value", style={"fontSize": "1.4rem"}),
                 html.Div("Toplam Değişken", className="metric-label"),
             ], className="metric-card"), width=3),
         ], className="mb-4"),
+        dbc.Tooltip(
+            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, Korr < 0.75, VIF ≤ 5",
+            target="card-tut", placement="top",
+            style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
+        ),
+        dbc.Tooltip(
+            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · Korr ≥ 0.75 · VIF > 5",
+            target="card-incele", placement="top",
+            style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
+        ),
+        dbc.Tooltip(
+            "Kritik sorun tespit edildi:\nIV < 0.02 · Eksik > 60% · PSI > 0.25",
+            target="card-cikar", placement="top",
+            style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
+        ),
         html.Div([
             dcc.Clipboard(target_id="var-summary-tsv", title="Kopyala",
                           style={"cursor": "pointer", "fontSize": "0.72rem",
@@ -468,7 +483,8 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, ke
 
         var_list = [c for c in df_train.columns if c != target
                     and c != date_col and c != seg_col]
-        woe_result = build_woe_datasets(df_train, df_test, df_oot, target, var_list)
+        _max_bins = int(config.get("max_bins", 4))
+        woe_result = build_woe_datasets(df_train, df_test, df_oot, target, var_list, max_bins=_max_bins)
         _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
         _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
         _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]

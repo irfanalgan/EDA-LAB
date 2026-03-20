@@ -4,6 +4,17 @@ from scipy import stats as scipy_stats
 
 SPECIAL_VALUES = {9999999999, 8888888888}
 
+# Eşik: kolondaki special value oranı >= %2 ise "special kolon" say
+_SPECIAL_RATIO_THRESHOLD = 0.02
+
+
+def is_special_column(series: "pd.Series") -> bool:
+    """Kolonda SPECIAL_VALUES var mı ve oranı >= %2 mi?"""
+    mask = series.isin(SPECIAL_VALUES)
+    if not mask.any():
+        return False
+    return mask.sum() / len(series) >= _SPECIAL_RATIO_THRESHOLD
+
 
 # ── sklearn >= 1.6 uyumluluk yaması (optbinning metrics.py) ──────────────────
 # sklearn 1.6'da force_all_finite → ensure_all_finite olarak yeniden adlandırıldı.
@@ -111,21 +122,26 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
             "IV Katkı": round(float(iv_part), 4),
         })
 
-    # Special
-    if special_mask.any():
-        y_sp = y[special_mask]
-        n_sp = int(special_mask.sum())
-        bad_sp = int(y_sp.sum())
-        good_sp = n_sp - bad_sp
-        d_b = max(bad_sp / total_bad, eps) if total_bad > 0 else eps
-        d_g = max(good_sp / total_good, eps) if total_good > 0 else eps
-        iv_sp = (d_b - d_g) * np.log(d_b / d_g)
-        iv_total += iv_sp
+    # Special — her değer ayrı satır
+    x_series_sp = pd.Series(X)
+    for sv in sorted(SPECIAL_VALUES):
+        sv_mask = x_series_sp == sv
+        if not sv_mask.any():
+            continue
+        y_sv = y[sv_mask.values]
+        n_sv = int(sv_mask.sum())
+        bad_sv = int(y_sv.sum())
+        good_sv = n_sv - bad_sv
+        d_b = max(bad_sv / total_bad, eps) if total_bad > 0 else eps
+        d_g = max(good_sv / total_good, eps) if total_good > 0 else eps
+        iv_sv = (d_b - d_g) * np.log(d_b / d_g)
+        iv_total += iv_sv
         rows.append({
-            "Bin": "Special", "Toplam": n_sp, "Bad": bad_sp, "Good": good_sp,
-            "Bad Rate %": round(bad_sp / n_sp * 100, 2) if n_sp > 0 else 0.0,
+            "Bin": f"Special ({int(sv)})", "Toplam": n_sv, "Bad": bad_sv,
+            "Good": good_sv,
+            "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
             "WOE": round(train_woe_special, 4),
-            "IV Katkı": round(float(iv_sp), 4),
+            "IV Katkı": round(float(iv_sv), 4),
         })
 
     # Missing
@@ -203,10 +219,12 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
         if fitted_optb is not None:
             optb = fitted_optb
         else:
+            _special_col = is_numeric and is_special_column(local[col])
+            _bins = 2 if _special_col else max_n_bins
             kwargs = dict(
                 name=col,
                 monotonic_trend="auto_asc_desc",
-                max_n_bins=max_n_bins,
+                max_n_bins=_bins,
                 solver="cp",
                 dtype="numerical" if is_numeric else "categorical",
             )
@@ -250,17 +268,45 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
         rows.append({"Bin": str(row["Bin"]), "Toplam": total, "Bad": bad,
                      "Good": good, "Bad Rate %": bad_rate, "WOE": woe, "IV Katkı": iv_part})
 
-    # Special and Missing rows with count > 0
-    for special_lbl in ["Special", "Missing"]:
-        sr = bt[bt["Bin"] == special_lbl]
-        if not sr.empty and int(sr.iloc[0]["Count"]) > 0:
-            r = sr.iloc[0]
-            display_lbl = "Eksik" if special_lbl == "Missing" else "Special"
-            rows.append({"Bin": display_lbl, "Toplam": int(r["Count"]),
+    # Special — her değer ayrı satır
+    sr_special = bt[bt["Bin"] == "Special"]
+    if not sr_special.empty and int(sr_special.iloc[0]["Count"]) > 0:
+        sp_woe = round(float(sr_special.iloc[0]["WoE"]), 4)
+        sp_iv  = float(sr_special.iloc[0]["IV"])
+        x_series = pd.Series(X)
+        sp_total_n = int(sr_special.iloc[0]["Count"])
+        sp_total_bad = int(sr_special.iloc[0]["Event"])
+        sv_count = 0
+        for sv in sorted(SPECIAL_VALUES):
+            sv_mask = x_series == sv
+            if not sv_mask.any():
+                continue
+            sv_count += 1
+            n_sv = int(sv_mask.sum())
+            bad_sv = int(y[sv_mask.values].sum())
+            good_sv = n_sv - bad_sv
+            # IV katkısını orantılı dağıt
+            iv_share = round(sp_iv * (n_sv / sp_total_n), 4) if sp_total_n > 0 else 0.0
+            rows.append({"Bin": f"Special ({int(sv)})", "Toplam": n_sv,
+                         "Bad": bad_sv, "Good": good_sv,
+                         "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
+                         "WOE": sp_woe, "IV Katkı": iv_share})
+        # Hiçbir special value ayrı bulunamadıysa orijinal satırı koy
+        if sv_count == 0:
+            r = sr_special.iloc[0]
+            rows.append({"Bin": "Special", "Toplam": int(r["Count"]),
                          "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
                          "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                         "WOE": round(float(r["WoE"]), 4),
-                         "IV Katkı": round(float(r["IV"]), 4)})
+                         "WOE": sp_woe, "IV Katkı": round(sp_iv, 4)})
+    # Missing
+    sr_missing = bt[bt["Bin"] == "Missing"]
+    if not sr_missing.empty and int(sr_missing.iloc[0]["Count"]) > 0:
+        r = sr_missing.iloc[0]
+        rows.append({"Bin": "Eksik", "Toplam": int(r["Count"]),
+                     "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
+                     "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
+                     "WOE": round(float(r["WoE"]), 4),
+                     "IV Katkı": round(float(r["IV"]), 4)})
 
     if not rows:
         return pd.DataFrame(), 0.0, None, None
@@ -639,8 +685,10 @@ def get_woe_encoder(df: pd.DataFrame, col: str, target: str,
     is_numeric = pd.api.types.is_numeric_dtype(local[col])
 
     try:
+        _special_col = is_numeric and is_special_column(local[col])
+        _bins = 2 if _special_col else max_n_bins
         kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
-                      max_n_bins=max_n_bins, solver="cp",
+                      max_n_bins=_bins, solver="cp",
                       dtype="numerical" if is_numeric else "categorical")
         if is_numeric:
             kwargs["special_codes"] = list(SPECIAL_VALUES)

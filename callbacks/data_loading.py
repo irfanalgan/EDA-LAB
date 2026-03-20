@@ -320,13 +320,14 @@ def load_data(n_clicks,
     Output("collapse-config", "is_open"),
     Output("dd-target-col", "options"),
     Output("dd-date-col", "options"),
+    Output("dd-sort-col", "options"),
     Output("dd-segment-col", "options"),
     Input("store-key", "data"),
 )
 def open_config_section(key):
     df = _get_df(key)
     if df is None:
-        return False, [], [], []
+        return False, [], [], [], []
 
     all_opts = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in df.columns]
 
@@ -347,7 +348,7 @@ def open_config_section(key):
     ]
     seg_opts = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in seg_cols]
 
-    return True, all_opts, date_opts, seg_opts
+    return True, all_opts, date_opts, all_opts, seg_opts
 
 
 # ── Callback: OOT Tarih Dropdown'ını Doldur ───────────────────────────────────
