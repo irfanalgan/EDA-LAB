@@ -36,6 +36,7 @@ PACKAGES = [
     ("sqlalchemy",              "sqlalchemy",                       None),
     ("shap",                    "shap",                             None),
     ("psutil",                  "psutil",                           None),
+    ("openpyxl",                "openpyxl",                         None),
 ]
 
 # ── Prefix dosyasını oku ──────────────────────────────────────────────────────
