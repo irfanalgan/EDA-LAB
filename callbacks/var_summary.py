@@ -130,7 +130,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
 
         if cik_reasons:
-            return "❌ Çıkar", "; ".join(cik_reasons)
+            return "3 ❌ Çıkar", "; ".join(cik_reasons)
 
         inc_reasons = []
         if iv_val < 0.10:
@@ -145,16 +145,16 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             inc_reasons.append(f"VIF={vif_val:.1f}>5")
 
         if inc_reasons:
-            return "⚠️ İncele", "; ".join(inc_reasons)
+            return "2 ⚠️ İncele", "; ".join(inc_reasons)
 
-        return "✅ Tut", "—"
+        return "1 ✅ Tut", "—"
 
     summary[["Öneri", "Sebep"]] = summary.apply(
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
 
     # Sıralama: Tut > İncele > Çıkar
-    _oneri_order = {"✅ Tut": 0, "⚠️ İncele": 1, "❌ Çıkar": 2}
+    _oneri_order = {"1 ✅ Tut": 0, "2 ⚠️ İncele": 1, "3 ❌ Çıkar": 2}
     summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
     summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
     summary = summary.reset_index(drop=True)
@@ -267,7 +267,7 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
         if psi_val is not None and psi_val > 0.25:
             cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
         if cik_reasons:
-            return "❌ Çıkar", "; ".join(cik_reasons)
+            return "3 ❌ Çıkar", "; ".join(cik_reasons)
         inc_reasons = []
         if iv_val < 0.10:
             inc_reasons.append(f"IV={iv_val:.4f}<0.10")
@@ -280,13 +280,13 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
         if vif_val is not None and vif_val > 5.0:
             inc_reasons.append(f"VIF={vif_val:.1f}>5")
         if inc_reasons:
-            return "⚠️ İncele", "; ".join(inc_reasons)
-        return "✅ Tut", "—"
+            return "2 ⚠️ İncele", "; ".join(inc_reasons)
+        return "1 ✅ Tut", "—"
 
     summary[["Öneri", "Sebep"]] = summary.apply(
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
-    _oneri_order = {"✅ Tut": 0, "⚠️ İncele": 1, "❌ Çıkar": 2}
+    _oneri_order = {"1 ✅ Tut": 0, "2 ⚠️ İncele": 1, "3 ❌ Çıkar": 2}
     summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
     summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
     summary = summary.reset_index(drop=True)
@@ -305,11 +305,11 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
 def _render_var_summary(summary, use_woe):
     """Cache'den veya taze hesaplamadan gelen summary DataFrame'ini HTML'e çevirir."""
     style_conditions = [
-        {"if": {"filter_query": '{Öneri} = "✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
-        {"if": {"filter_query": '{Öneri} = "⚠️ İncele"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
-        {"if": {"filter_query": '{Öneri} = "❌ Çıkar"',  "column_id": "Öneri"}, "color": "#ef4444", "fontWeight": "700"},
-        {"if": {"filter_query": '{Öneri} = "⚠️ İncele"', "column_id": "Sebep"}, "color": "#f59e0b"},
-        {"if": {"filter_query": '{Öneri} = "❌ Çıkar"',  "column_id": "Sebep"}, "color": "#ef4444"},
+        {"if": {"filter_query": '{Öneri} = "1 ✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
+        {"if": {"filter_query": '{Öneri} = "2 ⚠️ İncele"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
+        {"if": {"filter_query": '{Öneri} = "3 ❌ Çıkar"',  "column_id": "Öneri"}, "color": "#ef4444", "fontWeight": "700"},
+        {"if": {"filter_query": '{Öneri} = "2 ⚠️ İncele"', "column_id": "Sebep"}, "color": "#f59e0b"},
+        {"if": {"filter_query": '{Öneri} = "3 ❌ Çıkar"',  "column_id": "Sebep"}, "color": "#ef4444"},
         {"if": {"filter_query": '{PSI Durumu} = "Kritik Kayma"',  "column_id": "PSI Durumu"}, "color": "#ef4444"},
         {"if": {"filter_query": '{PSI Durumu} = "Hafif Kayma"',   "column_id": "PSI Durumu"}, "color": "#f59e0b"},
         {"if": {"filter_query": '{PSI Durumu} = "Stabil"',        "column_id": "PSI Durumu"}, "color": "#10b981"},
@@ -323,9 +323,9 @@ def _render_var_summary(summary, use_woe):
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
     ]
 
-    n_cik = (summary["Öneri"] == "❌ Çıkar").sum()
-    n_inc = (summary["Öneri"] == "⚠️ İncele").sum()
-    n_tut = (summary["Öneri"] == "✅ Tut").sum()
+    n_cik = (summary["Öneri"] == "3 ❌ Çıkar").sum()
+    n_inc = (summary["Öneri"] == "2 ⚠️ İncele").sum()
+    n_tut = (summary["Öneri"] == "1 ✅ Tut").sum()
 
     tsv = summary.to_csv(sep="\t", index=False)
 

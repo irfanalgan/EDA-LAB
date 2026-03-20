@@ -136,6 +136,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         t0 = time.perf_counter()
         passed, screen_report = screen_columns(df_active, target, date_col, seg_col)
         _SERVER_STORE[f"{key}_screen"] = (passed, screen_report)
+        _SERVER_STORE[f"{key}_screen_base"] = (list(passed), screen_report.copy())
         durations["screening"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["screening"] = None
@@ -311,8 +312,9 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     # ── Adım 4: Değişken Özeti tablosu ───────────────────────────────────────
     try:
         t0 = time.perf_counter()
-        from callbacks.var_summary import compute_var_summary_table
+        from callbacks.var_summary import compute_var_summary_table, compute_var_summary_raw
         compute_var_summary_table(cfg, key, seg_col, seg_val)
+        compute_var_summary_raw(cfg, key, seg_col, seg_val)
         durations["var_summary"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["var_summary"] = None

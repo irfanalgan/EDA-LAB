@@ -155,16 +155,24 @@ def _build_screen_report(key, df_active, config, expert_excluded=None,
     date_col    = config.get("date_col")
     segment_col = config.get("segment_col")
 
-    # Precompute cache'den oku — yoksa fallback olarak canlı hesapla
-    cached = _SERVER_STORE.get(f"{key}_screen")
-    if cached:
-        passed, report = cached
+    # Precompute cache'den BASE raporu oku (eşik/uzman elemeleri HARİÇ)
+    cached_base = _SERVER_STORE.get(f"{key}_screen_base")
+    if cached_base:
+        passed, report = cached_base
         passed = list(passed)
         report = report.copy()
     else:
-        passed, report = screen_columns(
-            df_active, target_col, date_col, segment_col
-        )
+        cached = _SERVER_STORE.get(f"{key}_screen")
+        if cached:
+            passed, report = cached
+            passed = list(passed)
+            report = report.copy()
+        else:
+            passed, report = screen_columns(
+                df_active, target_col, date_col, segment_col
+            )
+        # Base raporu ayrı cache'e yaz (eşik/uzman elemeleri olmadan)
+        _SERVER_STORE[f"{key}_screen_base"] = (list(passed), report.copy())
 
     # ── Modüler eşik elemeleri ────────────────────────────────────────────────
     thresholds = thresholds or {}

@@ -231,6 +231,9 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     Output("dd-segment-val", "options", allow_duplicate=True),
     Output("dd-segment-val", "value", allow_duplicate=True),
     Output("collapse-segment", "is_open", allow_duplicate=True),
+    Output("dd-oot-date", "options", allow_duplicate=True),
+    Output("dd-oot-date", "value", allow_duplicate=True),
+    Output("collapse-oot-date", "is_open", allow_duplicate=True),
     Output("profile-status", "children"),
     Output("load-status", "children", allow_duplicate=True),
     Output("collapse-profile-actions", "is_open", allow_duplicate=True),
@@ -254,7 +257,7 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     prevent_initial_call=True,
 )
 def load_profile_cb(_, profile_name):
-    _N_OUTPUTS = 29
+    _N_OUTPUTS = 32
     no = dash.no_update
     if not profile_name:
         return (no,) * _N_OUTPUTS
@@ -263,12 +266,12 @@ def load_profile_cb(_, profile_name):
         new_key, config, expert_exclude, df = _load_profile(profile_name)
     except Exception as e:
         out = [no] * _N_OUTPUTS
-        out[13] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
+        out[16] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
         return tuple(out)
 
     if df is None:
         out = [no] * _N_OUTPUTS
-        out[13] = dbc.Alert("Profilde veri dosyası bulunamadı.", color="danger", style=_ALERT_STYLE)
+        out[16] = dbc.Alert("Profilde veri dosyası bulunamadı.", color="danger", style=_ALERT_STYLE)
         return tuple(out)
 
     # Dropdown seçeneklerini oluştur
@@ -315,6 +318,15 @@ def load_profile_cb(_, profile_name):
         seg_dropdown_val = ["Tümü"]
         seg_open = False
 
+    # OOT tarih dropdown seçenekleri
+    date_col_cfg = config.get("date_col")
+    oot_opts = [{"label": "— opsiyonel —", "value": ""}]
+    if date_col_cfg and date_col_cfg in df.columns:
+        raw_dates = pd.to_datetime(df[date_col_cfg], errors="coerce").dropna()
+        distinct = sorted(raw_dates.dt.to_period("M").unique().astype(str))
+        if distinct:
+            oot_opts += [{"label": d, "value": d} for d in distinct]
+
     # Bağlantı bilgileri
     meta_path = _PROFILES_DIR / profile_name / "meta.json"
     conn = {}
@@ -338,6 +350,9 @@ def load_profile_cb(_, profile_name):
         seg_opts,                                       # dd-segment-val options
         seg_dropdown_val,                               # dd-segment-val value
         seg_open,                                       # collapse-segment is_open
+        oot_opts,                                       # dd-oot-date options
+        config.get("oot_date"),                         # dd-oot-date value
+        bool(config.get("oot_date")),                   # collapse-oot-date is_open
         profile_msg,                                    # profile-status
         load_msg,                                       # load-status
         True,                                           # collapse-profile-actions
