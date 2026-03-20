@@ -498,6 +498,12 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, ke
     if summary.empty:
         return html.Div("Özet tablosu oluşturulamadı.", className="alert-info-custom")
 
+    # Ön eleme (screen) ile filtrele — elenen değişkenleri çıkar
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    if screen_result:
+        passed_set = set(screen_result[0])
+        summary = summary[summary["Değişken"].isin(passed_set)].reset_index(drop=True)
+
     if excluded_set:
         summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
 

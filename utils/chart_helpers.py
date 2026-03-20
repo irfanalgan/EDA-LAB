@@ -181,6 +181,15 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
 
     iv_df = pd.DataFrame(iv_records).sort_values("IV", ascending=False).reset_index(drop=True)
 
+    # Güç etiketi ekle
+    def _iv_label(iv: float) -> str:
+        if iv < 0.02:  return "Çok Zayıf"
+        if iv < 0.10:  return "Zayıf"
+        if iv < 0.30:  return "Orta"
+        if iv < 0.50:  return "Güçlü"
+        return "Şüpheli"
+    iv_df["Güç"] = iv_df["IV"].apply(_iv_label)
+
     return {
         "train_woe": df_train_woe,
         "test_woe": df_test_woe,

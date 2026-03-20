@@ -41,9 +41,10 @@ def toggle_stat_panels(test_type):
     Output("anova-var", "options"), Output("anova-var", "value"),
     Output("ks-var",    "options"), Output("ks-var",    "value"),
     Input("store-config", "data"),
+    Input("store-expert-exclude", "data"),
     State("store-key", "data"),
 )
-def populate_stat_dropdowns(config, key):
+def populate_stat_dropdowns(config, expert_excluded, key):
     empty = ([], None)
     if not config or not key:
         return empty + empty + empty + empty
@@ -53,8 +54,23 @@ def populate_stat_dropdowns(config, key):
     target   = config.get("target_col", "")
     date_col = config.get("date_col", "")
     excl     = {c for c in [target, date_col] if c}
+
+    # Ön eleme (screen) + uzman elemeleri ile filtrele
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    passed_set = set(screen_result[0]) if screen_result else None
+    expert_set = set(expert_excluded or [])
+
     all_cols = [c for c in df_orig.columns if c not in excl]
-    num_cols = [c for c in df_orig.select_dtypes(include=[np.number]).columns if c not in excl]
+    if passed_set is not None:
+        all_cols = [c for c in all_cols if c in passed_set]
+    all_cols = [c for c in all_cols if c not in expert_set]
+
+    num_cols = [c for c in df_orig.select_dtypes(include=[np.number]).columns
+                if c not in excl]
+    if passed_set is not None:
+        num_cols = [c for c in num_cols if c in passed_set]
+    num_cols = [c for c in num_cols if c not in expert_set]
+
     all_opts = [{"label": c, "value": c} for c in all_cols]
     num_opts = [{"label": c, "value": c} for c in num_cols]
     chi_v1 = all_cols[0] if all_cols else None

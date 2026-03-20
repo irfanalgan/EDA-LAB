@@ -25,8 +25,12 @@ def render_outlier_tab(config, expert_excluded, key):
     cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
                              config.get("segment_col")] if c}
     excluded_set = set(expert_excluded or [])
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    passed_set = set(screen_result[0]) if screen_result else None
     num_cols = [c for c in df.select_dtypes(include="number").columns
                 if c not in cfg_cols and c not in excluded_set]
+    if passed_set is not None:
+        num_cols = [c for c in num_cols if c in passed_set]
     if not num_cols:
         return html.Div("Sayısal değişken bulunamadı.", className="alert-info-custom")
 

@@ -37,6 +37,7 @@ PACKAGES = [
     ("shap",                    "shap",                             None),
     ("psutil",                  "psutil",                           None),
     ("openpyxl",                "openpyxl",                         None),
+    ("kaleido",                 "kaleido==0.2.1",                   None),
 ]
 
 # ── Prefix dosyasını oku ──────────────────────────────────────────────────────

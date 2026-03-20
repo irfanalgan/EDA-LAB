@@ -435,7 +435,11 @@ def update_preview(config, expert_excluded, thresholds, key):
     cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
                              config.get("segment_col")] if c}
     excluded_set = set(expert_excluded)
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    passed_set = set(screen_result[0]) if screen_result else None
     available = sorted([c for c in df_orig.columns if c not in cfg_cols and c not in excluded_set])
+    if passed_set is not None:
+        available = [c for c in available if c in passed_set]
     chk_options = [{"label": c, "value": c} for c in available]
 
     current_exclusion_display = html.Div([
