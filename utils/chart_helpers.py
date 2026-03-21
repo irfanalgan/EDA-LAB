@@ -463,6 +463,11 @@ def refit_single_variable(col, new_max_bins, df_train, df_test, df_oot,
         bins_dict[col] = new_edges
     _SERVER_STORE[f"{_pfx}_bins"] = bins_dict
 
+    # 5b2. per-variable bin override
+    pv_bins = _SERVER_STORE.get(f"{_pfx}_pv_bins", {})
+    pv_bins[col] = new_max_bins
+    _SERVER_STORE[f"{_pfx}_pv_bins"] = pv_bins
+
     # 5c. iv_tables
     iv_tables = _SERVER_STORE.get(f"{_pfx}_iv_tables", {})
     iv_tables[col] = bt

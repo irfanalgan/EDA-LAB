@@ -357,8 +357,17 @@ def confirm_config(n_clicks, target_col, date_col, sort_col, oot_date, segment_c
     seg_val = segment_val if segment_val and segment_val != ["Tümü"] and "Tümü" not in (segment_val if isinstance(segment_val, list) else [segment_val]) else None
     config["segment_val"] = seg_val
 
-    # Eski model sonuçlarını temizle
+    # Eski cache'leri temizle — yeniden hesaplansın
     _SERVER_STORE.pop(f"{key}_model_results", None)
+    _pfx = f"{key}_ds_{segment_col or None}_{seg_val}"
+    for _sfx in ("_train", "_test", "_oot", "_train_woe", "_test_woe", "_oot_woe",
+                 "_optb", "_bins", "_iv_tables", "_failed", "_woe_tables",
+                 "_pv_bins", "_psi_map"):
+        _SERVER_STORE.pop(f"{_pfx}{_sfx}", None)
+    # var_summary + iv cache
+    _SERVER_STORE.pop(f"{key}_iv_{segment_col or None}_{seg_val}", None)
+    _SERVER_STORE.pop(f"{key}_varsummary_{segment_col or None}_{seg_val}", None)
+    _SERVER_STORE.pop(f"{key}_summary_{segment_col or None}_{seg_val}", None)
 
     # Background thread başlat — Dash thread'i bloklamaz
     t = threading.Thread(

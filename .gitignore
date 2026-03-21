@@ -46,3 +46,16 @@ profiles/
 
 # Profiling çıktıları
 *.html
+
+# Test dosyaları (yerel)
+test_full.py
+test_scenarios.py
+_test_all.py
+test_results.csv
+
+# Dokümantasyon notları (yerel)
+HESAPLAMA_AKISI.md
+VERI_KAYNAKLARI_NOTU.md
+
+# Claude Code (yerel ayarlar)
+.claude/
