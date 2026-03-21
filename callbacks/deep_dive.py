@@ -103,6 +103,7 @@ def render_deep_dive_shell(config, expert_excluded, key):
         dcc.Store(id="store-dd-config", data={
             "target_col":     config["target_col"],
             "date_col":       config.get("date_col"),
+            "sort_col":       config.get("sort_col"),
             "oot_date":       config.get("oot_date"),
             "has_test_split": config.get("has_test_split", False),
             "test_size":      config.get("test_size", 20),
