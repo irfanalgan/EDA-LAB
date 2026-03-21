@@ -321,6 +321,8 @@ def format_bt(bt_raw, col_name=None, df_train=None, target=None):
         if col_name and df_train is not None and col_name in df_train.columns:
             from modules.deep_dive import SPECIAL_VALUES
             y_tr = pd.to_numeric(df_train[target], errors="coerce")
+            total_bad = int(y_tr.sum())
+            total_good = len(y_tr) - total_bad
             for sv in sorted(SPECIAL_VALUES):
                 sv_mask = df_train[col_name] == sv
                 if not sv_mask.any():
@@ -329,12 +331,20 @@ def format_bt(bt_raw, col_name=None, df_train=None, target=None):
                 n_sv = int(sv_mask.sum())
                 bad_sv = int(y_tr[sv_mask].sum())
                 good_sv = n_sv - bad_sv
-                iv_share = round(sp_iv * (n_sv / sp_n), 4) if sp_n > 0 else 0.0
+                # Her special değer için ayrı WoE ve IV
+                d_b = bad_sv / total_bad if total_bad > 0 else 0
+                d_g = good_sv / total_good if total_good > 0 else 0
+                sv_woe = round(float(np.log(d_b / d_g)), 4) if d_b > 0 and d_g > 0 else 0.0
+                if d_b > 0 and d_g > 0:
+                    _log_val = float(np.log(d_b / d_g))
+                    sv_iv = float(f"{(d_b - d_g) * _log_val:.4f}")
+                else:
+                    sv_iv = 0.0
                 rows.append({
                     "Bin": f"Special ({int(sv)})", "Toplam": n_sv,
                     "Bad": bad_sv, "Good": good_sv,
                     "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
-                    "WOE": sp_woe, "IV Katkı": iv_share,
+                    "WOE": sv_woe, "IV Katkı": sv_iv,
                 })
         if not sv_found:
             r = sr_sp.iloc[0]
@@ -363,7 +373,7 @@ def format_bt(bt_raw, col_name=None, df_train=None, target=None):
         "Bin": "TOPLAM", "Toplam": int(t_n), "Bad": int(t_b),
         "Good": int(result["Good"].sum()),
         "Bad Rate %": round(t_b / t_n * 100, 2) if t_n > 0 else 0.0,
-        "WOE": "", "IV Katkı": round(float(bt_raw.loc["Totals", "IV"]), 4),
+        "WOE": "", "IV Katkı": round(float(result["IV Katkı"].sum()), 4),
     }])
     return pd.concat([result, total_row], ignore_index=True)
 

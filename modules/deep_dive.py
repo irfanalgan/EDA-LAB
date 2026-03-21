@@ -137,10 +137,10 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
         # Train WoE (sabit — tabloda gösterilecek)
         woe = float(train_woe_list[i]) if i < len(train_woe_list) else 0.0
 
-        # IV: kendi verisinin dağılımından → (d_b - d_g) * ln(d_b / d_g)
-        dist_bad = max(bad_i / total_bad, eps) if total_bad > 0 else eps
-        dist_good = max(good_i / total_good, eps) if total_good > 0 else eps
-        iv_part = (dist_bad - dist_good) * np.log(dist_bad / dist_good)
+        # IV: test dağılımı × train WoE → (d_b - d_g) * WoE_train
+        dist_bad = bad_i / total_bad if total_bad > 0 else 0
+        dist_good = good_i / total_good if total_good > 0 else 0
+        iv_part = (dist_bad - dist_good) * woe
         iv_total += iv_part
 
         # Bin label — show_digits=8 ile tutarlı format
@@ -159,7 +159,7 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
             "IV Katkı": round(float(iv_part), 4),
         })
 
-    # Special — her değer ayrı satır, kendi WoE ve IV'ü hesaplanır
+    # Special — her değer ayrı satır, WoE ve IV test dağılımı × kendi WoE
     x_series_sp = pd.Series(X)
     for sv in sorted(SPECIAL_VALUES):
         sv_mask = x_series_sp == sv
@@ -169,10 +169,10 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
         n_sv = int(sv_mask.sum())
         bad_sv = int(y_sv.sum())
         good_sv = n_sv - bad_sv
-        d_b = max(bad_sv / total_bad, eps) if total_bad > 0 else eps
-        d_g = max(good_sv / total_good, eps) if total_good > 0 else eps
-        sv_woe = round(float(np.log(d_b / d_g)), 4)
-        iv_sv = (d_b - d_g) * np.log(d_b / d_g)
+        d_b = bad_sv / total_bad if total_bad > 0 else 0
+        d_g = good_sv / total_good if total_good > 0 else 0
+        sv_woe = round(float(np.log(d_b / d_g)), 4) if d_b > 0 and d_g > 0 else 0.0
+        iv_sv = (d_b - d_g) * sv_woe
         iv_total += iv_sv
         rows.append({
             "Bin": f"Special ({int(sv)})", "Toplam": n_sv, "Bad": bad_sv,
@@ -182,15 +182,15 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
             "IV Katkı": round(float(iv_sv), 4),
         })
 
-    # Missing
+    # Missing — IV: test dağılımı × train WoE
     if missing_mask.any():
         y_ms = y[missing_mask]
         n_ms = int(missing_mask.sum())
         bad_ms = int(y_ms.sum())
         good_ms = n_ms - bad_ms
-        d_b = max(bad_ms / total_bad, eps) if total_bad > 0 else eps
-        d_g = max(good_ms / total_good, eps) if total_good > 0 else eps
-        iv_ms = (d_b - d_g) * np.log(d_b / d_g)
+        d_b = bad_ms / total_bad if total_bad > 0 else 0
+        d_g = good_ms / total_good if total_good > 0 else 0
+        iv_ms = (d_b - d_g) * train_woe_missing
         iv_total += iv_ms
         rows.append({
             "Bin": "Eksik", "Toplam": n_ms, "Bad": bad_ms, "Good": good_ms,
@@ -429,10 +429,10 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
             good  = total - bad
             woe   = woe_ref_map.get(bin_lbl, 0.0)
             woe   = float(woe) if woe != "" else 0.0
-            # IV: kendi dağılımından
-            d_b = max(bad / total_bad, eps) if total_bad > 0 else eps
-            d_g = max(good / total_good, eps) if total_good > 0 else eps
-            iv_part = (d_b - d_g) * np.log(d_b / d_g)
+            # IV: test dağılımı × train WoE
+            d_b = bad / total_bad if total_bad > 0 else 0
+            d_g = good / total_good if total_good > 0 else 0
+            iv_part = (d_b - d_g) * woe
             rows.append({"Bin": bin_lbl, "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
                          "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
@@ -447,9 +447,9 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
                 good  = total - bad
                 woe   = woe_ref_map.get(lbl, 0.0)
                 woe   = float(woe) if woe != "" else 0.0
-                d_b = max(bad / total_bad, eps) if total_bad > 0 else eps
-                d_g = max(good / total_good, eps) if total_good > 0 else eps
-                iv_part = (d_b - d_g) * np.log(d_b / d_g)
+                d_b = bad / total_bad if total_bad > 0 else 0
+                d_g = good / total_good if total_good > 0 else 0
+                iv_part = (d_b - d_g) * woe
                 rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
                              "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
                              "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
@@ -460,9 +460,9 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
             good  = total - bad
             woe   = woe_ref_map.get("Eksik", 0.0)
             woe   = float(woe) if woe != "" else 0.0
-            d_b = max(bad / total_bad, eps) if total_bad > 0 else eps
-            d_g = max(good / total_good, eps) if total_good > 0 else eps
-            iv_part = (d_b - d_g) * np.log(d_b / d_g)
+            d_b = bad / total_bad if total_bad > 0 else 0
+            d_g = good / total_good if total_good > 0 else 0
+            iv_part = (d_b - d_g) * woe
             rows.append({"Bin": "Eksik", "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
                          "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
@@ -478,9 +478,9 @@ def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
             good  = total - bad
             woe   = woe_ref_map.get(lbl, 0.0)
             woe   = float(woe) if woe != "" else 0.0
-            d_b = max(bad / total_bad, eps) if total_bad > 0 else eps
-            d_g = max(good / total_good, eps) if total_good > 0 else eps
-            iv_part = (d_b - d_g) * np.log(d_b / d_g)
+            d_b = bad / total_bad if total_bad > 0 else 0
+            d_g = good / total_good if total_good > 0 else 0
+            iv_part = (d_b - d_g) * woe
             rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
                          "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
                          "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
