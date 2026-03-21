@@ -75,7 +75,8 @@ except Exception:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
+def _build_binning_table_from_edges(optb, X, y, col, is_numeric,
+                                    train_special_woe_map=None):
     """
     Train'in fitted optb'sindeki bin sınırları + WoE değerleriyle
     yeni verinin (test/oot) dağılım tablosunu hesaplar.
@@ -159,7 +160,10 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
             "IV Katkı": round(float(iv_part), 4),
         })
 
-    # Special — her değer ayrı satır, WoE ve IV test dağılımı × kendi WoE
+    # Special — her değer ayrı satır
+    # train_special_woe_map varsa (test/OOT): train WoE kullan
+    # yoksa (train): veriden per-special WoE hesapla
+    _sp_woe_map = train_special_woe_map or {}
     x_series_sp = pd.Series(X)
     for sv in sorted(SPECIAL_VALUES):
         sv_mask = x_series_sp == sv
@@ -171,14 +175,19 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
         good_sv = n_sv - bad_sv
         d_b = bad_sv / total_bad if total_bad > 0 else 0
         d_g = good_sv / total_good if total_good > 0 else 0
-        sv_woe = round(float(np.log(d_b / d_g)), 4) if d_b > 0 and d_g > 0 else 0.0
+        if sv in _sp_woe_map:
+            # Test/OOT: train'den gelen per-special WoE (sabit)
+            sv_woe = float(_sp_woe_map[sv])
+        else:
+            # Train: veriden per-special WoE hesapla
+            sv_woe = round(float(np.log(d_b / d_g)), 4) if d_b > 0 and d_g > 0 else 0.0
         iv_sv = (d_b - d_g) * sv_woe
         iv_total += iv_sv
         rows.append({
             "Bin": f"Special ({int(sv)})", "Toplam": n_sv, "Bad": bad_sv,
             "Good": good_sv,
             "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
-            "WOE": sv_woe,
+            "WOE": round(sv_woe, 4),
             "IV Katkı": round(float(iv_sv), 4),
         })
 
@@ -219,7 +228,8 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
                    max_n_bins: int = 4,
                    force_dtype: str = None,
                    fitted_optb=None,
-                   use_edges: bool = True) -> tuple[pd.DataFrame, float, object, object]:
+                   use_edges: bool = True,
+                   train_special_woe: dict = None) -> tuple[pd.DataFrame, float, object, object]:
     """
     OptimalBinning ile monoton WOE/IV tablosu döndürür.
     Returns: (woe_df, iv_total, bin_edges)
@@ -274,7 +284,8 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
         # fitted_optb + use_edges ise: train'in bin sınırlarıyla yeni verinin tablosunu hesapla
         if fitted_optb is not None and is_numeric and use_edges:
             result, iv_total = _build_binning_table_from_edges(
-                optb, X, y, col, is_numeric)
+                optb, X, y, col, is_numeric,
+                train_special_woe_map=train_special_woe)
             if result.empty:
                 return pd.DataFrame(), 0.0, None, None
             _bin_edges = None
@@ -367,7 +378,7 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
     }])
     result = pd.concat([result, total_row], ignore_index=True)
 
-    # bin_edges from optbinning splits (for PSI and compute_period_badrate)
+    # bin_edges from optbinning splits (for PSI)
     _bin_edges = None
     if is_numeric:
         try:
@@ -378,125 +389,6 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
             pass
 
     return result, iv_total, _bin_edges, optb
-
-
-def compute_period_badrate(df: pd.DataFrame, col: str, target: str,
-                           woe_df: pd.DataFrame, bin_edges) -> tuple:
-    """
-    Train WOE binlerini yeni bir df'ye (test/OOT) uygulayarak her bin için
-    bad rate, WOE (train'den) ve IV Katkı hesaplar.
-
-    Returns (DataFrame, iv_total).
-    DataFrame columns: [Bin, Toplam, Bad, Bad Rate %, WOE, IV Katkı]
-    """
-    local = df[[col, target]].copy()
-    local[target] = pd.to_numeric(local[target], errors="coerce")
-    local = local.dropna(subset=[target])
-    if local.empty:
-        return pd.DataFrame(), 0.0
-
-    is_numeric = pd.api.types.is_numeric_dtype(local[col])
-    eps = 1e-9
-    total_n = len(local)
-    total_bad = int(local[target].sum())
-    total_good = total_n - total_bad
-
-    # Train WOE referansı (TOPLAM hariç)
-    woe_ref_df = woe_df[woe_df["Bin"] != "TOPLAM"].copy()
-    woe_ref_map = dict(zip(woe_ref_df["Bin"], woe_ref_df["WOE"]))
-
-    # Main train bins (excluding TOPLAM, Eksik, Special) — in order
-    main_bins_df = woe_df[
-        ~woe_df["Bin"].isin(["TOPLAM", "Eksik"]) &
-        ~woe_df["Bin"].astype(str).str.startswith("Special", na=False)
-    ].reset_index(drop=True)
-
-    if is_numeric and bin_edges is not None and len(bin_edges) >= 2:
-        special_mask = local[col].isin(SPECIAL_VALUES)
-        special_data = local[special_mask]
-        main_data    = local[~special_mask]
-        present      = main_data[main_data[col].notna()].copy()
-        missing      = main_data[main_data[col].isna()]
-
-        _cut = pd.cut(present[col], bins=bin_edges, include_lowest=False, labels=False)
-        present["bin_idx"] = _cut
-
-        rows = []
-        for i, bin_lbl in enumerate(main_bins_df["Bin"]):
-            grp   = present[present["bin_idx"] == i]
-            total = len(grp)
-            bad   = int(grp[target].sum())
-            good  = total - bad
-            woe   = woe_ref_map.get(bin_lbl, 0.0)
-            woe   = float(woe) if woe != "" else 0.0
-            # IV: test dağılımı × train WoE
-            d_b = bad / total_bad if total_bad > 0 else 0
-            d_g = good / total_good if total_good > 0 else 0
-            iv_part = (d_b - d_g) * woe
-            rows.append({"Bin": bin_lbl, "Toplam": total, "Bad": bad,
-                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
-                         "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
-
-        # Special bins
-        for sv in SPECIAL_VALUES:
-            sv_grp = special_data[special_data[col] == sv]
-            if len(sv_grp):
-                lbl   = f"Special ({int(sv)})"
-                total = len(sv_grp)
-                bad   = int(sv_grp[target].sum())
-                good  = total - bad
-                woe   = woe_ref_map.get(lbl, 0.0)
-                woe   = float(woe) if woe != "" else 0.0
-                d_b = bad / total_bad if total_bad > 0 else 0
-                d_g = good / total_good if total_good > 0 else 0
-                iv_part = (d_b - d_g) * woe
-                rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
-                             "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
-                             "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
-        # Eksik bin
-        if len(missing):
-            total = len(missing)
-            bad   = int(missing[target].sum())
-            good  = total - bad
-            woe   = woe_ref_map.get("Eksik", 0.0)
-            woe   = float(woe) if woe != "" else 0.0
-            d_b = bad / total_bad if total_bad > 0 else 0
-            d_g = good / total_good if total_good > 0 else 0
-            iv_part = (d_b - d_g) * woe
-            rows.append({"Bin": "Eksik", "Toplam": total, "Bad": bad,
-                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
-                         "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
-    else:
-        # Kategorik: eşleştirme değer adına göre
-        local["bin_label"] = local[col].fillna("Eksik").astype(str)
-        all_train_bins = woe_df[woe_df["Bin"] != "TOPLAM"]["Bin"].tolist()
-        rows = []
-        for lbl in all_train_bins:
-            grp   = local[local["bin_label"] == lbl]
-            total = len(grp)
-            bad   = int(grp[target].sum())
-            good  = total - bad
-            woe   = woe_ref_map.get(lbl, 0.0)
-            woe   = float(woe) if woe != "" else 0.0
-            d_b = bad / total_bad if total_bad > 0 else 0
-            d_g = good / total_good if total_good > 0 else 0
-            iv_part = (d_b - d_g) * woe
-            rows.append({"Bin": lbl, "Toplam": total, "Bad": bad,
-                         "Bad Rate %": round(bad / total * 100, 2) if total > 0 else 0.0,
-                         "WOE": round(woe, 4), "IV Katkı": round(float(iv_part), 4)})
-
-    result = pd.DataFrame(rows)
-    if result.empty:
-        return result, 0.0
-    iv_total = float(result["IV Katkı"].sum())
-    total_all = result["Toplam"].sum()
-    total_bad_r = result["Bad"].sum()
-    total_row = pd.DataFrame([{
-        "Bin": "TOPLAM", "Toplam": int(total_all), "Bad": int(total_bad_r),
-        "Bad Rate %": round(total_bad_r / total_all * 100, 2) if total_all > 0 else 0.0,
-        "WOE": "", "IV Katkı": round(iv_total, 4),
-    }])
-    return pd.concat([result, total_row], ignore_index=True), round(iv_total, 4)
 
 
 def compute_iv_ranking_optimal(df: pd.DataFrame, target: str,

@@ -6,8 +6,7 @@ import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
-from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import build_woe_datasets, calc_psi, psi_label
+from utils.chart_helpers import calc_psi, psi_label
 from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
 
 
@@ -486,33 +485,11 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, ke
     use_woe      = (vs_tab == "vs-tab-woe")
     excluded_set = set(expert_excluded or [])
 
-    # Cache yoksa: 6 DataFrame yoksa oluştur
+    # Precompute tamamlanmamışsa bekle — bağımsız hesaplama YAPMA
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
     if f"{_pfx}_train" not in _SERVER_STORE:
-        df_orig = _get_df(key)
-        if df_orig is None:
-            return html.Div("Veri yüklenmemiş.", className="alert-info-custom")
-        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-        target = config["target_col"]
-        date_col = config.get("date_col")
-
-        df_train, df_test, df_oot = get_splits(df_active, config)
-        _SERVER_STORE[f"{_pfx}_train"] = df_train
-        _SERVER_STORE[f"{_pfx}_test"]  = df_test
-        _SERVER_STORE[f"{_pfx}_oot"]   = df_oot
-
-        var_list = [c for c in df_train.columns if c != target
-                    and c != date_col and c != seg_col]
-        _max_bins = int(config.get("max_bins", 4))
-        woe_result = build_woe_datasets(df_train, df_test, df_oot, target, var_list, max_bins=_max_bins)
-        _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
-        _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
-        _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]
-        _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = woe_result["iv_df"]
-        _SERVER_STORE[f"{_pfx}_optb"]      = woe_result["optb_dict"]
-        _SERVER_STORE[f"{_pfx}_bins"]      = woe_result["bins_dict"]
-        _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
-        _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
+        return html.Div("Hesaplama devam ediyor, lütfen bekleyin...",
+                         className="alert-info-custom")
 
     if use_woe:
         # WoE tab: mevcut hesaplama (cache'den veya taze)

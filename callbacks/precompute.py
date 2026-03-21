@@ -4,17 +4,16 @@ import time
 import dash
 from dash import html, Input, Output, State
 import dash_bootstrap_components as dbc
-import numpy as np
 import pandas as pd
 
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df, clear_store
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import build_woe_datasets, format_bt, mono_check
+from utils.chart_helpers import build_woe_datasets, mono_check
 from modules.profiling import compute_profile
 from modules.correlation import compute_correlation_matrix
 from modules.screening import screen_columns
-from modules.deep_dive import get_woe_detail, _build_binning_table_from_edges
+from modules.deep_dive import get_woe_detail
 
 
 # ── Precompute yardımcıları ───────────────────────────────────────────────────
@@ -180,16 +179,14 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
         _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
         _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]
-        _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"]  = woe_result["iv_df"]
         _SERVER_STORE[f"{_pfx}_optb"]      = woe_result["optb_dict"]
         _SERVER_STORE[f"{_pfx}_bins"]      = woe_result["bins_dict"]
         _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
         _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
+        eksik_map = woe_result["eksik_map"]
 
-        # ── WoE dağılım tabloları (train/test/oot) — tek seferlik ──────────────
+        # ── WoE dağılım tabloları (train/test/oot) — TEK KAYNAK: get_woe_detail ──
         optb_dict = woe_result["optb_dict"]
-        _iv_tables_raw = woe_result["iv_tables"]   # {col: optbinning bt DataFrame}
-        iv_df = woe_result["iv_df"]
         woe_tables = {}
 
         for var in var_list:
@@ -197,26 +194,36 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
             if _optb is None:
                 continue
             try:
-                # Train tablosu: iv_tables'tan doğrudan formatla (tekrar build() yok)
-                bt_raw = _iv_tables_raw.get(var)
-                if bt_raw is None or bt_raw.empty:
-                    continue
-                bt_train = format_bt(bt_raw, col_name=var, df_train=df_train, target=target)
+                # Train tablosu: get_woe_detail (TEK KAYNAK)
+                # use_edges=False → OptBinning'in kendi binning_table'ını kullanır
+                # (doğru IV, her bin katkısı ≥ 0)
+                bt_train, iv_train, _, _ = get_woe_detail(
+                    df_train, var, target, fitted_optb=_optb,
+                    use_edges=False)
                 if bt_train.empty:
                     continue
-                iv_train = float(bt_raw.loc["Totals", "IV"])
+
+                # Train'den per-special WoE map çıkar (test/OOT için)
+                _sp_woe_map = {}
+                for _, _r in bt_train.iterrows():
+                    _bin_str = str(_r["Bin"])
+                    if _bin_str.startswith("Special ("):
+                        _sv = int(_bin_str.replace("Special (", "").replace(")", ""))
+                        _sp_woe_map[_sv] = _r["WOE"]
 
                 entry = {
                     "train_table": bt_train.to_dict("records"),
                     "iv_train": round(iv_train, 4),
                     "monoton": mono_check(bt_train),
+                    "train_special_woe": _sp_woe_map,
                 }
 
                 # Test tablosu
                 if df_test is not None and len(df_test) > 0:
                     try:
                         bt_test, iv_test, _, _ = get_woe_detail(
-                            df_test, var, target, fitted_optb=_optb, use_edges=True)
+                            df_test, var, target, fitted_optb=_optb,
+                            use_edges=True, train_special_woe=_sp_woe_map)
                         if not bt_test.empty:
                             entry["test_table"] = bt_test.to_dict("records")
                             entry["iv_test"] = round(iv_test, 4)
@@ -228,7 +235,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 if df_oot is not None and len(df_oot) > 0:
                     try:
                         bt_oot, iv_oot, _, _ = get_woe_detail(
-                            df_oot, var, target, fitted_optb=_optb, use_edges=True)
+                            df_oot, var, target, fitted_optb=_optb,
+                            use_edges=True, train_special_woe=_sp_woe_map)
                         if not bt_oot.empty:
                             entry["oot_table"] = bt_oot.to_dict("records")
                             entry["iv_oot"] = round(iv_oot, 4)
@@ -240,6 +248,32 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
             except Exception:
                 continue
         _SERVER_STORE[f"{_pfx}_woe_tables"] = woe_tables
+
+        # ── iv_df: woe_tables'dan türet (TEK KAYNAK) ─────────────────────────
+        def _iv_label(iv_val):
+            if iv_val < 0.02:  return "Çok Zayıf"
+            if iv_val < 0.10:  return "Zayıf"
+            if iv_val < 0.30:  return "Orta"
+            if iv_val < 0.50:  return "Güçlü"
+            return "Şüpheli"
+
+        iv_records = []
+        for _v, _e in woe_tables.items():
+            iv_records.append({
+                "Değişken": _v,
+                "IV": _e["iv_train"],
+                "Eksik %": eksik_map.get(_v, 0.0),
+            })
+        # Failed vars da ekle (IV=0)
+        for _fv in woe_result["failed"]:
+            iv_records.append({
+                "Değişken": _fv,
+                "IV": 0.0,
+                "Eksik %": eksik_map.get(_fv, 0.0),
+            })
+        iv_df = pd.DataFrame(iv_records).sort_values("IV", ascending=False).reset_index(drop=True)
+        iv_df["Güç"] = iv_df["IV"].apply(_iv_label)
+        _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = iv_df
 
         durations["iv_ranking"] = round(time.perf_counter() - t0, 1)
     except Exception:

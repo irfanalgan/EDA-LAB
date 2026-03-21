@@ -8,7 +8,7 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, calc_psi as _calc_psi, psi_label as _psi_label
-from modules.deep_dive import get_variable_stats, get_woe_detail, compute_period_badrate
+from modules.deep_dive import get_variable_stats, get_woe_detail
 from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
                                   check_variable_stats, check_train_size)
 
@@ -153,18 +153,24 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
 
     vstats = get_variable_stats(df_active, col, target)
 
-    _global_bins = int(dd_config.get("max_bins", 4))
+    _max_bins = int(dd_config.get("max_bins", 4))
     _force_dtype = dtype_override if dtype_override and dtype_override != "auto" else None
     _is_woe_tab  = (active_data_tab != "dd-tab-raw")
 
-    # Per-variable bin override varsa onu kullan
     _pfx_bins = f"{dd_config['key']}_ds_{seg_col}_{seg_val}"
-    _pv_bins = _SERVER_STORE.get(f"{_pfx_bins}_pv_bins", {})
-    _max_bins = int(_pv_bins.get(col, _global_bins))
 
-    # WOE — sadece train üzerinden
-    woe_df, iv_total_dd, woe_bin_edges, _ = get_woe_detail(
-        df_train, col, target, _max_bins, force_dtype=_force_dtype)
+    # WOE — cache'den oku, yoksa veya dtype override varsa hesapla
+    _woe_tables = _SERVER_STORE.get(f"{_pfx_bins}_woe_tables", {})
+    _cached_entry = _woe_tables.get(col)
+    if _cached_entry and not _force_dtype:
+        woe_df = pd.DataFrame(_cached_entry["train_table"])
+        iv_total_dd = _cached_entry.get("iv_train", 0.0)
+        # bin_edges cache'den
+        _bins_dict = _SERVER_STORE.get(f"{_pfx_bins}_bins", {})
+        woe_bin_edges = _bins_dict.get(col)
+    else:
+        woe_df, iv_total_dd, woe_bin_edges, _ = get_woe_detail(
+            df_train, col, target, _max_bins, force_dtype=_force_dtype)
 
     # PSI — TEK KAYNAK: calc_psi (train vs OOT)
     # WoE tab → discrete=True (her unique WoE değeri bir bin)
@@ -481,9 +487,25 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
                 table_df = ref_woe_df.copy()
                 _period_iv = iv_total
             else:
-                # Test / OOT: train bin edges ile bad rate + WOE + IV Katkı
-                p_df, _period_iv = compute_period_badrate(
-                    period_df, col, target, ref_woe_df, ref_bin_edges)
+                # Test / OOT: cache'den oku, yoksa get_woe_detail ile hesapla
+                _wt = _SERVER_STORE.get(f"{_pfx_bins}_woe_tables", {}).get(col, {})
+                _period_key = "test_table" if period_label == "Test" else "oot_table"
+                _iv_key = "iv_test" if period_label == "Test" else "iv_oot"
+                _cached_period = _wt.get(_period_key)
+                if _cached_period and not _force_dtype:
+                    p_df = pd.DataFrame(_cached_period)
+                    _period_iv = _wt.get(_iv_key, 0.0)
+                else:
+                    _optb_dict = _SERVER_STORE.get(f"{_pfx_bins}_optb", {})
+                    _optb = _optb_dict.get(col)
+                    if _optb is not None:
+                        _sp_woe = _wt.get("train_special_woe", {})
+                        p_df, _period_iv, _, _ = get_woe_detail(
+                            period_df, col, target, fitted_optb=_optb,
+                            use_edges=True, train_special_woe=_sp_woe)
+                    else:
+                        p_df = pd.DataFrame()
+                        _period_iv = 0.0
                 if isinstance(p_df, pd.DataFrame) and p_df.empty:
                     return None
                 chart_df = p_df[p_df["Bin"] != "TOPLAM"].copy()
@@ -666,54 +688,9 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
             ], style={"marginTop": "0.5rem"}),
         ], className="mb-4")
 
-    # ── Bin Ayar Paneli (sadece WoE tab) ────────────────────────────────────
-    bin_panel = html.Div()
-    if _is_woe_tab and not woe_df.empty:
-        _pfx = f"{dd_config['key']}_ds_{seg_col}_{seg_val}"
-        _bins_dict = _SERVER_STORE.get(f"{_pfx}_bins", {})
-        if col in _bins_dict:
-            _current_bins = len(_bins_dict[col]) - 1
-        else:
-            _current_bins = len(woe_df[~woe_df["Bin"].isin(
-                ["TOPLAM", "Eksik", "Special"])]) if "Bin" in woe_df.columns else _max_bins
-
-        bin_panel = html.Div([
-            html.Hr(style={"borderColor": "#2d3a4f", "margin": "0.3rem 0 0.8rem"}),
-            html.Div("Bin Sayısı Ayarı", style={
-                "color": "#a78bfa", "fontSize": "0.82rem", "fontWeight": "600",
-                "marginBottom": "0.5rem"}),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Label("Mevcut Bin", style={"fontSize": "0.75rem", "color": "#7e8fa4"}),
-                    html.Div(str(_current_bins),
-                             style={"fontSize": "0.95rem", "color": "#d1d5db",
-                                    "padding": "0.35rem 0"}),
-                ], width=2),
-                dbc.Col([
-                    dbc.Label("Yeni Bin", style={"fontSize": "0.75rem", "color": "#7e8fa4"}),
-                    dbc.Input(id="dd-bin-new-input", type="number",
-                              min=2, max=20, step=1, value=_current_bins,
-                              style={"maxWidth": "90px", "fontSize": "0.82rem"}),
-                ], width=2),
-                dbc.Col([
-                    html.Div(style={"height": "1.3rem"}),
-                    dbc.Button("Uygula", id="dd-bin-apply-btn", color="primary",
-                               size="sm", style={"fontSize": "0.78rem"}),
-                ], width=2),
-                dbc.Col([
-                    html.Div(id="dd-bin-result-msg", style={
-                        "fontSize": "0.78rem", "paddingTop": "1.8rem",
-                        "color": "#7e8fa4"}),
-                ], width=6),
-            ], className="align-items-start"),
-        ], style={"marginTop": "0"})
-
     sections = [
         hint_section,
     ]
-    # Bin paneli — WoE tab'da en üstte, özet istatistiklerden önce
-    if _is_woe_tab:
-        sections.append(bin_panel)
     sections.extend([
         html.P("Özet İstatistikler", className="section-title"),
         stats_row,
@@ -729,62 +706,3 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
     return html.Div(sections)
 
 
-# ── Callback: Bin Uygula (Deep Dive) ─────────────────────────────────────────
-import dash
-
-@app.callback(
-    Output("dd-bin-result-msg", "children"),
-    Output("deep-dive-content", "children", allow_duplicate=True),
-    Input("dd-bin-apply-btn", "n_clicks"),
-    State("dd-bin-new-input", "value"),
-    State("dd-deepdive-col", "value"),
-    State("dd-psi-split", "value"),
-    State("dd-dtype-override", "value"),
-    State("dd-data-tab", "active_tab"),
-    State("store-dd-config", "data"),
-    prevent_initial_call=True,
-)
-def apply_dd_bin_change(n_clicks, new_bins, col, psi_split, dtype_override,
-                        active_data_tab, dd_config):
-    if not n_clicks or not col or not new_bins or not dd_config:
-        return dash.no_update, dash.no_update
-
-    new_bins = int(new_bins)
-    if new_bins < 2 or new_bins > 20:
-        return html.Span("Bin sayısı 2–20 arasında olmalı.",
-                         style={"color": "#ef4444"}), dash.no_update
-
-    seg_col = dd_config.get("seg_col")
-    seg_val = dd_config.get("seg_val")
-    target  = dd_config["target_col"]
-    key     = dd_config["key"]
-    _pfx    = f"{key}_ds_{seg_col}_{seg_val}"
-
-    df_train = _SERVER_STORE.get(f"{_pfx}_train")
-    df_test  = _SERVER_STORE.get(f"{_pfx}_test")
-    df_oot   = _SERVER_STORE.get(f"{_pfx}_oot")
-
-    if df_train is None:
-        return html.Span("Train verisi bulunamadı.",
-                         style={"color": "#ef4444"}), dash.no_update
-
-    try:
-        from utils.chart_helpers import refit_single_variable
-        new_iv, actual_bins, old_iv = refit_single_variable(
-            col, new_bins, df_train, df_test, df_oot,
-            target, key, seg_col, seg_val)
-
-        old_iv_str = f"{old_iv:.4f}" if old_iv is not None else "?"
-        msg = html.Span(
-            f"✓ {col}: IV {old_iv_str} → {new_iv:.4f}, "
-            f"bin: {actual_bins} (istenen: {new_bins})",
-            style={"color": "#10b981"})
-
-        # Deep dive'ı yeniden render et
-        new_content = render_deep_dive_content(
-            col, psi_split, dtype_override, active_data_tab, dd_config)
-        return msg, new_content
-
-    except Exception as e:
-        return html.Span(f"Hata: {str(e)}",
-                         style={"color": "#ef4444"}), dash.no_update
