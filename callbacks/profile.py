@@ -12,7 +12,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 
 from app_instance import app
-from server_state import _SERVER_STORE
+from server_state import _SERVER_STORE, clear_store
 
 _PROFILES_DIR = Path(__file__).parent.parent / "profiles"
 _PROFILES_DIR.mkdir(exist_ok=True)
@@ -103,6 +103,8 @@ def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
             df = pd.read_parquet(parquet_path)
         except Exception:
             pass
+    clear_store()
+
     if df is not None:
         _SERVER_STORE[new_key] = df
 

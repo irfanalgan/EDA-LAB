@@ -1,6 +1,9 @@
+import logging
 import pandas as pd
 import numpy as np
 from scipy import stats as scipy_stats
+
+logger = logging.getLogger(__name__)
 
 SPECIAL_VALUES = {9999999999, 8888888888}
 
@@ -50,7 +53,8 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
     try:
         train_bt = optb.binning_table.build(show_digits=8)
         splits = list(optb.splits) if hasattr(optb, "splits") and optb.splits is not None else []
-    except Exception:
+    except Exception as e:
+        logger.debug("binning_table build failed for %s: %s", col, e)
         return pd.DataFrame(), 0.0
 
     if not splits and is_numeric:
@@ -122,7 +126,7 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
             "IV Katkı": round(float(iv_part), 4),
         })
 
-    # Special — her değer ayrı satır
+    # Special — her değer ayrı satır, kendi WoE ve IV'ü hesaplanır
     x_series_sp = pd.Series(X)
     for sv in sorted(SPECIAL_VALUES):
         sv_mask = x_series_sp == sv
@@ -134,13 +138,14 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric):
         good_sv = n_sv - bad_sv
         d_b = max(bad_sv / total_bad, eps) if total_bad > 0 else eps
         d_g = max(good_sv / total_good, eps) if total_good > 0 else eps
+        sv_woe = round(float(np.log(d_b / d_g)), 4)
         iv_sv = (d_b - d_g) * np.log(d_b / d_g)
         iv_total += iv_sv
         rows.append({
             "Bin": f"Special ({int(sv)})", "Toplam": n_sv, "Bad": bad_sv,
             "Good": good_sv,
             "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
-            "WOE": round(train_woe_special, 4),
+            "WOE": sv_woe,
             "IV Katkı": round(float(iv_sv), 4),
         })
 
@@ -250,7 +255,8 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
 
         bt = optb.binning_table.build(show_digits=8)
         iv_total = float(bt.loc["Totals", "IV"])
-    except Exception:
+    except Exception as e:
+        logger.debug("OptBinning fit/build failed for %s: %s", col, e)
         return pd.DataFrame(), 0.0, None, None
 
     # Main bins: non-empty Bin string, not "Special" or "Missing"
@@ -268,14 +274,10 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
         rows.append({"Bin": str(row["Bin"]), "Toplam": total, "Bad": bad,
                      "Good": good, "Bad Rate %": bad_rate, "WOE": woe, "IV Katkı": iv_part})
 
-    # Special — her değer ayrı satır
+    # Special — her değer ayrı satır, kendi WoE ve IV'ü hesaplanır
     sr_special = bt[bt["Bin"] == "Special"]
     if not sr_special.empty and int(sr_special.iloc[0]["Count"]) > 0:
-        sp_woe = round(float(sr_special.iloc[0]["WoE"]), 4)
-        sp_iv  = float(sr_special.iloc[0]["IV"])
         x_series = pd.Series(X)
-        sp_total_n = int(sr_special.iloc[0]["Count"])
-        sp_total_bad = int(sr_special.iloc[0]["Event"])
         sv_count = 0
         for sv in sorted(SPECIAL_VALUES):
             sv_mask = x_series == sv
@@ -285,19 +287,28 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
             n_sv = int(sv_mask.sum())
             bad_sv = int(y[sv_mask.values].sum())
             good_sv = n_sv - bad_sv
-            # IV katkısını orantılı dağıt
-            iv_share = round(sp_iv * (n_sv / sp_total_n), 4) if sp_total_n > 0 else 0.0
+            # Her special değerin kendi WoE ve IV katkısını hesapla
+            d_b = bad_sv / total_bad if total_bad > 0 else 0
+            d_g = good_sv / total_good if total_good > 0 else 0
+            if d_b > 0 and d_g > 0:
+                sv_woe = round(np.log(d_b / d_g), 4)
+                sv_iv = round((d_b - d_g) * np.log(d_b / d_g), 4)
+            else:
+                sv_woe = 0.0
+                sv_iv = 0.0
             rows.append({"Bin": f"Special ({int(sv)})", "Toplam": n_sv,
                          "Bad": bad_sv, "Good": good_sv,
                          "Bad Rate %": round(bad_sv / n_sv * 100, 2) if n_sv > 0 else 0.0,
-                         "WOE": sp_woe, "IV Katkı": iv_share})
+                         "WOE": sv_woe, "IV Katkı": sv_iv})
         # Hiçbir special value ayrı bulunamadıysa orijinal satırı koy
         if sv_count == 0:
             r = sr_special.iloc[0]
+            sp_woe = round(float(r["WoE"]), 4)
+            sp_iv = round(float(r["IV"]), 4)
             rows.append({"Bin": "Special", "Toplam": int(r["Count"]),
                          "Bad": int(r["Event"]), "Good": int(r["Non-event"]),
                          "Bad Rate %": round(float(r["Event rate"]) * 100, 2),
-                         "WOE": sp_woe, "IV Katkı": round(sp_iv, 4)})
+                         "WOE": sp_woe, "IV Katkı": sp_iv})
     # Missing
     sr_missing = bt[bt["Bin"] == "Missing"]
     if not sr_missing.empty and int(sr_missing.iloc[0]["Count"]) > 0:
@@ -469,7 +480,8 @@ def compute_iv_ranking_optimal(df: pd.DataFrame, target: str,
                 "Eksik %":  round(df[col].isna().mean() * 100, 2),
                 "Güç":      _iv_label(iv),
             })
-        except Exception:
+        except Exception as e:
+            logger.debug("IV ranking failed for %s: %s", col, e)
             records.append({"Değişken": col, "IV": 0.0,
                              "Eksik %": 0.0, "Güç": "Çok Zayıf"})
 

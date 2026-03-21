@@ -8,7 +8,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 
 from app_instance import app
-from server_state import _SERVER_STORE, get_df as _get_df
+from server_state import _SERVER_STORE, get_df as _get_df, clear_store
 from data.loader import get_data_from_sql, get_data_from_sql_multi, get_config_defaults
 from utils.helpers import coerce_numeric_columns
 
@@ -226,6 +226,7 @@ def load_csv(n_clicks,
 
         result, converted = coerce_numeric_columns(result)
         key = str(uuid.uuid4())
+        clear_store()
         _SERVER_STORE[key] = result
         _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
 
@@ -306,6 +307,7 @@ def load_data(n_clicks,
         top_note = "  ·  TOP 1000" if top_n else ""
         df, converted = coerce_numeric_columns(df)
         key = str(uuid.uuid4())
+        clear_store()
         _SERVER_STORE[key] = df
         _SERVER_STORE[f"{key}_quality"] = {"converted": converted}
         conv_note = f"  ·  {len(converted)} kolon numerik dönüştürüldü" if converted else ""
