@@ -11,6 +11,39 @@ SPECIAL_VALUES = {9999999999, 8888888888}
 _SPECIAL_RATIO_THRESHOLD = 0.02
 
 
+def calc_total_iv(bt, X, y) -> float:
+    """OptimalBinning bt'den toplam IV hesapla — special değerleri ayrıştırarak.
+    Tüm IV hesaplamaları bu fonksiyonu kullanmalı.
+    """
+    total_bad = int(np.asarray(y).sum())
+    total_good = len(y) - total_bad
+    if total_bad == 0 or total_good == 0:
+        return 0.0
+
+    iv = 0.0
+    # Normal bin'ler + Missing → OptimalBinning'in IV'leri doğru
+    for _, row in bt.iterrows():
+        bin_name = str(row["Bin"])
+        if bin_name in ("Special", "Totals", ""):
+            continue
+        iv += float(row["IV"])
+
+    # Special → her değer için ayrı IV hesapla
+    x_series = pd.Series(X)
+    for sv in SPECIAL_VALUES:
+        sv_mask = x_series == sv
+        if not sv_mask.any():
+            continue
+        bad_sv = int(np.asarray(y)[sv_mask.values].sum())
+        good_sv = int(sv_mask.sum()) - bad_sv
+        d_b = bad_sv / total_bad if total_bad > 0 else 0
+        d_g = good_sv / total_good if total_good > 0 else 0
+        if d_b > 0 and d_g > 0:
+            iv += (d_b - d_g) * np.log(d_b / d_g)
+
+    return round(iv, 4)
+
+
 def is_special_column(series: "pd.Series") -> bool:
     """Kolonda SPECIAL_VALUES var mı ve oranı >= %2 mi?"""
     mask = series.isin(SPECIAL_VALUES)
@@ -254,7 +287,7 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
             return result, iv_total, _bin_edges, optb
 
         bt = optb.binning_table.build(show_digits=8)
-        iv_total = float(bt.loc["Totals", "IV"])
+        iv_total = calc_total_iv(bt, X, y)
     except Exception as e:
         logger.debug("OptBinning fit/build failed for %s: %s", col, e)
         return pd.DataFrame(), 0.0, None, None
@@ -325,6 +358,7 @@ def get_woe_detail(df: pd.DataFrame, col: str, target: str,
     result = pd.DataFrame(rows)
     total_all_n = result["Toplam"].sum()
     total_bad_n = result["Bad"].sum()
+    iv_total = float(result["IV Katkı"].sum())
     total_row = pd.DataFrame([{
         "Bin": "TOPLAM", "Toplam": int(total_all_n), "Bad": int(total_bad_n),
         "Good": int(result["Good"].sum()),

@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
-from modules.deep_dive import get_woe_encoder
+from modules.deep_dive import get_woe_encoder, calc_total_iv
 
 
 # ── Tab açıklama kutusu yardımcısı ────────────────────────────────────────────
@@ -134,9 +134,9 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
             optb = _OB(**kwargs)
             optb.fit(_local[col].values, _local[target].values)
 
-            # IV table + IV value
+            # IV table + IV value (special değerler ayrıştırılarak)
             bt = optb.binning_table.build(show_digits=8)
-            iv = float(bt.loc["Totals", "IV"])
+            iv = calc_total_iv(bt, _local[col].values, _local[target].values)
             iv_tables[col] = bt
             optb_dict[col] = optb
 
@@ -418,9 +418,10 @@ def refit_single_variable(col, new_max_bins, df_train, df_test, df_oot,
     optb = _OB(**kwargs)
     optb.fit(_local[col].values, _local[target].values)
 
-    # ── 2. Binning table + IV ────────────────────────────────────────────────
+    # ── 2. Binning table + IV (special değerler ayrıştırılarak) ──────────────
     bt = optb.binning_table.build(show_digits=8)
-    new_iv = float(bt.loc["Totals", "IV"])
+    _local_refit = df_train.loc[df_train[target].notna(), [col, target]]
+    new_iv = calc_total_iv(bt, _local_refit[col].values, _local_refit[target].astype(int).values)
 
     # ── 3. Bin edges ─────────────────────────────────────────────────────────
     new_edges = None
