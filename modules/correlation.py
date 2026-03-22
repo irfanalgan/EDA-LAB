@@ -54,19 +54,15 @@ def find_high_corr_pairs(corr_df: pd.DataFrame,
 # ── VIF ───────────────────────────────────────────────────────────────────────
 
 def compute_vif(df: pd.DataFrame,
-                cols: list[str],
-                sample_size: int = 50_000) -> pd.DataFrame:
+                cols: list[str]) -> pd.DataFrame:
     """
-    Her kolon için VIF hesaplar (numpy lstsq, bağımlılık yok).
+    Her kolon için VIF hesaplar (numpy lstsq).
     VIF_i = 1 / (1 - R²_i),  R²_i: col_i'nin diğer kolonlara regresyonu.
     Eşikler:  < 5 Normal  |  5–10 Orta  |  > 10 Yüksek
     """
     local = df[cols].dropna()
     if len(local) < len(cols) + 2:
         return pd.DataFrame()
-
-    if len(local) > sample_size:
-        local = local.sample(n=sample_size, random_state=42)
 
     X = local.values.astype(float)
     n, k = X.shape

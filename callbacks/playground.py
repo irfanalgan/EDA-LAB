@@ -299,9 +299,10 @@ def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
     Input("store-config", "data"),
     Input("store-expert-exclude", "data"),
     Input("main-tabs", "active_tab"),
+    Input("interval-precompute", "disabled"),
     State("store-key", "data"),
 )
-def render_pg_var_summary_preview(config, expert_excluded, active_tab, key):
+def render_pg_var_summary_preview(config, expert_excluded, active_tab, _precompute_done, key):
     if not key or not config or not config.get("target_col"):
         return html.Div()
     seg_col = config.get("segment_col")

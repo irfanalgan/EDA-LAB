@@ -96,11 +96,13 @@ def calc_psi(base: np.ndarray, comp: np.ndarray,
             return {"psi": float(psi), "rows": rows}
         return float(psi)
     else:
-        # ── Ham değerler: linspace binning ─────────────────────────────────
-        mn, mx = float(base.min()), float(base.max())
-        if mn == mx:
+        # ── Ham değerler: quantile binning (çarpık veriye dayanıklı) ────────
+        if len(base) == 0:
             return {"psi": 0.0, "rows": []} if detail else 0.0
-        bins = np.linspace(mn, mx, n_bins + 1)
+        quantiles = np.linspace(0, 100, n_bins + 1)
+        bins = np.unique(np.percentile(base, quantiles))
+        if len(bins) < 2:
+            return {"psi": 0.0, "rows": []} if detail else 0.0
         bins[0] = -np.inf
         bins[-1] = np.inf
         b_hist = np.histogram(base, bins=bins)[0]

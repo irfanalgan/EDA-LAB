@@ -470,11 +470,12 @@ def _render_var_summary(summary, use_woe):
     Input("store-expert-exclude", "data"),
     Input("main-tabs", "active_tab"),
     Input("varsummary-data-tab", "active_tab"),
+    Input("interval-precompute", "disabled"),
     State("store-key", "data"),
     State("chk-varsummary-woe", "value"),
     prevent_initial_call=True,
 )
-def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, key, woe_toggle):
+def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _precompute_done, key, woe_toggle):
     if active_tab != "tab-var-summary":
         return dash.no_update
     if not key or not config or not config.get("target_col"):

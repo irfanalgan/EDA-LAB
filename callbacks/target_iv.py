@@ -72,9 +72,10 @@ def _render_trend_chart(df_plot, target, date_col, period_label):
     Output("tab-target-iv", "children"),
     Input("store-config", "data"),
     Input("store-expert-exclude", "data"),
+    Input("interval-precompute", "disabled"),
     State("store-key", "data"),
 )
-def update_target_iv(config, expert_excluded, key):
+def update_target_iv(config, expert_excluded, _precompute_done, key):
     df_orig = _get_df(key)
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
