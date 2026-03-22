@@ -24,6 +24,10 @@ from callbacks.var_summary import compute_var_summary_table, compute_var_summary
 logger = logging.getLogger(__name__)
 
 
+# ── Thread yönetimi ──────────────────────────────────────────────────────────
+_active_thread: threading.Thread | None = None
+_cancel_event = threading.Event()
+
 # ── Precompute yardımcıları ───────────────────────────────────────────────────
 _PRECOMPUTE_STEPS = [
     {"key": "screening",    "label": "Ön Eleme (Screening)"},
@@ -114,10 +118,18 @@ def _build_modal_body_done(durations: dict):
 
 
 def _run_precompute_background(prog_key: str, key: str, target: str,
-                               date_col, seg_col, seg_val, config: dict = None):
+                               date_col, seg_col, seg_val, config: dict = None,
+                               cancel_event: threading.Event = None):
     """Tüm precompute adımlarını background thread'de çalıştırır.
-    İlerleme _PRECOMPUTE_PROGRESS[prog_key]'e yazılır, interval callback okur."""
+    İlerleme _PRECOMPUTE_PROGRESS[prog_key]'e yazılır, interval callback okur.
+    cancel_event set edilirse thread erken sonlanır."""
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 0, "durations": {}, "done": False}
+
+    def _cancelled():
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("Precompute iptal edildi — prog_key=%s", prog_key)
+            return True
+        return False
 
     df_orig = _get_df(key)
     if df_orig is None:
@@ -144,6 +156,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     except Exception:
         durations["screening"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 1, "durations": dict(durations), "done": False}
+    if _cancelled():
+        return
 
     # ── Adım 1: Split + Profiling ────────────────────────────────────────────
     #   Split'i önce yapıyoruz çünkü profiling raw train+test üzerinden çalışacak.
@@ -162,6 +176,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     except Exception:
         durations["profiling"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 2, "durations": dict(durations), "done": False}
+    if _cancelled():
+        return
 
     # ── Adım 2: WoE / IV ─────────────────────────────────────────────────────
     try:
@@ -196,6 +212,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         eksik_map    = {}
 
         for col in passed_cols:
+            if _cancelled():
+                return
             try:
                 _mb = 2 if col in special_cols else _max_bins
                 optb = OptimalBinning(
@@ -298,6 +316,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         logger.exception("Adım 2 (WoE/IV) başarısız")
         durations["iv_ranking"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 3, "durations": dict(durations), "done": False}
+    if _cancelled():
+        return
 
     # ── Adım 3: Korelasyon ─────────────────────────────────────────────────
     try:
@@ -312,6 +332,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     except Exception:
         durations["correlation"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": False}
+    if _cancelled():
+        return
 
     # ── Adım 4: Değişken Özeti ─────────────────────────────────────────────
     try:
@@ -324,6 +346,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         durations["var_summary"] = None
 
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": dict(durations), "done": False}
+    if _cancelled():
+        return
 
     # ── Adım 5: Değişken Özeti (Ham) ─────────────────────────────────────────
     try:
@@ -423,16 +447,27 @@ def confirm_config(n_clicks, target_col, date_col, sort_col, oot_date, segment_c
     seg_val = segment_val if segment_val and segment_val != ["Tümü"] and "Tümü" not in (segment_val if isinstance(segment_val, list) else [segment_val]) else None
     config["segment_val"] = seg_val
 
+    # Eski thread çalışıyorsa iptal et
+    global _active_thread, _cancel_event
+    if _active_thread is not None and _active_thread.is_alive():
+        _cancel_event.set()
+        _active_thread.join(timeout=2)
+        logger.info("Eski precompute thread iptal edildi")
+
+    # Yeni cancel event (clear durumda)
+    _cancel_event = threading.Event()
+
     # Eski cache'leri temizle — sadece ham veri kalsın, geri kalanı yeniden hesaplansın
     clear_store(keep_key=key)
 
     # Background thread başlat — Dash thread'i bloklamaz
     t = threading.Thread(
         target=_run_precompute_background,
-        args=(prog_key, key, target_col, date_col, segment_col or None, seg_val, config),
+        args=(prog_key, key, target_col, date_col, segment_col or None, seg_val, config, _cancel_event),
         daemon=True,
     )
     t.start()
+    _active_thread = t
 
     return (
         config,

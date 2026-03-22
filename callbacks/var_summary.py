@@ -107,7 +107,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
                 if v in train_woe.columns:
                     r = train_woe[v].corr(y)
                     if pd.notna(r):
-                        corr_map[v] = round(r, 4)
+                        corr_map[v] = round(abs(r), 4)
         except Exception:
             pass
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
@@ -229,7 +229,7 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
             if v in df_train.columns and pd.api.types.is_numeric_dtype(df_train[v]):
                 r = df_train[v].corr(y)
                 if pd.notna(r):
-                    corr_map[v] = round(r, 4)
+                    corr_map[v] = round(abs(r), 4)
     except Exception:
         pass
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
