@@ -97,46 +97,30 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
         lambda v: _mono_symbol(woe_tables.get(v, {}).get("monoton_oot", ""))
     )
 
-    # ── Korelasyon — Train WoE, tüm değişkenler ─────────────────────────────
+    # ── Korelasyon — Değişken vs Target (Train WoE) ─────────────────────────
     corr_map = {}
-    if train_woe is not None and not train_woe.empty:
+    df_train = _SERVER_STORE.get(f"{_pfx}_train")
+    if train_woe is not None and not train_woe.empty and df_train is not None:
         try:
-            num_cols = [v for v in var_list if v in train_woe.columns]
-            if len(num_cols) >= 2:
-                corr_df = compute_correlation_matrix(train_woe[num_cols], num_cols)
-                high_pairs = find_high_corr_pairs(corr_df, threshold=0.0)
-                for _, row in high_pairs.iterrows():
-                    v1, v2 = row["Değişken 1"], row["Değişken 2"]
-                    r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
-                    for v in (v1, v2):
-                        if v not in corr_map or r > corr_map[v]:
-                            corr_map[v] = round(r, 2)
+            y = df_train[target]
+            for v in var_list:
+                if v in train_woe.columns:
+                    r = train_woe[v].corr(y)
+                    if pd.notna(r):
+                        corr_map[v] = round(r, 4)
         except Exception:
             pass
-    summary["Korr Değeri"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
+    summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
-    # ── VIF — Train WoE, tüm değişkenler ─────────────────────────────────────
-    vif_map = {}
-    if train_woe is not None and not train_woe.empty:
-        try:
-            num_cols_vif = [v for v in var_list if v in train_woe.columns]
-            if len(num_cols_vif) >= 2:
-                vif_res = compute_vif(train_woe[num_cols_vif], num_cols_vif)
-                if not vif_res.empty and "Değişken" in vif_res.columns:
-                    for _, row in vif_res.iterrows():
-                        vif_map[row["Değişken"]] = row["VIF"]
-        except Exception:
-            pass
-    summary["Train VIF"] = summary["Değişken"].map(
-        lambda v: round(vif_map[v], 1) if v in vif_map else "—"
-    )
+    # ── VIF — modelleme sonrası hesaplanır, burada boş bırakılır ────────────
+    summary["Train VIF"] = "—"
 
     # ── Öneri mantığı ────────────────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
         psi_val   = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
-        corr_val  = row["Korr Değeri"] if isinstance(row["Korr Değeri"], (int, float)) else None
+        corr_val  = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
         vif_val   = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
 
         cik_reasons = []
@@ -157,8 +141,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
         if psi_val is not None and psi_val > 0.10:
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
-        if corr_val is not None and corr_val >= 0.75:
-            inc_reasons.append(f"Korr={corr_val:.2f}≥0.75")
+        if corr_val is not None and abs(corr_val) >= 0.80:
+            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}≥0.80")
         if vif_val is not None and vif_val > 5.0:
             inc_reasons.append(f"VIF={vif_val:.1f}>5")
 
@@ -179,7 +163,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
 
     col_order = ["Değişken", "Öneri", "Sebep", "IV", "Bin",
                  "Test Monoton", "OOT Monoton",
-                 "Korr Değeri", "PSI Değeri", "PSI Durumu",
+                 "Korr (Target)", "PSI Değeri", "PSI Durumu",
                  "Train VIF", "Eksik %"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
@@ -237,44 +221,28 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
     summary["PSI Değeri"] = summary["Değişken"].map(lambda v: psi_map.get(v, "—"))
     summary["PSI Durumu"] = summary["Değişken"].map(lambda v: psi_label_map.get(v, "—"))
 
-    # ── Korelasyon — Raw train+test ───────────────────────────────────────
+    # ── Korelasyon — Değişken vs Target (Raw train) ─────────────────────────
     corr_map = {}
     try:
-        num_cols = [v for v in var_list if v in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[v])]
-        if len(num_cols) >= 2:
-            corr_df = compute_correlation_matrix(df_raw[num_cols], num_cols)
-            high_pairs = find_high_corr_pairs(corr_df, threshold=0.0)
-            for _, row in high_pairs.iterrows():
-                v1, v2 = row["Değişken 1"], row["Değişken 2"]
-                r = abs(row.get("Korelasyon", row.get(high_pairs.columns[2], 0)))
-                for v in (v1, v2):
-                    if v not in corr_map or r > corr_map[v]:
-                        corr_map[v] = round(r, 2)
+        y = df_train[target]
+        for v in var_list:
+            if v in df_train.columns and pd.api.types.is_numeric_dtype(df_train[v]):
+                r = df_train[v].corr(y)
+                if pd.notna(r):
+                    corr_map[v] = round(r, 4)
     except Exception:
         pass
-    summary["Korr Değeri"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
+    summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
-    # ── VIF — Raw train+test ──────────────────────────────────────────────
-    vif_map = {}
-    try:
-        num_cols_vif = [v for v in var_list if v in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[v])]
-        if len(num_cols_vif) >= 2:
-            vif_res = compute_vif(df_raw[num_cols_vif], num_cols_vif)
-            if not vif_res.empty and "Değişken" in vif_res.columns:
-                for _, row in vif_res.iterrows():
-                    vif_map[row["Değişken"]] = row["VIF"]
-    except Exception:
-        pass
-    summary["Train VIF"] = summary["Değişken"].map(
-        lambda v: round(vif_map[v], 1) if v in vif_map else "—"
-    )
+    # ── VIF — modelleme sonrası hesaplanır, burada boş bırakılır ────────────
+    summary["Train VIF"] = "—"
 
     # ── Öneri mantığı (aynı) ──────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val = row["IV"]
         eksik_val = row["Eksik %"]
         psi_val = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
-        corr_val = row["Korr Değeri"] if isinstance(row["Korr Değeri"], (int, float)) else None
+        corr_val = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
         vif_val = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
         cik_reasons = []
         if iv_val < 0.02:
@@ -292,8 +260,8 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
             inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
         if psi_val is not None and psi_val > 0.10:
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
-        if corr_val is not None and corr_val >= 0.75:
-            inc_reasons.append(f"Korr={corr_val:.2f}≥0.75")
+        if corr_val is not None and abs(corr_val) >= 0.80:
+            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}>=0.80")
         if vif_val is not None and vif_val > 5.0:
             inc_reasons.append(f"VIF={vif_val:.1f}>5")
         if inc_reasons:
@@ -310,7 +278,7 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
 
     # Ham tab: Monoton kolonları yok
     col_order = ["Değişken", "Öneri", "Sebep", "IV",
-                 "Korr Değeri", "PSI Değeri", "PSI Durumu",
+                 "Korr (Target)", "PSI Değeri", "PSI Durumu",
                  "Train VIF", "Eksik %"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
@@ -334,7 +302,7 @@ def _render_var_summary(summary, use_woe):
         {"if": {"filter_query": '{Test Monoton} = "❌"', "column_id": "Test Monoton"}, "color": "#ef4444"},
         {"if": {"filter_query": '{OOT Monoton} = "✅"',  "column_id": "OOT Monoton"},  "color": "#10b981"},
         {"if": {"filter_query": '{OOT Monoton} = "❌"',  "column_id": "OOT Monoton"},  "color": "#ef4444"},
-        {"if": {"filter_query": '{Korr Değeri} >= 0.75', "column_id": "Korr Değeri"}, "color": "#f59e0b", "fontWeight": "600"},
+        {"if": {"filter_query": '{Korr (Target)} >= 0.80', "column_id": "Korr (Target)"}, "color": "#f59e0b", "fontWeight": "600"},
         {"if": {"filter_query": '{Train VIF} >= 10',     "column_id": "Train VIF"},   "color": "#ef4444", "fontWeight": "600"},
         {"if": {"filter_query": '{Train VIF} >= 5 && {Train VIF} < 10', "column_id": "Train VIF"}, "color": "#f59e0b"},
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
@@ -347,7 +315,7 @@ def _render_var_summary(summary, use_woe):
     tsv = summary.to_csv(sep="\t", index=False)
 
     woe_note = html.Div(
-        "★ Korelasyon · VIF — Train WoE üzerinden  ·  Monotonluk — Train bin sınırlarıyla",
+        "★ Korr (Target) — Train üzerinden  ·  Monotonluk — Train bin sınırlarıyla",
         style={"color": "#a78bfa", "fontSize": "0.75rem", "marginBottom": "0.75rem"},
     ) if use_woe else html.Div()
 
@@ -372,12 +340,12 @@ def _render_var_summary(summary, use_woe):
             ], className="metric-card"), width=3),
         ], className="mb-4"),
         dbc.Tooltip(
-            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, Korr < 0.75, VIF ≤ 5",
+            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, |Korr| < 0.80, VIF ≤ 5",
             target="card-tut", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
         dbc.Tooltip(
-            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · Korr ≥ 0.75 · VIF > 5",
+            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · |Korr| ≥ 0.80 · VIF > 5",
             target="card-incele", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
@@ -421,9 +389,9 @@ def _render_var_summary(summary, use_woe):
                 "OOT Monoton":  {"value": "**OOT** verisinde WoE bin sıralamasının monoton olup olmadığı "
                                           "(Train'in bin sınırlarıyla).\n\n"
                                           "- ✅ Monoton\n- ❌ Monoton değil\n- — OOT split yok veya hesaplanamadı", "type": "markdown"},
-                "Korr Değeri":  {"value": "Başka bir değişkenle en yüksek **|r|** korelasyon değeri "
-                                          "(Train WoE üzerinden).\n\n"
-                                          "- **≥ 0.75** → İncele uyarısı", "type": "markdown"},
+                "Korr (Target)":  {"value": "Değişkenin **target** ile Pearson korelasyonu "
+                                          "(Train verisi üzerinden).\n\n"
+                                          "- Yüksek |r| → güçlü doğrusal ilişki", "type": "markdown"},
                 "PSI Değeri":   {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"
                                           "| PSI | Durum |\n|---|---|\n"
                                           "| < 0.10 | Stabil |\n"

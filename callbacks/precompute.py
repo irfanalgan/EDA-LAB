@@ -19,7 +19,7 @@ from modules.deep_dive import (
     SPECIAL_CODES, is_special_column, format_binning_table,
     build_period_table, _iv_label, _check_monotonicity,
 )
-from callbacks.var_summary import compute_var_summary_table
+from callbacks.var_summary import compute_var_summary_table, compute_var_summary_raw
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ _PRECOMPUTE_STEPS = [
     {"key": "iv_ranking",   "label": "IV Ranking"},
     {"key": "correlation",  "label": "Korelasyon Matrisi"},
     {"key": "var_summary",  "label": "Değişken Özeti (WoE)"},
+    {"key": "var_summary_raw", "label": "Değişken Özeti (Ham)"},
 ]
 
 def _precompute_step_row(step_key: str, label: str, status: str, duration: float = None):
@@ -322,7 +323,19 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     except Exception:
         durations["var_summary"] = None
 
-    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": dict(durations), "done": True}
+    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": dict(durations), "done": False}
+
+    # ── Adım 5: Değişken Özeti (Ham) ─────────────────────────────────────────
+    try:
+        t0 = time.perf_counter()
+        summary_raw = compute_var_summary_raw(cfg, key, seg_col, seg_val)
+        if summary_raw is not None and not summary_raw.empty:
+            _SERVER_STORE[f"{key}_varsummary_raw_{seg_col}_{seg_val}"] = summary_raw
+        durations["var_summary_raw"] = round(time.perf_counter() - t0, 1)
+    except Exception:
+        durations["var_summary_raw"] = None
+
+    _PRECOMPUTE_PROGRESS[prog_key] = {"step": 6, "durations": dict(durations), "done": True}
 
 
 # ── Callback: Yapılandırmayı Onayla ──────────────────────────────────────────
