@@ -8,7 +8,7 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, calc_psi as _calc_psi, psi_label as _psi_label
-from modules.deep_dive import get_variable_stats, get_woe_detail
+from modules.deep_dive import get_variable_stats
 from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
                                   check_variable_stats, check_train_size)
 
@@ -159,18 +159,18 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
 
     _pfx_bins = f"{dd_config['key']}_ds_{seg_col}_{seg_val}"
 
-    # WOE — cache'den oku, yoksa veya dtype override varsa hesapla
+    # WOE — sadece cache'den oku (hesaplama kaldırıldı — yeniden yazılacak)
     _woe_tables = _SERVER_STORE.get(f"{_pfx_bins}_woe_tables", {})
     _cached_entry = _woe_tables.get(col)
     if _cached_entry and not _force_dtype:
         woe_df = pd.DataFrame(_cached_entry["train_table"])
         iv_total_dd = _cached_entry.get("iv_train", 0.0)
-        # bin_edges cache'den
         _bins_dict = _SERVER_STORE.get(f"{_pfx_bins}_bins", {})
         woe_bin_edges = _bins_dict.get(col)
     else:
-        woe_df, iv_total_dd, woe_bin_edges, _ = get_woe_detail(
-            df_train, col, target, _max_bins, force_dtype=_force_dtype)
+        woe_df = pd.DataFrame()
+        iv_total_dd = 0.0
+        woe_bin_edges = None
 
     # PSI — TEK KAYNAK: calc_psi (train vs OOT)
     # WoE tab → binning table'lardan (per-bin dağılım karşılaştırması)
@@ -506,12 +506,20 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
 
             tsv_id = f"woe-tsv-{period_label.lower()}"
 
+            # Grafik filtresi: sadece bin aralıkları (Special/Eksik/TOPLAM hariç)
+            def _chart_only_bins(df):
+                return df[
+                    (df["Bin"] != "TOPLAM")
+                    & (df["Bin"] != "Eksik")
+                    & ~df["Bin"].astype(str).str.startswith("Special")
+                ].copy()
+
             if is_train:
-                chart_df = ref_woe_df[ref_woe_df["Bin"] != "TOPLAM"].copy()
+                chart_df = _chart_only_bins(ref_woe_df)
                 table_df = ref_woe_df.copy()
                 _period_iv = iv_total
             else:
-                # Test / OOT: cache'den oku, yoksa get_woe_detail ile hesapla
+                # Test / OOT: cache'den oku
                 _wt = _SERVER_STORE.get(f"{_pfx_bins}_woe_tables", {}).get(col, {})
                 _period_key = "test_table" if period_label == "Test" else "oot_table"
                 _iv_key = "iv_test" if period_label == "Test" else "iv_oot"
@@ -520,19 +528,11 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
                     p_df = pd.DataFrame(_cached_period)
                     _period_iv = _wt.get(_iv_key, 0.0)
                 else:
-                    _optb_dict = _SERVER_STORE.get(f"{_pfx_bins}_optb", {})
-                    _optb = _optb_dict.get(col)
-                    if _optb is not None:
-                        _sp_woe = _wt.get("train_special_woe", {})
-                        p_df, _period_iv, _, _ = get_woe_detail(
-                            period_df, col, target, fitted_optb=_optb,
-                            use_edges=True, train_special_woe=_sp_woe)
-                    else:
-                        p_df = pd.DataFrame()
-                        _period_iv = 0.0
+                    p_df = pd.DataFrame()
+                    _period_iv = 0.0
                 if isinstance(p_df, pd.DataFrame) and p_df.empty:
                     return None
-                chart_df = p_df[p_df["Bin"] != "TOPLAM"].copy()
+                chart_df = _chart_only_bins(p_df)
                 table_df = p_df.copy()
 
             n_period   = len(period_df)

@@ -4,7 +4,6 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
-from modules.deep_dive import get_woe_encoder
 
 
 # ── Tab açıklama kutusu yardımcısı ────────────────────────────────────────────
@@ -49,180 +48,6 @@ _TABLE_STYLE = dict(
     style_cell={"padding": "0.4rem 0.65rem"},
     style_data_conditional=[{"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}],
 )
-
-
-# ── WoE Dataset Builder ───────────────────────────────────────────────────────
-def _build_woe_dataset(df: pd.DataFrame, target: str, cols: list) -> tuple:
-    """
-    Her kolon için WoE encode eder; kolon adı '{col}_woe' olarak kaydedilir.
-    Returns: (woe_df, failed_cols, opt_dict)
-    opt_dict: {col_name: OptimalBinning object} — pickle için saklanır.
-    """
-    result = {}
-    failed = []
-    opt_dict = {}
-    for col in cols:
-        try:
-            woe_series, _, ok, optb = get_woe_encoder(df, col, target)
-            if ok:
-                result[f"{col}_woe"] = woe_series.values
-                if optb is not None:
-                    opt_dict[col] = optb
-            else:
-                failed.append(col)
-        except Exception:
-            failed.append(col)
-    woe_df = pd.DataFrame(result, index=df.index)
-    return woe_df, failed, opt_dict
-
-
-def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
-                       target: str, cols: list, max_bins: int = 4) -> dict:
-    """
-    Train üzerinde OptimalBinning fit → tek döngüde optb, bin_edges,
-    WoE transform (train + test + oot) üretir.
-    IV hesabı BURADA YAPILMAZ — get_woe_detail() tek kaynaktır.
-
-    Returns dict:
-        "train_woe":  pd.DataFrame  — train WoE değerleri
-        "test_woe":   pd.DataFrame | None
-        "oot_woe":    pd.DataFrame | None
-        "optb_dict":  dict          — {col: OptimalBinning}
-        "bins_dict":  dict          — {col: [bin_edges]}
-        "iv_tables":  dict          — {col: binning_table DataFrame}
-        "failed":     list          — encode edilemeyen kolonlar
-        "eksik_map":  dict          — {col: eksik_pct}
-    """
-    from optbinning import OptimalBinning as _OB
-    from modules.deep_dive import SPECIAL_VALUES, is_special_column
-
-    train_woe_data = {}
-    test_woe_data = {}
-    oot_woe_data = {}
-    optb_dict = {}
-    bins_dict = {}
-    iv_tables = {}
-    failed = []
-    eksik_map = {}
-
-    # Eksik % → train + test
-    if df_test is not None:
-        _eksik_df = pd.concat([df_train, df_test], ignore_index=True)
-    else:
-        _eksik_df = df_train
-
-    y_train = pd.to_numeric(df_train[target], errors="coerce")
-    _clean_mask = y_train.notna()
-
-    for col in cols:
-        if col == target:
-            continue
-        eksik_pct = round(_eksik_df[col].isna().mean() * 100, 2) if col in _eksik_df.columns else 0.0
-        eksik_map[col] = eksik_pct
-        try:
-            is_numeric = pd.api.types.is_numeric_dtype(df_train[col])
-
-            # Fit on train
-            _local = df_train.loc[_clean_mask, [col, target]].copy()
-            _local[target] = y_train[_clean_mask].astype(int)
-
-            _special_col = is_numeric and is_special_column(_local[col])
-            _bins = 2 if _special_col else max_bins
-            kwargs = dict(name=col, monotonic_trend="auto_asc_desc",
-                          max_n_bins=_bins, solver="cp",
-                          dtype="numerical" if is_numeric else "categorical")
-            if is_numeric:
-                kwargs["special_codes"] = list(SPECIAL_VALUES)
-
-            optb = _OB(**kwargs)
-            optb.fit(_local[col].values, _local[target].values)
-
-            bt = optb.binning_table.build(show_digits=8)
-            iv_tables[col] = bt
-            optb_dict[col] = optb
-
-            # Bin edges
-            if is_numeric and hasattr(optb, "splits") and optb.splits is not None:
-                edges = list(optb.splits)
-                edges.insert(0, -np.inf)
-                edges.append(np.inf)
-                bins_dict[col] = edges
-
-            # Per-special WoE hesapla (OptBinning konvansiyonu: ln(d_good/d_bad))
-            _sp_woe_map = {}
-            if is_numeric:
-                _x = _local[col].values
-                _y = _local[target].values
-                _tb = int(_y.sum())
-                _tg = len(_y) - _tb
-                if _tb > 0 and _tg > 0:
-                    for _sv in SPECIAL_VALUES:
-                        _svm = (_x == _sv)
-                        if not _svm.any():
-                            continue
-                        _bsv = int(_y[_svm].sum())
-                        _gsv = int(_svm.sum()) - _bsv
-                        _db = _bsv / _tb
-                        _dg = _gsv / _tg
-                        if _db > 0 and _dg > 0:
-                            _sp_woe_map[_sv] = float(np.log(_dg / _db))
-                        else:
-                            _sp_woe_map[_sv] = 0.0
-
-            # WoE transform — train
-            _tr_woe = optb.transform(df_train[col].values, metric="woe",
-                                     metric_missing="empirical",
-                                     metric_special="empirical")
-            _tr_series = pd.Series(_tr_woe, index=df_train.index).fillna(0.0)
-            # Per-special WoE override (combined → per-special)
-            for _sv, _sw in _sp_woe_map.items():
-                _svm = df_train[col] == _sv
-                if _svm.any():
-                    _tr_series.loc[_svm] = _sw
-            train_woe_data[col] = _tr_series
-
-            # WoE transform — test
-            if df_test is not None and len(df_test) > 0:
-                _te_woe = optb.transform(df_test[col].values, metric="woe",
-                                         metric_missing="empirical",
-                                         metric_special="empirical")
-                _te_series = pd.Series(_te_woe, index=df_test.index).fillna(0.0)
-                for _sv, _sw in _sp_woe_map.items():
-                    _svm = df_test[col] == _sv
-                    if _svm.any():
-                        _te_series.loc[_svm] = _sw
-                test_woe_data[col] = _te_series
-
-            # WoE transform — oot
-            if df_oot is not None and len(df_oot) > 0:
-                _oot_woe = optb.transform(df_oot[col].values, metric="woe",
-                                          metric_missing="empirical",
-                                          metric_special="empirical")
-                _oot_series = pd.Series(_oot_woe, index=df_oot.index).fillna(0.0)
-                for _sv, _sw in _sp_woe_map.items():
-                    _svm = df_oot[col] == _sv
-                    if _svm.any():
-                        _oot_series.loc[_svm] = _sw
-                oot_woe_data[col] = _oot_series
-
-        except Exception:
-            failed.append(col)
-
-    # Build DataFrames
-    df_train_woe = pd.DataFrame(train_woe_data, index=df_train.index)
-    df_test_woe = pd.DataFrame(test_woe_data, index=df_test.index) if df_test is not None and test_woe_data else None
-    df_oot_woe = pd.DataFrame(oot_woe_data, index=df_oot.index) if df_oot is not None and oot_woe_data else None
-
-    return {
-        "train_woe": df_train_woe,
-        "test_woe": df_test_woe,
-        "oot_woe": df_oot_woe,
-        "optb_dict": optb_dict,
-        "bins_dict": bins_dict,
-        "iv_tables": iv_tables,
-        "failed": failed,
-        "eksik_map": eksik_map,
-    }
 
 
 # ── PSI — Train WoE vs OOT WoE ───────────────────────────────────────────────
@@ -310,19 +135,12 @@ def psi_label(psi_val: float) -> str:
     return "Kritik Kayma"
 
 
-def _iv_label(iv: float) -> str:
-    if iv < 0.02:  return "Çok Zayıf"
-    if iv < 0.10:  return "Zayıf"
-    if iv < 0.30:  return "Orta"
-    if iv < 0.50:  return "Güçlü"
-    return "Şüpheli"
-
 
 
 
 def mono_check(bt):
     """Bad Rate % üzerinden monotonluk kontrol et (Eksik/Special/TOPLAM hariç)."""
-    m = bt[~bt["Bin"].astype(str).str.match(r"^(TOPLAM|Eksik|Special)")]
+    m = bt[~bt["Bin"].astype(str).str.match(r"^(TOPLAM|Eksik|Special|special_)")]
     nums = [float(w) for w in m["Bad Rate %"].dropna().tolist()
             if isinstance(w, (int, float))]
     if len(nums) < 2:

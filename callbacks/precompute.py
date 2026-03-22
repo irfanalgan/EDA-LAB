@@ -1,19 +1,27 @@
+import logging
 import threading
 import time
 
 import dash
 from dash import html, Input, Output, State
 import dash_bootstrap_components as dbc
+import numpy as np
 import pandas as pd
+from optbinning import OptimalBinning
 
 from app_instance import app
 from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df, clear_store
 from utils.helpers import apply_segment_filter, get_splits
-from utils.chart_helpers import build_woe_datasets, mono_check
 from modules.profiling import compute_profile
 from modules.correlation import compute_correlation_matrix
 from modules.screening import screen_columns
-from modules.deep_dive import get_woe_detail
+from modules.deep_dive import (
+    SPECIAL_CODES, is_special_column, format_binning_table,
+    build_period_table, _iv_label, _check_monotonicity,
+)
+from callbacks.var_summary import compute_var_summary_table
+
+logger = logging.getLogger(__name__)
 
 
 # ── Precompute yardımcıları ───────────────────────────────────────────────────
@@ -125,11 +133,6 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     }
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
 
-    # Zaten hesaplanmışsa skip
-    if f"{_pfx}_train" in _SERVER_STORE:
-        _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": {}, "done": True}
-        return
-
     # ── Adım 0: Screening ────────────────────────────────────────────────────
     try:
         t0 = time.perf_counter()
@@ -162,143 +165,159 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     # ── Adım 2: WoE / IV ─────────────────────────────────────────────────────
     try:
         t0 = time.perf_counter()
+        _target = config["target_col"]
+        _max_bins = int(config.get("max_bins", 4))
+        special_codes = SPECIAL_CODES
 
         # Screening'den geçen kolonlar
-        screen_data = _SERVER_STORE.get(f"{key}_screen")
-        if screen_data:
-            var_list = [c for c in screen_data[0] if c != target]
-        else:
-            var_list = [c for c in df_train.columns if c != target
-                        and c != date_col and c != seg_col]
+        _screen = _SERVER_STORE.get(f"{key}_screen")
+        passed_cols = _screen[0] if _screen else []
+        if not passed_cols:
+            passed_cols = [c for c in df_train.columns
+                          if c not in (target, date_col, seg_col)]
 
-        # Tek döngüde WoE fit (train) + IV + transform (train/test/oot)
-        _max_bins = int(cfg.get("max_bins", 4))
-        woe_result = build_woe_datasets(df_train, df_test, df_oot,
-                                         target, var_list, max_bins=_max_bins)
+        # Special kolonları belirle
+        special_cols = {c for c in passed_cols if is_special_column(df_train[c])}
 
-        _SERVER_STORE[f"{_pfx}_train_woe"] = woe_result["train_woe"]
-        _SERVER_STORE[f"{_pfx}_test_woe"]  = woe_result["test_woe"]
-        _SERVER_STORE[f"{_pfx}_oot_woe"]   = woe_result["oot_woe"]
-        _SERVER_STORE[f"{_pfx}_optb"]      = woe_result["optb_dict"]
-        _SERVER_STORE[f"{_pfx}_bins"]      = woe_result["bins_dict"]
-        _SERVER_STORE[f"{_pfx}_iv_tables"] = woe_result["iv_tables"]
-        _SERVER_STORE[f"{_pfx}_failed"]    = woe_result["failed"]
-        eksik_map = woe_result["eksik_map"]
+        logger.info("WoE/IV — passed_cols: %d, special_cols: %d", len(passed_cols), len(special_cols))
+        logger.info("WoE/IV — df_train: %s, df_test: %s, df_oot: %s",
+                     df_train.shape if df_train is not None else None,
+                     df_test.shape if df_test is not None else None,
+                     df_oot.shape if df_oot is not None else None)
 
-        # ── WoE dağılım tabloları (train/test/oot) — TEK KAYNAK: get_woe_detail ──
-        optb_dict = woe_result["optb_dict"]
-        woe_tables = {}
+        train_woe_df = pd.DataFrame(index=df_train.index)
+        test_woe_df  = pd.DataFrame(index=df_test.index) if df_test is not None else None
+        oot_woe_df   = pd.DataFrame(index=df_oot.index) if df_oot is not None else None
+        woe_tables   = {}
+        bins_dict    = {}
+        optb_dict    = {}
+        failed_cols  = []
+        eksik_map    = {}
 
-        for var in var_list:
-            _optb = optb_dict.get(var)
-            if _optb is None:
-                continue
+        for col in passed_cols:
             try:
-                # Train tablosu: get_woe_detail (TEK KAYNAK)
-                # use_edges=False → OptBinning'in kendi binning_table'ını kullanır
-                # (doğru IV, her bin katkısı ≥ 0)
-                bt_train, iv_train, _, _ = get_woe_detail(
-                    df_train, var, target, fitted_optb=_optb,
-                    use_edges=False)
-                if bt_train.empty:
-                    continue
+                _mb = 2 if col in special_cols else _max_bins
+                optb = OptimalBinning(
+                    name=col, monotonic_trend="auto_asc_desc",
+                    max_n_bins=_mb, dtype="numerical", solver="cp",
+                    special_codes=special_codes,
+                )
+                optb.fit(df_train[col].values, df_train[_target].values)
 
-                # Train'den per-special WoE map çıkar (test/OOT için)
-                _sp_woe_map = {}
-                for _, _r in bt_train.iterrows():
-                    _bin_str = str(_r["Bin"])
-                    if _bin_str.startswith("Special ("):
-                        _sv = int(_bin_str.replace("Special (", "").replace(")", ""))
-                        _sp_woe_map[_sv] = _r["WOE"]
+                # Train tablosu
+                raw_bt = optb.binning_table.build(show_digits=8)
+                train_bt = format_binning_table(raw_bt)
+                # IV: raw tablodan index ile oku (OptBinning index="Totals")
+                if "Totals" in raw_bt.index:
+                    iv_train = float(raw_bt.loc["Totals", "IV"])
+                else:
+                    iv_train = float(pd.to_numeric(raw_bt["IV"], errors="coerce").sum())
 
-                entry = {
-                    "train_table": bt_train.to_dict("records"),
-                    "iv_train": round(iv_train, 4),
-                    "monoton": mono_check(bt_train),
-                    "train_special_woe": _sp_woe_map,
-                }
+                # Bin edges
+                edges = [-np.inf] + list(optb.splits) + [np.inf]
+                bins_dict[col] = edges
 
-                # Test tablosu
+                # Eksik %
+                eksik_map[col] = round(float(df_train[col].isna().mean() * 100), 2)
+
+                # WoE transform
+                train_woe_df[col] = optb.transform(
+                    df_train[col].values, metric="woe",
+                    metric_missing="empirical", metric_special="empirical")
+
+                if df_test is not None:
+                    test_woe_df[col] = optb.transform(
+                        df_test[col].values, metric="woe",
+                        metric_missing="empirical", metric_special="empirical")
+
+                if df_oot is not None:
+                    oot_woe_df[col] = optb.transform(
+                        df_oot[col].values, metric="woe",
+                        metric_missing="empirical", metric_special="empirical")
+
+                # Test/OOT tabloları
+                test_bt, oot_bt = None, None
+                iv_test, iv_oot = 0.0, 0.0
+                mono_test, mono_oot = "—", "—"
+
                 if df_test is not None and len(df_test) > 0:
-                    try:
-                        bt_test, iv_test, _, _ = get_woe_detail(
-                            df_test, var, target, fitted_optb=_optb,
-                            use_edges=True, train_special_woe=_sp_woe_map)
-                        if not bt_test.empty:
-                            entry["test_table"] = bt_test.to_dict("records")
-                            entry["iv_test"] = round(iv_test, 4)
-                            entry["monoton_test"] = mono_check(bt_test)
-                    except Exception:
-                        pass
+                    test_bt = build_period_table(df_test, col, _target, edges, train_bt)
+                    if test_bt is not None:
+                        _non_total = test_bt["Bin"] != "TOPLAM"
+                        iv_test = float(pd.to_numeric(
+                            test_bt.loc[_non_total, "IV"], errors="coerce").sum())
+                        mono_test = _check_monotonicity(test_bt)
 
-                # OOT tablosu
                 if df_oot is not None and len(df_oot) > 0:
-                    try:
-                        bt_oot, iv_oot, _, _ = get_woe_detail(
-                            df_oot, var, target, fitted_optb=_optb,
-                            use_edges=True, train_special_woe=_sp_woe_map)
-                        if not bt_oot.empty:
-                            entry["oot_table"] = bt_oot.to_dict("records")
-                            entry["iv_oot"] = round(iv_oot, 4)
-                            entry["monoton_oot"] = mono_check(bt_oot)
-                    except Exception:
-                        pass
+                    oot_bt = build_period_table(df_oot, col, _target, edges, train_bt)
+                    if oot_bt is not None:
+                        _non_total = oot_bt["Bin"] != "TOPLAM"
+                        iv_oot = float(pd.to_numeric(
+                            oot_bt.loc[_non_total, "IV"], errors="coerce").sum())
+                        mono_oot = _check_monotonicity(oot_bt)
 
-                woe_tables[var] = entry
-            except Exception:
-                continue
+                woe_tables[col] = {
+                    "train_table": train_bt.to_dict("records"),
+                    "test_table": test_bt.to_dict("records") if test_bt is not None else None,
+                    "oot_table": oot_bt.to_dict("records") if oot_bt is not None else None,
+                    "iv_train": iv_train, "iv_test": iv_test, "iv_oot": iv_oot,
+                    "monoton_test": mono_test, "monoton_oot": mono_oot,
+                }
+                optb_dict[col] = optb
+
+            except Exception as e:
+                logger.warning("WoE başarısız: %s — %s", col, e)
+                failed_cols.append(col)
+
+        # Cache'e yaz
         _SERVER_STORE[f"{_pfx}_woe_tables"] = woe_tables
+        _SERVER_STORE[f"{_pfx}_bins"] = bins_dict
+        _SERVER_STORE[f"{_pfx}_optb"] = optb_dict
+        _SERVER_STORE[f"{_pfx}_train_woe"] = train_woe_df
+        _SERVER_STORE[f"{_pfx}_test_woe"] = test_woe_df
+        _SERVER_STORE[f"{_pfx}_oot_woe"] = oot_woe_df
 
-        # ── iv_df: woe_tables'dan türet (TEK KAYNAK) ─────────────────────────
-        def _iv_label(iv_val):
-            if iv_val < 0.02:  return "Çok Zayıf"
-            if iv_val < 0.10:  return "Zayıf"
-            if iv_val < 0.30:  return "Orta"
-            if iv_val < 0.50:  return "Güçlü"
-            return "Şüpheli"
-
+        # IV DataFrame — woe_tables'dan türetilir (tek kaynak)
         iv_records = []
-        for _v, _e in woe_tables.items():
+        for v, entry in woe_tables.items():
             iv_records.append({
-                "Değişken": _v,
-                "IV": _e["iv_train"],
-                "Eksik %": eksik_map.get(_v, 0.0),
+                "Değişken": v,
+                "IV": entry["iv_train"],
+                "Eksik %": eksik_map.get(v, 0.0),
             })
-        # Failed vars da ekle (IV=0)
-        for _fv in woe_result["failed"]:
-            iv_records.append({
-                "Değişken": _fv,
-                "IV": 0.0,
-                "Eksik %": eksik_map.get(_fv, 0.0),
-            })
-        iv_df = pd.DataFrame(iv_records).sort_values("IV", ascending=False).reset_index(drop=True)
+        iv_df = (pd.DataFrame(iv_records)
+                 .sort_values("IV", ascending=False)
+                 .reset_index(drop=True))
+        iv_df["IV"] = iv_df["IV"].round(3)
         iv_df["Güç"] = iv_df["IV"].apply(_iv_label)
         _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = iv_df
 
         durations["iv_ranking"] = round(time.perf_counter() - t0, 1)
     except Exception:
+        logger.exception("Adım 2 (WoE/IV) başarısız")
         durations["iv_ranking"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 3, "durations": dict(durations), "done": False}
 
-    # ── Adım 3: Korelasyon (Train WoE, tüm değişkenler) ─────────────────────
+    # ── Adım 3: Korelasyon ─────────────────────────────────────────────────
     try:
         t0 = time.perf_counter()
-        train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
-        if train_woe is not None and not train_woe.empty:
-            num_cols_corr = list(train_woe.columns)[:30]
-            corr_df = compute_correlation_matrix(train_woe, num_cols_corr)
-            _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}_precomp"] = (corr_df, num_cols_corr)
+        _train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
+        if _train_woe is not None and not _train_woe.empty:
+            _woe_cols = [c for c in _train_woe.columns if c in woe_tables]
+            if len(_woe_cols) >= 2:
+                corr = compute_correlation_matrix(_train_woe[_woe_cols], _woe_cols)
+                _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}"] = corr
         durations["correlation"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["correlation"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": False}
 
-    # ── Adım 4: Değişken Özeti tablosu ───────────────────────────────────────
+    # ── Adım 4: Değişken Özeti ─────────────────────────────────────────────
     try:
         t0 = time.perf_counter()
-        from callbacks.var_summary import compute_var_summary_table, compute_var_summary_raw
-        compute_var_summary_table(cfg, key, seg_col, seg_val)
-        compute_var_summary_raw(cfg, key, seg_col, seg_val)
+        summary = compute_var_summary_table(cfg, key, seg_col, seg_val)
+        if summary is not None and not summary.empty:
+            _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary
         durations["var_summary"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["var_summary"] = None

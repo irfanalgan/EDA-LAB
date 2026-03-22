@@ -9,7 +9,6 @@ from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE
 from modules.target_analysis import compute_target_stats, compute_target_over_time
-from modules.deep_dive import compute_iv_ranking_optimal
 
 
 def _tcard(value, label, color="#4F8EF7"):
@@ -120,12 +119,11 @@ def update_target_iv(config, expert_excluded, key):
     trend_dropdown, _trend_opts = _build_trend_dropdown()
 
     # IV — sadece train üzerinden
+    # IV — sadece cache'den oku (hesaplama kaldırıldı — yeniden yazılacak)
     cache_key = f"{key}_iv_{seg_col}_{seg_val}"
-    if cache_key in _SERVER_STORE:
-        iv_df = _SERVER_STORE[cache_key]
-    else:
-        iv_df = compute_iv_ranking_optimal(df_train, target)
-        _SERVER_STORE[cache_key] = iv_df
+    iv_df = _SERVER_STORE.get(cache_key)
+    if iv_df is None:
+        iv_df = pd.DataFrame(columns=["Değişken", "IV", "Eksik %", "Güç"])
 
     # Elenen değişkenleri IV tablosundan çıkar
     if excluded_set and "Değişken" in iv_df.columns:

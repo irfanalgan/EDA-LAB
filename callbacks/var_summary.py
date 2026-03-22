@@ -42,7 +42,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
         if _ob is not None:
             try:
                 _bt = _ob.binning_table.build()
-                _data = _bt[~_bt["Bin"].isin(["Totals", "Special", "Missing"])]
+                _exclude = {"Totals", "Missing"}
+                _data = _bt[~_bt["Bin"].isin(_exclude)]
                 return len(_data)
             except Exception:
                 pass
