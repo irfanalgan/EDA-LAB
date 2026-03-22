@@ -278,7 +278,7 @@ def format_binning_table(bt: pd.DataFrame) -> pd.DataFrame:
     # Virgülden sonra 3 basamak, WoE 8 basamak
     for c in ["Toplam (%)", "Bad Rate %", "IV"]:
         if c in df.columns:
-            df[c] = df[c].round(3)
+            df[c] = df[c].round(4)
     if "WoE" in df.columns:
         df["WoE"] = df["WoE"].round(8)
 
@@ -361,12 +361,12 @@ def build_period_table(df_period, col, target, bin_edges, train_bt):
     total_nonevent = result["Non-event"].sum()
 
     result["Toplam (%)"] = (
-        (result["count"] / total_count * 100).round(3) if total_count > 0
+        (result["count"] / total_count * 100).round(4) if total_count > 0
         else 0.0
     )
     result["Bad Rate %"] = np.where(
         result["count"] > 0,
-        (result["Event"] / result["count"] * 100).round(3),
+        (result["Event"] / result["count"] * 100).round(4),
         0.0,
     )
 
@@ -374,7 +374,7 @@ def build_period_table(df_period, col, target, bin_edges, train_bt):
     if total_event > 0 and total_nonevent > 0:
         bad_prob  = result["Event"] / total_event
         good_prob = result["Non-event"] / total_nonevent
-        result["IV"] = ((good_prob - bad_prob) * result["WoE"]).round(3)
+        result["IV"] = ((good_prob - bad_prob) * result["WoE"]).round(4)
     else:
         result["IV"] = 0.0
 
@@ -400,7 +400,7 @@ def build_period_table(df_period, col, target, bin_edges, train_bt):
     # Virgülden sonra 3 basamak, WoE 8 basamak — format_binning_table ile tutarlı
     for c in ["Toplam (%)", "Bad Rate %", "IV"]:
         if c in result.columns:
-            result[c] = result[c].round(3)
+            result[c] = result[c].round(4)
     if "WoE" in result.columns:
         result["WoE"] = result["WoE"].round(8)
 

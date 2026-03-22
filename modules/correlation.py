@@ -56,39 +56,31 @@ def find_high_corr_pairs(corr_df: pd.DataFrame,
 def compute_vif(df: pd.DataFrame,
                 cols: list[str]) -> pd.DataFrame:
     """
-    Her kolon için VIF hesaplar (numpy lstsq).
-    VIF_i = 1 / (1 - R²_i),  R²_i: col_i'nin diğer kolonlara regresyonu.
+    Her kolon için VIF hesaplar (statsmodels variance_inflation_factor).
     Eşikler:  < 5 Normal  |  5–10 Orta  |  > 10 Yüksek
     """
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+    from statsmodels.tools.tools import add_constant
+
     local = df[cols].dropna()
     if len(local) < len(cols) + 2:
         return pd.DataFrame()
 
-    X = local.values.astype(float)
-    n, k = X.shape
-
-    if k < 2:
+    if len(cols) < 2:
         return pd.DataFrame({
             "Değişken": cols,
-            "VIF":      [1.0] * k,
-            "Uyarı":    ["✓ Normal"] * k,
+            "VIF":      [1.0] * len(cols),
+            "Uyarı":    ["✓ Normal"] * len(cols),
         })
 
+    X = add_constant(local[cols])
     records = []
-    for idx, col in enumerate(cols):
-        y      = X[:, idx]
-        X_rest = np.delete(X, idx, axis=1)
-        A      = np.c_[np.ones(n), X_rest]
+    for i, col in enumerate(cols):
         try:
-            beta, _, _, _ = np.linalg.lstsq(A, y, rcond=None)
-            y_hat  = A @ beta
-            ss_res = float(np.sum((y - y_hat) ** 2))
-            ss_tot = float(np.sum((y - y.mean()) ** 2))
-            r2     = max(0.0, 1.0 - ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
-            vif    = round(1.0 / (1.0 - r2), 2) if r2 < 0.9999 else 999.0
+            col_idx = list(X.columns).index(col)
+            vif = round(variance_inflation_factor(X.values, col_idx), 2)
         except Exception:
             vif = 999.0
-
         uyari = "✓ Normal" if vif < 5 else "⚠ Orta" if vif < 10 else "✗ Yüksek"
         records.append({"Değişken": col, "VIF": vif, "Uyarı": uyari})
 

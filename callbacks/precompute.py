@@ -209,9 +209,9 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 train_bt = format_binning_table(raw_bt)
                 # IV: raw tablodan index ile oku (OptBinning index="Totals")
                 if "Totals" in raw_bt.index:
-                    iv_train = round(float(raw_bt.loc["Totals", "IV"]), 3)
+                    iv_train = round(float(raw_bt.loc["Totals", "IV"]), 4)
                 else:
-                    iv_train = round(float(pd.to_numeric(raw_bt["IV"], errors="coerce").sum()), 3)
+                    iv_train = round(float(pd.to_numeric(raw_bt["IV"], errors="coerce").sum()), 4)
 
                 # Bin edges
                 edges = [-np.inf] + list(optb.splits) + [np.inf]
@@ -245,7 +245,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                     if test_bt is not None:
                         _non_total = test_bt["Bin"] != "TOPLAM"
                         iv_test = round(float(pd.to_numeric(
-                            test_bt.loc[_non_total, "IV"], errors="coerce").sum()), 3)
+                            test_bt.loc[_non_total, "IV"], errors="coerce").sum()), 4)
                         mono_test = _check_monotonicity(test_bt)
 
                 if df_oot is not None and len(df_oot) > 0:
@@ -253,7 +253,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                     if oot_bt is not None:
                         _non_total = oot_bt["Bin"] != "TOPLAM"
                         iv_oot = round(float(pd.to_numeric(
-                            oot_bt.loc[_non_total, "IV"], errors="coerce").sum()), 3)
+                            oot_bt.loc[_non_total, "IV"], errors="coerce").sum()), 4)
                         mono_oot = _check_monotonicity(oot_bt)
 
                 woe_tables[col] = {
@@ -288,7 +288,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         iv_df = (pd.DataFrame(iv_records)
                  .sort_values("IV", ascending=False)
                  .reset_index(drop=True))
-        iv_df["IV"] = iv_df["IV"].round(3)
+        iv_df["IV"] = iv_df["IV"].round(4)
         iv_df["Güç"] = iv_df["IV"].apply(_iv_label)
         _SERVER_STORE[f"{key}_iv_{seg_col}_{seg_val}"] = iv_df
 
