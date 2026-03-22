@@ -148,25 +148,62 @@ def build_woe_datasets(df_train: pd.DataFrame, df_test, df_oot,
                 edges.append(np.inf)
                 bins_dict[col] = edges
 
+            # Per-special WoE hesapla (OptBinning konvansiyonu: ln(d_good/d_bad))
+            _sp_woe_map = {}
+            if is_numeric:
+                _x = _local[col].values
+                _y = _local[target].values
+                _tb = int(_y.sum())
+                _tg = len(_y) - _tb
+                if _tb > 0 and _tg > 0:
+                    for _sv in SPECIAL_VALUES:
+                        _svm = (_x == _sv)
+                        if not _svm.any():
+                            continue
+                        _bsv = int(_y[_svm].sum())
+                        _gsv = int(_svm.sum()) - _bsv
+                        _db = _bsv / _tb
+                        _dg = _gsv / _tg
+                        if _db > 0 and _dg > 0:
+                            _sp_woe_map[_sv] = float(np.log(_dg / _db))
+                        else:
+                            _sp_woe_map[_sv] = 0.0
+
             # WoE transform — train
             _tr_woe = optb.transform(df_train[col].values, metric="woe",
                                      metric_missing="empirical",
                                      metric_special="empirical")
-            train_woe_data[col] = pd.Series(_tr_woe, index=df_train.index).fillna(0.0)
+            _tr_series = pd.Series(_tr_woe, index=df_train.index).fillna(0.0)
+            # Per-special WoE override (combined → per-special)
+            for _sv, _sw in _sp_woe_map.items():
+                _svm = df_train[col] == _sv
+                if _svm.any():
+                    _tr_series.loc[_svm] = _sw
+            train_woe_data[col] = _tr_series
 
             # WoE transform — test
             if df_test is not None and len(df_test) > 0:
                 _te_woe = optb.transform(df_test[col].values, metric="woe",
                                          metric_missing="empirical",
                                          metric_special="empirical")
-                test_woe_data[col] = pd.Series(_te_woe, index=df_test.index).fillna(0.0)
+                _te_series = pd.Series(_te_woe, index=df_test.index).fillna(0.0)
+                for _sv, _sw in _sp_woe_map.items():
+                    _svm = df_test[col] == _sv
+                    if _svm.any():
+                        _te_series.loc[_svm] = _sw
+                test_woe_data[col] = _te_series
 
             # WoE transform — oot
             if df_oot is not None and len(df_oot) > 0:
                 _oot_woe = optb.transform(df_oot[col].values, metric="woe",
                                           metric_missing="empirical",
                                           metric_special="empirical")
-                oot_woe_data[col] = pd.Series(_oot_woe, index=df_oot.index).fillna(0.0)
+                _oot_series = pd.Series(_oot_woe, index=df_oot.index).fillna(0.0)
+                for _sv, _sw in _sp_woe_map.items():
+                    _svm = df_oot[col] == _sv
+                    if _svm.any():
+                        _oot_series.loc[_svm] = _sw
+                oot_woe_data[col] = _oot_series
 
         except Exception:
             failed.append(col)

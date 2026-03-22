@@ -173,24 +173,48 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
             df_train, col, target, _max_bins, force_dtype=_force_dtype)
 
     # PSI — TEK KAYNAK: calc_psi (train vs OOT)
-    # WoE tab → discrete=True (her unique WoE değeri bir bin)
+    # WoE tab → binning table'lardan (per-bin dağılım karşılaştırması)
     # Ham tab → discrete=False, n_bins=10, np.linspace
     _pfx = f"{dd_config['key']}_ds_{seg_col}_{seg_val}"
     cutoff_date = oot_date if oot_date else (psi_split if psi_split else None)
     psi_res = {"psi": None}
     if df_oot is not None and not df_oot.empty and col in df_train.columns:
         if _is_woe_tab:
-            _tr_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
-            _oot_woe = _SERVER_STORE.get(f"{_pfx}_oot_woe")
-            if _tr_woe is not None and _oot_woe is not None and col in _tr_woe.columns and col in _oot_woe.columns:
-                _tv = _tr_woe[col].dropna().values
-                _ov = _oot_woe[col].dropna().values
-                if len(_tv) >= 2 and len(_ov) >= 2:
-                    _d = _calc_psi(_tv, _ov, discrete=True, detail=True)
-                    psi_res = {"psi": _d["psi"], "label": _psi_label(_d["psi"]),
-                               "detail_df": pd.DataFrame(_d["rows"]),
-                               "split_label": "Train", "comp_label": "OOT",
-                               "n_baseline": len(_tv), "n_compare": len(_ov)}
+            # Binning table'lardan PSI (per-special bin dahil doğru dağılım)
+            _wt_entry = _woe_tables.get(col) if _woe_tables else None
+            if _wt_entry and "oot_table" in _wt_entry:
+                try:
+                    _bt_tr = pd.DataFrame(_wt_entry["train_table"])
+                    _bt_ot = pd.DataFrame(_wt_entry["oot_table"])
+                    _bt_tr = _bt_tr[_bt_tr["Bin"] != "TOPLAM"]
+                    _bt_ot = _bt_ot[_bt_ot["Bin"] != "TOPLAM"]
+                    _merged = _bt_tr[["Bin", "Toplam"]].merge(
+                        _bt_ot[["Bin", "Toplam"]], on="Bin", how="outer",
+                        suffixes=("_tr", "_ot")).fillna(0)
+                    _tr_tot = _merged["Toplam_tr"].sum()
+                    _ot_tot = _merged["Toplam_ot"].sum()
+                    if _tr_tot > 0 and _ot_tot > 0:
+                        _eps = 1e-4
+                        _tr_pct = (_merged["Toplam_tr"] / _tr_tot).clip(lower=_eps)
+                        _ot_pct = (_merged["Toplam_ot"] / _ot_tot).clip(lower=_eps)
+                        _contribs = (_ot_pct - _tr_pct) * np.log(_ot_pct / _tr_pct)
+                        _psi_val = float(_contribs.sum())
+                        _psi_rows = []
+                        for _idx, _row in _merged.iterrows():
+                            _i = _merged.index.get_loc(_idx)
+                            _psi_rows.append({
+                                "Bin": _row["Bin"],
+                                "Baseline %": round(float(_tr_pct.iloc[_i]) * 100, 2),
+                                "Karşılaştırma %": round(float(_ot_pct.iloc[_i]) * 100, 2),
+                                "Δ (pp)": round(float(_ot_pct.iloc[_i] - _tr_pct.iloc[_i]) * 100, 2),
+                                "PSI Katkı": round(float(_contribs.iloc[_i]), 5),
+                            })
+                        psi_res = {"psi": _psi_val, "label": _psi_label(_psi_val),
+                                   "detail_df": pd.DataFrame(_psi_rows),
+                                   "split_label": "Train", "comp_label": "OOT",
+                                   "n_baseline": int(_tr_tot), "n_compare": int(_ot_tot)}
+                except Exception:
+                    pass
         else:
             _tv = df_train[col].dropna().values
             _ov = df_oot[col].dropna().values

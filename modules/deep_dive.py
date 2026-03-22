@@ -138,10 +138,10 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric,
         # Train WoE (sabit — tabloda gösterilecek)
         woe = float(train_woe_list[i]) if i < len(train_woe_list) else 0.0
 
-        # IV: test dağılımı × train WoE → (d_b - d_g) * WoE_train
+        # IV: OptBinning konvansiyonu → (d_good - d_bad) * WoE  [WoE = ln(d_good/d_bad)]
         dist_bad = bad_i / total_bad if total_bad > 0 else 0
         dist_good = good_i / total_good if total_good > 0 else 0
-        iv_part = (dist_bad - dist_good) * woe
+        iv_part = (dist_good - dist_bad) * woe
         iv_total += iv_part
 
         # Bin label — show_digits=8 ile tutarlı format
@@ -199,7 +199,7 @@ def _build_binning_table_from_edges(optb, X, y, col, is_numeric,
         good_ms = n_ms - bad_ms
         d_b = bad_ms / total_bad if total_bad > 0 else 0
         d_g = good_ms / total_good if total_good > 0 else 0
-        iv_ms = (d_b - d_g) * train_woe_missing
+        iv_ms = (d_g - d_b) * train_woe_missing
         iv_total += iv_ms
         rows.append({
             "Bin": "Eksik", "Toplam": n_ms, "Bad": bad_ms, "Good": good_ms,

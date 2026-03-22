@@ -184,7 +184,6 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
 
     # Cache'e yaz
     _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary.copy()
-    _SERVER_STORE[f"{key}_summary_{seg_col}_{seg_val}"] = summary.copy()
 
     return summary
 

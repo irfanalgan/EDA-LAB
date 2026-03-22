@@ -308,7 +308,7 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, key):
     seg_val = config.get("segment_val")
 
     # Önce tam özet cache'ine bak (Değişken Özeti → Hesapla sonrası dolu olur)
-    full_summary = _SERVER_STORE.get(f"{key}_summary_{seg_col}_{seg_val}")
+    full_summary = _SERVER_STORE.get(f"{key}_varsummary_{seg_col}_{seg_val}")
     iv_df        = _SERVER_STORE.get(f"{key}_iv_{seg_col}_{seg_val}")
 
     if full_summary is not None:
