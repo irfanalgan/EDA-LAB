@@ -294,15 +294,62 @@ def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
 
 
 # ── Playground: Değişken özeti önizleme ───────────────────────────────────────
+
+def _apply_numeric_filter(df, col, op, val):
+    """Sayısal filtre uygula. '—' gibi string değerler (NaN) filtreden muaf tutulur."""
+    if val is None or col not in df.columns:
+        return df
+    nums = pd.to_numeric(df[col], errors="coerce")
+    is_na = nums.isna()
+    if op == "ge":
+        mask = (nums >= val) | is_na
+    elif op == "gt":
+        mask = (nums > val) | is_na
+    elif op == "le":
+        mask = (nums <= val) | is_na
+    elif op == "lt":
+        mask = (nums < val) | is_na
+    else:
+        return df
+    return df[mask]
+
+
+# ── Filtre sıfırlama ─────────────────────────────────────────────────────────
+@app.callback(
+    Output("pg-filter-iv-op", "value"),
+    Output("pg-filter-iv-val", "value"),
+    Output("pg-filter-corr-op", "value"),
+    Output("pg-filter-corr-val", "value"),
+    Output("pg-filter-psi-op", "value"),
+    Output("pg-filter-psi-val", "value"),
+    Output("pg-filter-test-mono", "value"),
+    Output("pg-filter-oot-mono", "value"),
+    Input("btn-pg-filter-reset", "n_clicks"),
+    prevent_initial_call=True,
+)
+def reset_pg_filters(_n):
+    return "ge", 0.02, "lt", 0.80, "lt", 0.25, "Hepsi", "Hepsi"
+
+
 @app.callback(
     Output("pg-var-summary-preview", "children"),
     Input("store-config", "data"),
     Input("store-expert-exclude", "data"),
     Input("main-tabs", "active_tab"),
     Input("interval-precompute", "disabled"),
+    Input("pg-filter-iv-op", "value"),
+    Input("pg-filter-iv-val", "value"),
+    Input("pg-filter-corr-op", "value"),
+    Input("pg-filter-corr-val", "value"),
+    Input("pg-filter-psi-op", "value"),
+    Input("pg-filter-psi-val", "value"),
+    Input("pg-filter-test-mono", "value"),
+    Input("pg-filter-oot-mono", "value"),
     State("store-key", "data"),
 )
-def render_pg_var_summary_preview(config, expert_excluded, active_tab, _precompute_done, key):
+def render_pg_var_summary_preview(config, expert_excluded, active_tab, _precompute_done,
+                                  iv_op, iv_val, corr_op, corr_val,
+                                  psi_op, psi_val, test_mono, oot_mono, key):
     if not key or not config or not config.get("target_col"):
         return html.Div()
     seg_col = config.get("segment_col")
@@ -335,6 +382,21 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, _precompu
     excluded = set(expert_excluded or [])
     disp = disp[~disp["Değişken"].isin(excluded)].copy()
 
+    total_count = len(disp)
+
+    # ── Filtreler ──
+    disp = _apply_numeric_filter(disp, "IV", iv_op, iv_val)
+    disp = _apply_numeric_filter(disp, "Korr (Target)", corr_op, corr_val)
+    disp = _apply_numeric_filter(disp, "PSI Değeri", psi_op, psi_val)
+
+    if test_mono and test_mono != "Hepsi" and "Test Monoton" in disp.columns:
+        disp = disp[disp["Test Monoton"] == test_mono]
+
+    if oot_mono and oot_mono != "Hepsi" and "OOT Monoton" in disp.columns:
+        disp = disp[disp["OOT Monoton"] == oot_mono]
+
+    filtered_count = len(disp)
+
     cond = [
         {"if": {"filter_query": '{Güç} = "Güçlü"',       "column_id": "Güç"},   "color": "#10b981"},
         {"if": {"filter_query": '{Güç} = "Orta"',         "column_id": "Güç"},   "color": "#4F8EF7"},
@@ -366,7 +428,16 @@ def render_pg_var_summary_preview(config, expert_excluded, active_tab, _precompu
                     "padding": "4px 8px", "textAlign": "left"},
         style_data_conditional=cond,
     )
-    return html.Div([source_note, tbl] if source_note else [tbl])
+    count_note = html.Div(
+        f"{filtered_count} / {total_count} değişken gösteriliyor",
+        className="form-hint",
+        style={"padding": "0.3rem 0.5rem", "marginTop": "0.3rem"})
+    parts = []
+    if source_note:
+        parts.append(source_note)
+    parts.append(tbl)
+    parts.append(count_note)
+    return html.Div(parts)
 
 
 # ── Playground: Dropdown seçeneklerini doldur ─────────────────────────────────

@@ -489,6 +489,96 @@ def _build_rating_section(tab_data):
     )
 
 
+def _calc_hhi_table(p_arr, thresholds):
+    """26 Segment üzerinden rating bazlı HHI tablosu döndürür."""
+    import numpy as np
+    ratings = _assign_rating_thresholds(p_arr, thresholds)
+    n = len(p_arr)
+    rows = []
+    total_hhi = 0.0
+    for r in range(1, 26):
+        cnt = int(np.sum(ratings == r))
+        share = cnt / n if n > 0 else 0.0
+        hhi_contrib = share ** 2
+        total_hhi += hhi_contrib
+        rows.append({
+            "Rating": r,
+            "Adet": cnt,
+            "Yoğunlaşma": round(share * 100, 2),
+            "HHI": round(hhi_contrib, 6),
+        })
+    rows.append({
+        "Rating": "TOPLAM",
+        "Adet": n,
+        "Yoğunlaşma": 100.0,
+        "HHI": round(total_hhi, 6),
+    })
+    return rows, total_hhi
+
+
+def _build_hhi_section(tab_data):
+    """HHI (Herfindahl-Hirschman Index) accordion — 26 Segment üzerinden."""
+    import numpy as np
+
+    probas = tab_data.get("probabilities", {})
+    if not probas or not probas.get("train"):
+        return None
+
+    split_divs = []
+    for split_name, split_key in [("Train", "train"), ("Test", "test"), ("OOT", "oot")]:
+        p = probas.get(split_key)
+        if p is None:
+            continue
+        p_arr = np.array(p)
+        if len(p_arr) == 0:
+            continue
+
+        rows, total_hhi = _calc_hhi_table(p_arr, _RATING_26_THRESHOLDS)
+
+        if total_hhi < 0.06:
+            yorum = "Dengeli"
+            yorum_color = "#10b981"
+        elif total_hhi < 0.10:
+            yorum = "Orta"
+            yorum_color = "#f59e0b"
+        else:
+            yorum = "Yoğun"
+            yorum_color = "#ef4444"
+
+        cond = [
+            {"if": {"filter_query": '{Rating} = "TOPLAM"'},
+             "fontWeight": "700", "backgroundColor": "#161d2e"},
+            {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
+        ]
+        tbl = dash_table.DataTable(
+            data=rows,
+            columns=[{"name": "Rating", "id": "Rating"},
+                     {"name": "Adet", "id": "Adet"},
+                     {"name": "Yoğunlaşma %", "id": "Yoğunlaşma"},
+                     {"name": "HHI", "id": "HHI"}],
+            **{**_TBL_STYLE, "style_data_conditional": cond, "page_size": 30},
+        )
+        header = html.Div([
+            html.Span(split_name, style={"color": "#a8b2c2", "fontWeight": "600",
+                                         "fontSize": "0.78rem", "textTransform": "uppercase"}),
+            html.Span(f"  HHI = {total_hhi:.6f}  ·  {yorum}",
+                      style={"color": yorum_color, "fontSize": "0.75rem", "marginLeft": "0.75rem"}),
+        ], style={"marginBottom": "0.4rem", "marginTop": "0.75rem"})
+        split_divs.append(html.Div([header, tbl]))
+
+    if not split_divs:
+        return None
+
+    note = html.Div(
+        f"26 Segment PD eşikleri üzerinden · Mükemmel dağılım ≈ {1/26:.4f}",
+        style={"color": "#7e8fa4", "fontSize": "0.72rem", "marginTop": "0.5rem",
+               "fontStyle": "italic"},
+    )
+    split_divs.append(note)
+    return dbc.AccordionItem(html.Div(split_divs), title="HHI (Yoğunlaşma)",
+                             item_id="item-hhi")
+
+
 def _build_corr_section(corr_dict):
     """Model değişkenleri arasındaki korelasyon heatmap'i."""
     if not corr_dict:
@@ -874,6 +964,10 @@ def _build_results_content(tab_data, results, corr_dict=None, woe_dist=None,
     rating_item = _build_rating_section(tab_data)
     if rating_item:
         items.append(rating_item)
+
+    hhi_item = _build_hhi_section(tab_data)
+    if hhi_item:
+        items.append(hhi_item)
 
     corr_item = _build_corr_section(corr_dict)
     if corr_item:
@@ -2331,7 +2425,53 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
             _xl_auto_width(ws_rt, col_count, min_w=10)
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SHEET 13 — Korelasyon
+    # SHEET — HHI (Yoğunlaşma)
+    # ═══════════════════════════════════════════════════════════════════════════
+    if probas and probas.get("train"):
+        import numpy as np
+        ws_hhi = wb.create_sheet("HHI")
+        ws_hhi.sheet_properties.tabColor = "8B5CF6"
+        _xl_write_title(ws_hhi, "HHI — Yoğunlaşma (26 Segment)", 4, S)
+
+        current_row = 3
+        for sn, sk in [("Train", "train"), ("Test", "test"), ("OOT", "oot")]:
+            p = probas.get(sk)
+            if p is None:
+                continue
+            p_arr = np.array(p)
+            if len(p_arr) == 0:
+                continue
+
+            rows, total_hhi = _calc_hhi_table(p_arr, _RATING_26_THRESHOLDS)
+
+            if total_hhi < 0.06:
+                yorum = "Dengeli"
+            elif total_hhi < 0.10:
+                yorum = "Orta"
+            else:
+                yorum = "Yoğun"
+
+            # Split başlığı
+            ws_hhi.cell(row=current_row, column=1,
+                        value=f"{sn}  ·  HHI = {total_hhi:.6f}  ·  {yorum}").font = Font(
+                name="Segoe UI", bold=True, color=S["ACCENT"], size=11)
+            current_row += 1
+
+            df_hhi = pd.DataFrame(rows)
+            end_r = _xl_write_df(ws_hhi, df_hhi, current_row, S,
+                                 left_align_cols={1},
+                                 num_fmt_cols={3: "0.00", 4: "0.000000"})
+            # TOPLAM satırı kalın
+            for c in range(1, 5):
+                cell = ws_hhi.cell(row=end_r, column=c)
+                cell.font = Font(name="Segoe UI", bold=True, color="FFFFFF", size=10)
+                cell.fill = PatternFill("solid", fgColor="1E293B")
+            current_row = end_r + 2
+
+        _xl_auto_width(ws_hhi, 4, min_w=12)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SHEET — Korelasyon
     # ═══════════════════════════════════════════════════════════════════════════
     corr_dict = results.get("raw_corr") if tab_key == "raw" else results.get("corr")
     if corr_dict:

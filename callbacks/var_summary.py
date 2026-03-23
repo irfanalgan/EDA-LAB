@@ -84,7 +84,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
 
     def _mono_symbol(raw):
         """Precompute'taki metin → emoji dönüşümü."""
-        if not raw or raw == "–":
+        if not raw or raw in ("–", "—", "—"):
             return "—"
         if "Artan" in raw or "Azalan" in raw:
             return "✅"

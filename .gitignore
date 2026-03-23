@@ -43,6 +43,7 @@ desktop.ini
 
 # Kayıtlı profiller (kullanıcıya özel, büyük dosyalar)
 profiles/
+specs/
 
 # Profiling çıktıları
 *.html

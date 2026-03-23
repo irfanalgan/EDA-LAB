@@ -253,6 +253,9 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     Output("input-sql-jk-2", "value", allow_duplicate=True),
     Output("input-sql-jk-3", "value", allow_duplicate=True),
     Output("store-profile-loaded", "data", allow_duplicate=True),
+    # Train-test split durumu
+    Output("chk-train-test-split", "value", allow_duplicate=True),
+    Output("input-test-size", "value", allow_duplicate=True),
     # Profil değişince playground model çıktısını ve sonuç sinyalini temizle
     Output("pg-model-output", "children", allow_duplicate=True),
     Output("store-model-signal", "data", allow_duplicate=True),
@@ -262,21 +265,23 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     prevent_initial_call=True,
 )
 def load_profile_cb(_, profile_name):
-    _N_OUTPUTS = 32
+    _N_OUTPUTS = 34
     no = dash.no_update
     if not profile_name:
         return (no,) * _N_OUTPUTS
+
+    _IDX_PROFILE_STATUS = 19  # Output sırasında profile-status konumu
 
     try:
         new_key, config, expert_exclude, df = _load_profile(profile_name)
     except Exception as e:
         out = [no] * _N_OUTPUTS
-        out[16] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
+        out[_IDX_PROFILE_STATUS] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
         return tuple(out)
 
     if df is None:
         out = [no] * _N_OUTPUTS
-        out[16] = dbc.Alert("Profilde veri dosyası bulunamadı.", color="danger", style=_ALERT_STYLE)
+        out[_IDX_PROFILE_STATUS] = dbc.Alert("Profilde veri dosyası bulunamadı.", color="danger", style=_ALERT_STYLE)
         return tuple(out)
 
     # Dropdown seçeneklerini oluştur
@@ -374,6 +379,8 @@ def load_profile_cb(_, profile_name):
         jkeys[1] if len(jkeys) > 1 else "",             # input-sql-jk-2
         jkeys[2] if len(jkeys) > 2 else "",             # input-sql-jk-3
         profile_name,                                   # store-profile-loaded
+        ["split"] if config.get("has_test_split") else [],  # chk-train-test-split
+        config.get("test_size", 20),                    # input-test-size
         "",                                             # pg-model-output (temizle)
         None,                                           # store-model-signal (temizle)
         None,                                           # store-loaded-model-index (temizle)
