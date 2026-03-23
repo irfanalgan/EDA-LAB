@@ -755,7 +755,7 @@ def build_izleme_main():
             dbc.Tab(
                 html.Div(id="mon-tab-disc-content",
                          children=_metric_sub_tabs("disc")),
-                label="Diskriminasyon",
+                label="Gini/KS",
                 tab_id="tab-mon-discrimination",
                 className="tab-content-area",
             ),
@@ -829,9 +829,9 @@ def _build_mon_slideshow_modal():
                    style={"marginTop": "0.5rem", "fontSize": "0.78rem"}),
         ], className="slide-content"),
 
-        # Slide 2 — Diskriminasyon
+        # Slide 2 — Gini/KS
         html.Div([
-            html.H4("Diskriminasyon — KS & Gini", className="slide-title"),
+            html.H4("Gini/KS", className="slide-title"),
             html.P(
                 "Modelin iyi/kötü müşterileri ayırt etme gücünü ölçer. "
                 "KS (Kolmogorov-Smirnov) kümülatif dağılım farkını, "

@@ -1,4 +1,4 @@
-"""İzleme — Diskriminasyon tab callback'leri (KS, Gini/AR)."""
+"""İzleme — Gini/KS tab callback'leri."""
 
 from dash import html, dcc, Input, Output, State, no_update, dash_table
 import dash_bootstrap_components as dbc
@@ -86,7 +86,7 @@ def _render_disc(rating_counts, rating_defaults, title_prefix=""):
     ks, ks_rows = calc_ks_from_summary(rating_counts, rating_defaults)
     gini, ar, _, details = calc_gini_from_summary(rating_counts, rating_defaults)
     return html.Div([
-        html.H6(f"{title_prefix}Diskriminasyon Metrikleri",
+        html.H6(f"{title_prefix}Gini/KS Metrikleri",
                 style={"color": "#c8cdd8", "fontSize": "0.9rem",
                        "marginBottom": "0.5rem"}),
         _build_metric_cards(ks, gini * 100, ar * 100),
@@ -135,7 +135,7 @@ def mon_disc_populate(signal, key):
     fig.add_trace(go.Scatter(x=labels, y=gini_vals, mode="lines+markers",
                              name="Gini (%)", line=dict(color="#10b981", width=2),
                              marker=dict(size=6)))
-    fig.update_layout(**_CHART_LAYOUT, title="Diskriminasyon Trendi",
+    fig.update_layout(**_CHART_LAYOUT, title="Gini/KS Trendi",
                       yaxis_title="%")
     chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
 

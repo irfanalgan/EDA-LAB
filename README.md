@@ -25,7 +25,7 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 | Alt Tab | İçerik |
 |---------|--------|
 | **PSI** | Değişken bazlı PSI + Rating PSI; dönemsel trend grafiği (Rating PSI + her değişken ayrı çizgi) |
-| **Diskriminasyon** | KS, Gini (Accuracy Ratio); dönemsel trend |
+| **Gini/KS** | KS, Gini (Accuracy Ratio); dönemsel trend |
 | **Bad Rate** | Dönem bazlı default oranı; trend çizgisi |
 | **HHI** | Rating konsantrasyon indeksi; trend çizgisi + eşik çizgileri (0.06 / 0.10) |
 | **Backtesting** | Binomial test — rating bazlı güven aralıkları, conservatism, monotonicity |
@@ -301,7 +301,7 @@ EDA-LAB/
 │       ├── profile.py      # İzleme profil kaydet/yükle/sil + artımlı güncelleme
 │       └── tabs/           # ── Metrik tab callback'leri ──
 │           ├── psi.py      # Değişken PSI + Rating PSI (trend + kümülatif)
-│           ├── disc.py     # KS + Gini / Accuracy Ratio (trend + kümülatif)
+│           ├── disc.py     # Gini/KS — Accuracy Ratio (trend + kümülatif)
 │           ├── badrate.py  # Bad Rate (trend + kümülatif)
 │           ├── hhi.py      # HHI konsantrasyon (trend + kümülatif)
 │           ├── backtest.py # Binomial test (trend + kümülatif)
@@ -333,7 +333,7 @@ EDA-LAB/
 
 ### v2.0 — İzleme (Model Monitoring)
 - **İzleme Sekmesi** — Canlıya alınmış modellerin dönemsel performans takibi; Referans + İzleme veri yükleme, tek tıkla yapılandırma
-- **6 Metrik Tabı** — PSI (Değişken + Rating), Diskriminasyon (KS + Gini), Bad Rate, HHI, Backtesting (Binomial Test), Göç Matrisi
+- **6 Metrik Tabı** — PSI (Değişken + Rating), Gini/KS, Bad Rate, HHI, Backtesting (Binomial Test), Göç Matrisi
 - **Trend + Kümülatif** — Her tab'da dönem seçici dropdown + trend çizgi grafiği + tüm dönemlerin birleşik kümülatif sonucu
 - **Özet Tabanlı Mimari** — Ham veri saklanmaz; dönemsel özetler (~KB boyutunda) profilde tutulur, tüm metrikler özetlerden hesaplanır
 - **Artımlı Güncelleme** — Yeni veri geldiğinde sadece yeni dönemlerin özetleri hesaplanır, eski sonuçlar korunur
