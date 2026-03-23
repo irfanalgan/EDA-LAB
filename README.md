@@ -1,10 +1,12 @@
 # EDA Laboratuvarı
 
-Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA ve model geliştirme aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
+Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA, model geliştirme ve model izleme aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
 
 ---
 
 ## Özellikler
+
+### Geliştirme (EDA + Model)
 
 | Sekme | İçerik |
 |-------|--------|
@@ -18,9 +20,40 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 | **Playground** | Grafik oluşturucu + hızlı model (LR / LightGBM / XGBoost / RF) + SHAP |
 | **Sonuç** | Detaylı model raporu — metrikler, ROC, confusion matrix, SHAP, model özeti (accordion) |
 
+### İzleme (Model Monitoring)
+
+| Alt Tab | İçerik |
+|---------|--------|
+| **PSI** | Değişken bazlı PSI + Rating PSI; dönemsel trend grafiği (Rating PSI + her değişken ayrı çizgi) |
+| **Diskriminasyon** | KS, Gini (Accuracy Ratio); dönemsel trend |
+| **Bad Rate** | Dönem bazlı default oranı; trend çizgisi |
+| **HHI** | Rating konsantrasyon indeksi; trend çizgisi + eşik çizgileri (0.06 / 0.10) |
+| **Backtesting** | Binomial test — rating bazlı güven aralıkları, conservatism, monotonicity |
+| **Göç Matrisi** | Referans vs izleme rating geçiş heatmap'i (ID eşleştirmeli) |
+
+Her tab **Trend** (dönem dropdown + trend grafiği) ve **Kümülatif** (tüm dönemlerin birleşik sonucu) alt sekmelerinden oluşur.
+
 ### Veri Kaynakları
 - **MS SQL Server** — Windows Authentication, `config.toml` üzerinden bağlantı
 - **CSV** — Sürükle-bırak yükleme, ayırıcı seçimi (`,` `;` `\t` `|`)
+
+### İzleme Sistemi — Nasıl Çalışır?
+
+Canlıya alınmış modellerin performansını sürekli takip eder. Kullanıcı **Referans** (geliştirme sample'ı) ve **İzleme** (canlı tablo) verilerini yükler, yapılandırma onaylar, sistem tüm metrikleri dönemsel özetlere dönüştürür. **Ham veri saklanmaz** — profilde yalnızca özetler tutulur (~KB boyutunda).
+
+**Yapılandırma alanları:** Target kolonu, Tarih kolonu, PD kolonu, Model değişkenleri, ID kolonu (opsiyonel — göç matrisi için), Olgunlaşma süresi (ay), Dönem frekansı (Aylık / Çeyreklik), WoE aktif/pasif + OPT pickle
+
+**3 senaryo:**
+
+1. **İlk hesaplama** — Referans + İzleme yüklenir → WoE dönüşümü (aktifse) → Referans özeti çıkarılır → İzleme verisi dönemlere ayrılır → Her dönem için özet hesaplanır → Ham veri atılır
+2. **Profil yükle — yeni veri yok** — Özetler cache'den yüklenir, tab'lar anında dolar
+3. **Profil yükle — yeni dönem verisi var** — SQL'den sadece yeni satırlar çekilir → yeni dönemlerin özetleri hesaplanır → mevcut listeye eklenir → eski sonuçlar korunur
+
+**Kolon şeması koruması:** Profil kaydedilirken SQL tablosunun kolon listesi saklanır. Yeni veri çekildiğinde kolon yapısı değişmişse hesaplama durdurulur, kullanıcıya yeni profil açması veya tabloyu eski yapısına döndürmesi önerilir.
+
+**Olgunlaşma filtresi:** PSI ve HHI gibi anlık metrikler tüm dönemleri kullanır. Gini, KS, Bad Rate, Backtesting gibi sonuç bağımlı metrikler yalnızca olgun dönemleri (default sonucu gözlemlenmiş) kullanır.
+
+**WoE etkisi:** WoE yalnızca Değişken PSI'ı etkiler (bin edge'leri optb.splits'ten gelir). Diğer tüm metrikler (KS, Gini, Bad Rate, HHI, Backtesting, Göç Matrisi) PD/Rating kolonundan hesaplanır — WoE'den bağımsızdır.
 
 ### Outlier Analizi
 - **IQR** — 1.5× (normal sınır) veya 3.0× (aşırı aykırı) çarpanı
@@ -132,6 +165,8 @@ Segment filtresi IV Ranking'i **23×** hızlandırıyor. Küçük segment ile ç
 
 ## Mimari
 
+### Geliştirme tarafı
+
 ```
 SQL / CSV → df_original (server-side cache, UUID key)
                 │
@@ -149,6 +184,28 @@ SQL / CSV → df_original (server-side cache, UUID key)
 ### Precompute — Background Thread
 
 Yapılandırma onaylanınca IV Ranking, Profiling ve Korelasyon hesaplamaları ayrı bir `threading.Thread` içinde çalışır. Dash ana thread'i bloklanmaz; diğer sekmeler hesaplama süresince kullanılabilir. İlerleme 300ms aralıklarla `dcc.Interval` üzerinden UI'ya yansır.
+
+### İzleme tarafı
+
+```
+Referans (SQL/CSV) ──┐
+                     ├─► compute.py (background thread)
+İzleme  (SQL/CSV) ──┘         │
+                               ├─ ref_summary        (tek dict, ~10-30 KB)
+                               ├─ period_summaries[]  (dönem başı ~10-50 KB)
+                               └─ ref_df.pkl          (göç matrisi için ham ref)
+                                       │
+                   ┌───────────────────┼───────────────────┐
+                   │                   │                   │
+             _MON_STORE          profile.py           tabs/*.py
+          (server-side cache)  (kaydet/yükle/sil)   (6 metrik tabı)
+```
+
+**Dönemsel özet yapısı:** Her dönem için `rating_counts[25]`, `rating_defaults[25]`, `var_psi{değişken→bin counts}` ve opsiyonel `migration_matrix[25×25]` saklanır. Tüm metrikler bu özetlerden hesaplanır — ham veriye gerek yoktur.
+
+**Kümülatif hesaplama:** Dönemsel özetlerin count'ları element bazlı toplanır. Yeni bir hesaplama gerektirmez.
+
+**Artımlı güncelleme:** Profil yüklendiğinde SQL'den `WHERE tarih > last_period` ile sadece yeni satırlar çekilir, yeni dönemlerin özetleri hesaplanıp mevcut listeye eklenir.
 
 ---
 
@@ -209,7 +266,7 @@ Windows Authentication kullanılır, kullanıcı adı/şifre gerekmez.
 EDA-LAB/
 ├── app.py                  # Giriş noktası (23 satır)
 ├── app_instance.py         # Dash app tanımı — tek yer
-├── server_state.py         # Paylaşılan state (_SERVER_STORE, _PRECOMPUTE_PROGRESS)
+├── server_state.py         # Paylaşılan state (_SERVER_STORE, _PRECOMPUTE_PROGRESS, _MON_STORE)
 ├── benchmark.py            # Performans test scripti
 ├── setup_deps.py           # Otomatik bağımlılık yükleyici
 ├── pip_prefix.txt          # Kurumsal pip prefix (opsiyonel)
@@ -219,7 +276,8 @@ EDA-LAB/
 ├── data/
 │   └── loader.py           # SQL bağlantısı
 ├── layout/
-│   └── __init__.py         # build_layout() — sidebar, tab yapıları
+│   ├── __init__.py         # build_layout() — sidebar, tab yapıları, store'lar
+│   └── izleme.py           # İzleme sekmesi layout'u (config, tab'lar, progress modal)
 ├── callbacks/
 │   ├── __init__.py         # Tüm modülleri import eder (kayıt tetikler)
 │   ├── data_loading.py     # CSV/SQL yükleme, config, segment
@@ -234,7 +292,20 @@ EDA-LAB/
 │   ├── var_summary.py      # Değişken Özeti
 │   ├── playground.py       # Grafik + Hızlı Model + SHAP
 │   ├── results.py          # Sonuç sekmesi — detaylı model raporu
-│   └── profile.py          # Profil kaydet/yükle/sil + model kaydet/yükle
+│   ├── profile.py          # Profil kaydet/yükle/sil + model kaydet/yükle
+│   └── izleme/             # ── İzleme modülü ──
+│       ├── __init__.py     # Alt modül import'ları
+│       ├── compute.py      # Hesaplama motoru (ref/dönem özeti, kümülatif, background thread)
+│       ├── data.py         # Veri yükleme, config, format modal, yapılandırma onayı
+│       ├── nav.py          # İzleme içi navigasyon
+│       ├── profile.py      # İzleme profil kaydet/yükle/sil + artımlı güncelleme
+│       └── tabs/           # ── Metrik tab callback'leri ──
+│           ├── psi.py      # Değişken PSI + Rating PSI (trend + kümülatif)
+│           ├── disc.py     # KS + Gini / Accuracy Ratio (trend + kümülatif)
+│           ├── badrate.py  # Bad Rate (trend + kümülatif)
+│           ├── hhi.py      # HHI konsantrasyon (trend + kümülatif)
+│           ├── backtest.py # Binomial test (trend + kümülatif)
+│           └── migration.py# Göç matrisi heatmap (trend + kümülatif)
 ├── modules/
 │   ├── profiling.py        # Veri profiling
 │   ├── target_analysis.py  # Target & IV hesaplamaları
@@ -259,6 +330,26 @@ EDA-LAB/
 ---
 
 ## Değişiklik Geçmişi
+
+### v2.0 — İzleme (Model Monitoring)
+- **İzleme Sekmesi** — Canlıya alınmış modellerin dönemsel performans takibi; Referans + İzleme veri yükleme, tek tıkla yapılandırma
+- **6 Metrik Tabı** — PSI (Değişken + Rating), Diskriminasyon (KS + Gini), Bad Rate, HHI, Backtesting (Binomial Test), Göç Matrisi
+- **Trend + Kümülatif** — Her tab'da dönem seçici dropdown + trend çizgi grafiği + tüm dönemlerin birleşik kümülatif sonucu
+- **Özet Tabanlı Mimari** — Ham veri saklanmaz; dönemsel özetler (~KB boyutunda) profilde tutulur, tüm metrikler özetlerden hesaplanır
+- **Artımlı Güncelleme** — Yeni veri geldiğinde sadece yeni dönemlerin özetleri hesaplanır, eski sonuçlar korunur
+- **Kolon Şeması Koruması** — SQL tablosunda kolon değişikliği algılanır, uyumsuzlukta hesaplama durdurulur
+- **Olgunlaşma Filtresi** — Sonuç bağımlı metrikler (KS, Gini, Bad Rate, Backtesting) yalnızca olgun dönemleri kullanır
+- **WoE Entegrasyonu** — OPT pickle yüklenerek değişken PSI'da WoE bin'leri kullanılabilir; diğer metrikler WoE'den bağımsız
+- **İzleme Profilleri** — Ayrı profil sistemi (kaydet/yükle/sil); `ref_summary.pkl` + `period_summaries.pkl` + `ref_df.pkl` + `opt.pkl`
+- **Background Compute** — Hesaplama ayrı thread'de çalışır, iptal edilebilir; ilerleme progress bar ile gösterilir
+- **PSI Trend Grafiği** — Rating PSI (kalın kırmızı) + her değişkenin PSI'ı (ayrı renkli ince çizgiler) tek grafikte
+- **Format Modal** — CSV ayırıcı seçimi ve önizleme (izleme tarafı için)
+
+### v1.9
+- **Modelleme Filtreleri** — HHI accordion, profil yükleme düzeltmeleri
+
+### v1.8
+- **Thread Cancellation** — Precompute iptal desteği, ham değerler precompute'a eklendi, mutlak korelasyon
 
 ### v1.7
 - **Sonuç Sekmesi** — Playground'dan ayrı, detaylı model raporu: Metrikler, Model Özeti, ROC Eğrisi, Confusion Matrix (Train/Test/OOT yan yana), SHAP Beeswarm; tümü accordion ile aç/kapat

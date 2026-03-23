@@ -2,6 +2,7 @@ from dash import dcc, html
 import dash_bootstrap_components as dbc
 
 from utils.chart_helpers import _tab_info
+from layout.izleme import build_izleme_container
 
 # ── Sidebar geçiş sabitleri ────────────────────────────────────────────────────
 _T = "max-width 0.3s ease-in-out, flex 0.3s ease-in-out, opacity 0.25s ease-in-out"
@@ -24,10 +25,20 @@ _SIDEBAR_CLOSED_STYLE = {"maxWidth": "0", "overflow": "hidden", "opacity": "0",
 def build_navbar():
     return dbc.Navbar(
         dbc.Container([
+            # ── Brand + Top-level nav links ──
             html.Div([
-                html.Span("EDA", className="navbar-logo-text"),
-                html.Span("LAB", className="navbar-brand-title"),
-            ], style={"display": "flex", "alignItems": "baseline", "gap": "0.4rem"}),
+                html.Div([
+                    html.Span("EDA", className="navbar-logo-text"),
+                    html.Span("LAB", className="navbar-brand-title"),
+                ], style={"display": "flex", "alignItems": "baseline", "gap": "0.4rem"}),
+                html.Div([
+                    html.Button("Geliştirme", id="btn-nav-gelistirme", n_clicks=0,
+                                className="top-nav-link active"),
+                    html.Button("İzleme", id="btn-nav-izleme", n_clicks=0,
+                                className="top-nav-link"),
+                ], style={"display": "flex", "gap": "0.2rem", "marginLeft": "1.5rem"}),
+            ], style={"display": "flex", "alignItems": "center"}),
+            # ── Right side ──
             html.Div([
                 html.Span("Keşifsel Veri Analizi", className="navbar-subtitle"),
                 html.Button(
@@ -1638,17 +1649,26 @@ def _build_slideshow_modal():
 def build_layout():
     return html.Div([
         build_navbar(),
-        dbc.Row([
-            dbc.Col(
-                html.Div([
-                    build_sidebar(),
-                    html.Button("‹", id="btn-sidebar-toggle", className="sidebar-toggle"),
-                ]),
-                id="col-sidebar", width=3, style=_COL_SIDEBAR_OPEN,
-            ),
-            dbc.Col(build_main(), id="col-main", width=9,
-                    style={**_COL_MAIN_OPEN, "position": "relative"}),
-        ], style={"margin": "0"}),
+
+        # ── Geliştirme container (mevcut yapı) ──
+        html.Div(id="container-gelistirme", children=[
+            dbc.Row([
+                dbc.Col(
+                    html.Div([
+                        build_sidebar(),
+                        html.Button("‹", id="btn-sidebar-toggle", className="sidebar-toggle"),
+                    ]),
+                    id="col-sidebar", width=3, style=_COL_SIDEBAR_OPEN,
+                ),
+                dbc.Col(build_main(), id="col-main", width=9,
+                        style={**_COL_MAIN_OPEN, "position": "relative"}),
+            ], style={"margin": "0"}),
+        ]),
+
+        # ── İzleme container (yeni — bağımsız) ──
+        build_izleme_container(),
+
+        # ── Geliştirme Store'ları ──
         dcc.Store(id="store-key", storage_type="memory"),
         dcc.Store(id="store-config", storage_type="memory"),
         dcc.Store(id="store-expert-exclude", storage_type="memory"),
@@ -1659,6 +1679,23 @@ def build_layout():
         dcc.Store(id="store-pending-note", storage_type="memory"),
         dcc.Store(id="store-loaded-model-index", storage_type="memory"),
         dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
+
+        # ── İzleme Store'ları (tamamen bağımsız) ─────────────────────────────────
+        dcc.Store(id="store-mon-key", storage_type="memory"),
+        dcc.Store(id="store-mon-config", storage_type="memory"),
+        # Hangi toggle aktif: "ref" veya "mon"
+        dcc.Store(id="store-mon-toggle", data="ref", storage_type="memory"),
+        # Yüklenen verilerin durumu: {"ref_rows": N, "mon_rows": N} veya {}
+        dcc.Store(id="store-mon-loaded", data={}, storage_type="memory"),
+        # Hesaplama durumu (compute thread progress key)
+        dcc.Store(id="store-mon-compute-state", storage_type="memory"),
+        # Hesaplama tamamlandı sinyali (tab'ların yeniden render'ı için)
+        dcc.Store(id="store-mon-summaries-signal", storage_type="memory"),
+        # Hesaplama progress interval
+        dcc.Interval(id="interval-mon-compute", interval=400, disabled=True, n_intervals=0),
+        # İzleme Slideshow
+        dcc.Store(id="mon-store-slide-index", data=0),
+        dcc.Interval(id="mon-interval-slideshow", interval=8000, disabled=True, n_intervals=0),
 
         # ── Loading Slideshow ────────────────────────────────────────────────────
         dcc.Store(id="store-slide-index", data=0),

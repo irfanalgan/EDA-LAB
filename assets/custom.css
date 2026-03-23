@@ -103,10 +103,33 @@ body {
     font-weight: 500;
 }
 
+/* ── Top-level nav links (Geliştirme / İzleme) ─────────────────────────── */
+.top-nav-link {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0.25rem 0.7rem 0.45rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+    text-transform: uppercase;
+}
+.top-nav-link:hover {
+    color: var(--text-secondary);
+}
+.top-nav-link.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    SIDEBAR
    ══════════════════════════════════════════════════════════════════════════ */
-#sidebar {
+#sidebar,
+#mon-sidebar {
     background: linear-gradient(180deg, #131A2A 0%, #111827 40%, #0F1522 100%);
     border-right: 1px solid var(--border-subtle);
     min-height: calc(100vh - 56px);
@@ -114,7 +137,8 @@ body {
     transition: max-width 0.3s ease-in-out, opacity 0.25s ease-in-out;
     position: relative;
 }
-#sidebar::after {
+#sidebar::after,
+#mon-sidebar::after {
     content: "";
     position: absolute;
     top: 0; right: 0; bottom: 0;
