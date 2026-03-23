@@ -130,7 +130,7 @@ def _build_format_modal():
                 html.Strong("opt pickle"),
                 " dosyasını yükleyebilirsiniz. Bu durumda değişken PSI hesaplaması "
                 "WoE dönüştürülmüş değerler üzerinden yapılır. "
-                "Diğer metrikler (KS, Gini, Bad Rate, vb.) WoE'den etkilenmez — "
+                "Diğer metrikler (KS, Gini, Temerrüt Oranı, vb.) WoE'den etkilenmez — "
                 "her zaman PD/Rating kolonundan hesaplanır.",
             ], style={"fontSize": "0.80rem", "color": "#a8b2c2"}),
 
@@ -762,7 +762,7 @@ def build_izleme_main():
             dbc.Tab(
                 html.Div(id="mon-tab-badrate-content",
                          children=_metric_sub_tabs("badrate")),
-                label="Bad Rate",
+                label="Temerrüt Oranı",
                 tab_id="tab-mon-badrate",
                 className="tab-content-area",
             ),
@@ -870,13 +870,13 @@ def _build_mon_slideshow_modal():
             ], className="slide-chips"),
         ], className="slide-content"),
 
-        # Slide 4 — HHI & Bad Rate
+        # Slide 4 — HHI & Temerrüt Oranı
         html.Div([
-            html.H4("HHI & Bad Rate", className="slide-title"),
+            html.H4("HHI & Temerrüt Oranı", className="slide-title"),
             html.P(
                 "HHI (Herfindahl-Hirschman Index) rating dağılımının "
                 "konsantrasyonunu ölçer — düşük HHI dengeli dağılım demektir. "
-                "Bad Rate ise dönemsel default oranını takip eder.",
+                "Temerrüt Oranı ise dönemsel default oranını takip eder.",
                 className="slide-text",
             ),
             html.Div("HHI < 0.06 → Dengeli  |  0.06–0.10 → Orta  |  > 0.10 → Yoğun",

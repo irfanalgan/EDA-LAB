@@ -26,7 +26,7 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 |---------|--------|
 | **PSI** | Değişken bazlı PSI + Rating PSI; dönemsel trend grafiği (Rating PSI + her değişken ayrı çizgi) |
 | **Gini/KS** | KS, Gini (Accuracy Ratio); dönemsel trend |
-| **Bad Rate** | Dönem bazlı default oranı; trend çizgisi |
+| **Temerrüt Oranı** | Dönem bazlı default oranı; trend çizgisi |
 | **HHI** | Rating konsantrasyon indeksi; trend çizgisi + eşik çizgileri (0.06 / 0.10) |
 | **Backtesting** | Binomial test — rating bazlı güven aralıkları, conservatism, monotonicity |
 | **Göç Matrisi** | Referans vs izleme rating geçiş heatmap'i (ID eşleştirmeli) |
@@ -302,7 +302,7 @@ EDA-LAB/
 │       └── tabs/           # ── Metrik tab callback'leri ──
 │           ├── psi.py      # Değişken PSI + Rating PSI (trend + kümülatif)
 │           ├── disc.py     # Gini/KS — Accuracy Ratio (trend + kümülatif)
-│           ├── badrate.py  # Bad Rate (trend + kümülatif)
+│           ├── badrate.py  # Temerrüt Oranı (trend + kümülatif)
 │           ├── hhi.py      # HHI konsantrasyon (trend + kümülatif)
 │           ├── backtest.py # Binomial test (trend + kümülatif)
 │           └── migration.py# Göç matrisi heatmap (trend + kümülatif)
@@ -333,12 +333,12 @@ EDA-LAB/
 
 ### v2.0 — İzleme (Model Monitoring)
 - **İzleme Sekmesi** — Canlıya alınmış modellerin dönemsel performans takibi; Referans + İzleme veri yükleme, tek tıkla yapılandırma
-- **6 Metrik Tabı** — PSI (Değişken + Rating), Gini/KS, Bad Rate, HHI, Backtesting (Binomial Test), Göç Matrisi
+- **6 Metrik Tabı** — PSI (Değişken + Rating), Gini/KS, Temerrüt Oranı, HHI, Backtesting (Binomial Test), Göç Matrisi
 - **Trend + Kümülatif** — Her tab'da dönem seçici dropdown + trend çizgi grafiği + tüm dönemlerin birleşik kümülatif sonucu
 - **Özet Tabanlı Mimari** — Ham veri saklanmaz; dönemsel özetler (~KB boyutunda) profilde tutulur, tüm metrikler özetlerden hesaplanır
 - **Artımlı Güncelleme** — Yeni veri geldiğinde sadece yeni dönemlerin özetleri hesaplanır, eski sonuçlar korunur
 - **Kolon Şeması Koruması** — SQL tablosunda kolon değişikliği algılanır, uyumsuzlukta hesaplama durdurulur
-- **Olgunlaşma Filtresi** — Sonuç bağımlı metrikler (KS, Gini, Bad Rate, Backtesting) yalnızca olgun dönemleri kullanır
+- **Olgunlaşma Filtresi** — Sonuç bağımlı metrikler (KS, Gini, Temerrüt Oranı, Backtesting) yalnızca olgun dönemleri kullanır
 - **WoE Entegrasyonu** — OPT pickle yüklenerek değişken PSI'da WoE bin'leri kullanılabilir; diğer metrikler WoE'den bağımsız
 - **İzleme Profilleri** — Ayrı profil sistemi (kaydet/yükle/sil); `ref_summary.pkl` + `period_summaries.pkl` + `ref_df.pkl` + `opt.pkl`
 - **Background Compute** — Hesaplama ayrı thread'de çalışır, iptal edilebilir; ilerleme progress bar ile gösterilir

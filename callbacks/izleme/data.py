@@ -658,7 +658,7 @@ def mon_update_metrics(config, key):
         card(f"{active_rows:,}", "Aktif Satır"),
         card(f"{df_active.shape[1]}", "Kolon Sayısı"),
         date_card,
-        card(f"%{target_rate:.2f}", f"Bad Rate  ({target})", "#ef4444", tooltip=tooltip),
+        card(f"%{target_rate:.2f}", f"Temerrüt Oranı  ({target})", "#ef4444", tooltip=tooltip),
     ]
     return dbc.Row(cards, className="g-3 mb-0")
 

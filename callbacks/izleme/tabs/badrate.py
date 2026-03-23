@@ -1,4 +1,4 @@
-"""İzleme — Bad Rate tab callback'leri."""
+"""İzleme — Temerrüt Oranı tab callback'leri."""
 
 from dash import html, dcc, Input, Output, State, no_update, dash_table
 import dash_bootstrap_components as dbc
@@ -24,7 +24,7 @@ _NO_DATA = html.P("Henüz veri yok (olgun dönem gerekli).",
 
 def _render_bad_rate(n_total, n_bad, bad_rate, title=""):
     return html.Div([
-        html.H6(title or "Bad Rate",
+        html.H6(title or "Temerrüt Oranı",
                 style={"color": "#c8cdd8", "fontSize": "0.9rem",
                        "marginBottom": "0.5rem"}),
         dbc.Row([
@@ -41,7 +41,7 @@ def _render_bad_rate(n_total, n_bad, bad_rate, title=""):
                          "marginBottom": "0"}),
             ]), className="bg-dark border-secondary"), width=4),
             dbc.Col(dbc.Card(dbc.CardBody([
-                html.P("Bad Rate", style={"color": "#7e8fa4",
+                html.P("Temerrüt Oranı", style={"color": "#7e8fa4",
                        "fontSize": "0.72rem", "marginBottom": "2px"}),
                 html.H5(f"{bad_rate:.2%}", style={"color": "#f59e0b",
                          "marginBottom": "0"}),
@@ -79,11 +79,11 @@ def mon_badrate_populate(signal, key):
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=labels, y=rates, mode="lines+markers",
-                             name="Bad Rate (%)",
+                             name="Temerrüt Oranı (%)",
                              line=dict(color="#ef4444", width=2),
                              marker=dict(size=6)))
-    fig.update_layout(**_CHART_LAYOUT, title="Bad Rate Trendi",
-                      yaxis_title="Bad Rate (%)")
+    fig.update_layout(**_CHART_LAYOUT, title="Temerrüt Oranı Trendi",
+                      yaxis_title="Temerrüt Oranı (%)")
     chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
 
     # Kümülatif
@@ -91,7 +91,7 @@ def mon_badrate_populate(signal, key):
     if cum:
         cum_content = _render_bad_rate(
             cum["n_total"], cum["n_bad"], cum["bad_rate"],
-            "Kümülatif Bad Rate")
+            "Kümülatif Temerrüt Oranı")
     else:
         cum_content = _NO_DATA
 
