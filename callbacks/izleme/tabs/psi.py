@@ -41,33 +41,151 @@ def _psi_label(val):
 
 
 def _build_var_psi_table(ref_summary, mon_var_psi):
-    """Değişken bazlı PSI tablosu üret."""
+    """Değişken bazlı detaylı bin-level PSI tabloları üret."""
     ref_var_psi = ref_summary.get("var_psi", {})
-    rows = []
+    tables = []
+
     for var in sorted(ref_var_psi.keys()):
         if var not in mon_var_psi:
             continue
-        psi_val, _ = calc_var_psi(ref_var_psi[var], mon_var_psi[var])
-        rows.append({"Değişken": var, "PSI": round(psi_val, 4),
-                     "Yorum": _psi_label(psi_val)})
+        ref_v = ref_var_psi[var]
+        mon_v = mon_var_psi[var]
+        psi_val, bin_rows = calc_var_psi(ref_v, mon_v)
+        if not bin_rows:
+            continue
 
-    if not rows:
+        has_woe = bool(ref_v.get("woe_values"))
+
+        # Toplam hesapla
+        ref_total = sum(r["ref_count"] for r in bin_rows)
+        mon_total = sum(r["mon_count"] for r in bin_rows)
+        ref_bad_total = sum(r["ref_bad"] for r in bin_rows)
+        mon_bad_total = sum(r["mon_bad"] for r in bin_rows)
+        ref_good_total = ref_total - ref_bad_total
+        mon_good_total = mon_total - mon_bad_total
+
+        data = []
+        for r in bin_rows:
+            ref_good = r["ref_count"] - r["ref_bad"]
+            mon_good = r["mon_count"] - r["mon_bad"]
+            ref_bad_rate = r["ref_bad"] / r["ref_count"] if r["ref_count"] > 0 else 0
+            mon_bad_rate = r["mon_bad"] / r["mon_count"] if r["mon_count"] > 0 else 0
+            ref_good_pct = ref_good / ref_good_total * 100 if ref_good_total > 0 else 0
+            ref_bad_pct = r["ref_bad"] / ref_bad_total * 100 if ref_bad_total > 0 else 0
+            ref_t_pct = r["ref_count"] / ref_total * 100 if ref_total > 0 else 0
+            mon_good_pct = mon_good / mon_good_total * 100 if mon_good_total > 0 else 0
+            mon_bad_pct = r["mon_bad"] / mon_bad_total * 100 if mon_bad_total > 0 else 0
+            mon_t_pct = r["mon_count"] / mon_total * 100 if mon_total > 0 else 0
+
+            # Bin label
+            lo = r.get("edge_lo")
+            hi = r.get("edge_hi")
+            if lo is not None and hi is not None:
+                lo_s = "-∞" if lo == float("-inf") else f"{lo:.4g}"
+                hi_s = "∞" if hi == float("inf") else f"{hi:.4g}"
+                bin_label = f"[{lo_s}, {hi_s})"
+            else:
+                bin_label = str(r.get("bin_idx", ""))
+
+            row = {
+                "Bins": bin_label,
+                "REF Good": ref_good,
+                "REF Bad": r["ref_bad"],
+                "REF Total": r["ref_count"],
+                "REF Bad Rate": f"{ref_bad_rate:.2%}",
+                "REF Good%": f"{ref_good_pct:.2f}%",
+                "REF Bad%": f"{ref_bad_pct:.2f}%",
+                "REF T%": f"{ref_t_pct:.2f}%",
+            }
+            if has_woe:
+                row["REF WoE"] = f"{r.get('woe', 0):.4f}"
+                row["REF IV"] = f"{r.get('ref_iv_contrib', 0):.4f}"
+
+            row.update({
+                "MON Good": mon_good,
+                "MON Bad": r["mon_bad"],
+                "MON Total": r["mon_count"],
+                "MON Bad Rate": f"{mon_bad_rate:.2%}",
+                "MON Good%": f"{mon_good_pct:.2f}%",
+                "MON Bad%": f"{mon_bad_pct:.2f}%",
+                "MON T%": f"{mon_t_pct:.2f}%",
+            })
+            if has_woe:
+                row["MON WoE"] = f"{r.get('woe', 0):.4f}"
+                row["MON IV"] = f"{r.get('mon_iv_contrib', 0):.4f}"
+
+            row["Band PSI"] = f"{r['psi_contrib']:.4f}"
+            data.append(row)
+
+        # Toplam satır
+        ref_br = ref_bad_total / ref_total if ref_total > 0 else 0
+        mon_br = mon_bad_total / mon_total if mon_total > 0 else 0
+        total_row = {
+            "Bins": "TOPLAM",
+            "REF Good": ref_good_total,
+            "REF Bad": ref_bad_total,
+            "REF Total": ref_total,
+            "REF Bad Rate": f"{ref_br:.2%}",
+            "REF Good%": "100.00%",
+            "REF Bad%": "100.00%",
+            "REF T%": "100.00%",
+        }
+        if has_woe:
+            ref_iv = sum(r.get("ref_iv_contrib", 0) for r in bin_rows)
+            total_row["REF WoE"] = ""
+            total_row["REF IV"] = f"{ref_iv:.4f}"
+
+        total_row.update({
+            "MON Good": mon_good_total,
+            "MON Bad": mon_bad_total,
+            "MON Total": mon_total,
+            "MON Bad Rate": f"{mon_br:.2%}",
+            "MON Good%": "100.00%",
+            "MON Bad%": "100.00%",
+            "MON T%": "100.00%",
+        })
+        if has_woe:
+            mon_iv = sum(r.get("mon_iv_contrib", 0) for r in bin_rows)
+            total_row["MON WoE"] = ""
+            total_row["MON IV"] = f"{mon_iv:.4f}"
+
+        total_row["Band PSI"] = f"{psi_val:.4f}"
+        data.append(total_row)
+
+        # Kolon sırası
+        cols = ["Bins",
+                "REF Good", "REF Bad", "REF Total", "REF Bad Rate",
+                "REF Good%", "REF Bad%", "REF T%"]
+        if has_woe:
+            cols += ["REF WoE", "REF IV"]
+        cols += ["MON Good", "MON Bad", "MON Total", "MON Bad Rate",
+                 "MON Good%", "MON Bad%", "MON T%"]
+        if has_woe:
+            cols += ["MON WoE", "MON IV"]
+        cols += ["Band PSI"]
+
+        psi_color = "#ef4444" if psi_val >= 0.25 else (
+            "#f59e0b" if psi_val >= 0.10 else "#10b981")
+        tables.append(html.Div([
+            html.H6(f"{var} — PSI: {psi_val:.4f} ({_psi_label(psi_val)})",
+                     style={"color": psi_color, "fontSize": "0.85rem",
+                            "marginTop": "1rem", "marginBottom": "0.3rem"}),
+            dash_table.DataTable(
+                columns=[{"name": c, "id": c} for c in cols],
+                data=data,
+                style_header=_TH,
+                style_cell={**_TD, "minWidth": "60px"},
+                style_data_conditional=[_TD_ODD],
+                page_size=30,
+                style_table={"overflowX": "auto"},
+            ),
+        ]))
+
+    if not tables:
         return html.P("Değişken PSI verisi yok.",
                        style={"color": "#7e8fa4", "fontSize": "0.82rem"})
 
-    return dash_table.DataTable(
-        columns=[{"name": c, "id": c} for c in ["Değişken", "PSI", "Yorum"]],
-        data=rows,
-        style_header=_TH, style_cell=_TD,
-        style_data_conditional=[
-            _TD_ODD,
-            {"if": {"filter_query": "{PSI} >= 0.25"}, "color": "#ef4444"},
-            {"if": {"filter_query": "{PSI} >= 0.10 && {PSI} < 0.25"},
-             "color": "#f59e0b"},
-        ],
-        page_size=50,
-        style_table={"overflowX": "auto"},
-    )
+    return html.Div(tables)
 
 
 def _build_rating_psi_table(ref_summary, mon_summary):

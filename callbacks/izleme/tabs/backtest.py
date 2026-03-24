@@ -54,8 +54,8 @@ def _render_backtest(rating_counts, rating_defaults, title=""):
         })
 
     cols = ["Rating", "Adet", "Yoğunlaşma", "Default", "DR", "MIDPD",
-            "Conservatism", "Üst Sınır", "Alt Sınır", "Üst Flag", "Alt Flag",
-            "Monotonicity"]
+            "Conservatism", "Monotonicity", "Üst Sınır", "Alt Sınır",
+            "Üst Flag", "Alt Flag"]
 
     return html.Div([
         html.H6(title or "Backtesting — Binomial Test",

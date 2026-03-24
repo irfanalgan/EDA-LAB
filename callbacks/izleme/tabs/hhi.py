@@ -43,14 +43,24 @@ def _render_hhi(rating_counts, title=""):
         return _NO_DATA
 
     data = []
+    total_count = 0
     for r in rows:
         if r["count"] == 0:
             continue
+        total_count += r["count"]
         data.append({
             "Rating": r["rating"],
             "Adet": r["count"],
             "Pay (%)": f"{r['share']:.2%}",
             "HHI Katkı": f"{r['hhi_contrib']:.6f}",
+        })
+    # Toplam satır
+    if data:
+        data.append({
+            "Rating": "Toplam",
+            "Adet": total_count,
+            "Pay (%)": "100.00%",
+            "HHI Katkı": f"{hhi:.6f}",
         })
 
     label = _hhi_label(hhi)

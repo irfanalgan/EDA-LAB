@@ -55,23 +55,96 @@ def _build_ks_table(ks_val, rows):
     if not rows:
         return html.Div()
     data = []
+    tot_good, tot_bad, tot_total = 0, 0, 0
     for r in rows:
         if r["total"] == 0:
             continue
+        tot_good += r["good"]
+        tot_bad += r["bad"]
+        tot_total += r["total"]
         data.append({
             "Rating": r["rating"],
             "Good": r["good"],
             "Bad": r["bad"],
             "Toplam": r["total"],
-            "Bad Rate": f"{r['bad_rate']:.2%}",
+            "Temerrüt Oranı": f"{r['bad_rate']:.2%}",
             "Küm Good": r["cum_good"],
             "Küm Bad": r["cum_bad"],
             "%Küm Good": f"{r['pct_cum_good']:.2f}%",
             "%Küm Bad": f"{r['pct_cum_bad']:.2f}%",
             "Fark": f"{r['diff']:.2f}%",
         })
-    cols = ["Rating", "Good", "Bad", "Toplam", "Bad Rate",
+    # Toplam satır
+    if data:
+        last = data[-1]
+        data.append({
+            "Rating": "Toplam",
+            "Good": tot_good,
+            "Bad": tot_bad,
+            "Toplam": tot_total,
+            "Temerrüt Oranı": f"{tot_bad / tot_total:.2%}" if tot_total else "0%",
+            "Küm Good": last["Küm Good"],
+            "Küm Bad": last["Küm Bad"],
+            "%Küm Good": "100.00%",
+            "%Küm Bad": "100.00%",
+            "Fark": "",
+        })
+    cols = ["Rating", "Good", "Bad", "Toplam", "Temerrüt Oranı",
             "Küm Good", "Küm Bad", "%Küm Good", "%Küm Bad", "Fark"]
+    return dash_table.DataTable(
+        columns=[{"name": c, "id": c} for c in cols],
+        data=data,
+        style_header=_TH, style_cell=_TD,
+        style_data_conditional=[_TD_ODD],
+        page_size=30,
+        style_table={"overflowX": "auto"},
+    )
+
+
+def _build_gini_table(gini_val, details):
+    """Excel formatında Gini tablosu (kötüden iyiye sıralı)."""
+    gini_rows = details.get("rows", [])
+    if not gini_rows:
+        return html.Div()
+    data = []
+    for r in gini_rows:
+        if r["total"] == 0:
+            continue
+        data.append({
+            "Rating": r["rating"],
+            "Good": r["good"],
+            "Bad": r["bad"],
+            "Total": r["total"],
+            "Bad Rate": f"{r['bad_rate']:.2%}",
+            "Cum Good": r["cum_good"],
+            "Cum Bad": r["cum_bad"],
+            "Cum Total": r["cum_total"],
+            "% Cum Good": f"{r['pct_cum_good']:.2f}%",
+            "% Cum Bad": f"{r['pct_cum_bad']:.2f}%",
+            "% Cum Total": f"{r['pct_cum_total']:.2f}%",
+            "Gini Area": f"{r['gini_area']:.4f}",
+            "Random": f"{r['random']:.2f}%",
+            "Perfect Curve": f"{r['perfect_curve']:.2f}%",
+        })
+    # Toplam satır
+    if data:
+        last = data[-1]
+        data.append({
+            "Rating": "Toplam",
+            "Good": "", "Bad": "", "Total": "", "Bad Rate": "",
+            "Cum Good": last["Cum Good"],
+            "Cum Bad": last["Cum Bad"],
+            "Cum Total": last["Cum Total"],
+            "% Cum Good": "100.00%",
+            "% Cum Bad": "100.00%",
+            "% Cum Total": "100.00%",
+            "Gini Area": f"{sum(r['gini_area'] for r in gini_rows):.4f}",
+            "Random": "", "Perfect Curve": "",
+        })
+    cols = ["Rating", "Good", "Bad", "Total", "Bad Rate",
+            "Cum Good", "Cum Bad", "Cum Total",
+            "% Cum Good", "% Cum Bad", "% Cum Total",
+            "Gini Area", "Random", "Perfect Curve"]
     return dash_table.DataTable(
         columns=[{"name": c, "id": c} for c in cols],
         data=data,
@@ -93,6 +166,10 @@ def _render_disc(rating_counts, rating_defaults, title_prefix=""):
         html.H6("KS Tablosu", style={"color": "#c8cdd8", "fontSize": "0.85rem",
                                       "marginTop": "1rem", "marginBottom": "0.5rem"}),
         _build_ks_table(ks, ks_rows),
+        html.H6(f"Gini Tablosu — Gini: {gini * 100:.2f}%",
+                style={"color": "#c8cdd8", "fontSize": "0.85rem",
+                       "marginTop": "1.5rem", "marginBottom": "0.5rem"}),
+        _build_gini_table(gini, details),
     ])
 
 

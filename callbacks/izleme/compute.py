@@ -8,9 +8,12 @@ Background thread ile çalışır, iptal edilebilir (threading.Event).
 
 import threading
 import math
+import logging
 import numpy as np
 import pandas as pd
 from scipy.stats import binom
+
+logger = logging.getLogger(__name__)
 
 from server_state import _MON_STORE, _PRECOMPUTE_PROGRESS
 
@@ -211,28 +214,29 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
                     "ref_counts": ref_counts,
                     "ref_bad_counts": ref_bad_counts,
                 }
-            except Exception:
-                continue
-        else:
-            # Ham değerler — quantile bin'leme
-            num_data = pd.to_numeric(col_data, errors="coerce")
-            edges = _compute_var_edges_from_ref(num_data, n_bins=10)
-            ref_counts = _bin_counts(num_data, edges)
-            ref_bad_counts = []
-            for j in range(len(edges) - 1):
-                lo, hi = edges[j], edges[j + 1]
-                if j == len(edges) - 2:
-                    mask = (num_data >= lo) & (num_data <= hi)
-                else:
-                    mask = (num_data >= lo) & (num_data < hi)
-                ref_bad_counts.append(int(target[mask.fillna(False)].sum()))
+                continue  # WoE başarılı, sonraki değişkene geç
+            except Exception as e:
+                logger.warning("WoE transform failed for %s: %s — raw fallback", var, e)
 
-            var_psi[var] = {
-                "edges": edges,
-                "woe_values": None,
-                "ref_counts": ref_counts,
-                "ref_bad_counts": ref_bad_counts,
-            }
+        # Ham değerler — quantile bin'leme (WoE kapalıysa VEYA WoE fail olduysa)
+        num_data = pd.to_numeric(col_data, errors="coerce")
+        edges = _compute_var_edges_from_ref(num_data, n_bins=10)
+        ref_counts = _bin_counts(num_data, edges)
+        ref_bad_counts = []
+        for j in range(len(edges) - 1):
+            lo, hi = edges[j], edges[j + 1]
+            if j == len(edges) - 2:
+                mask = (num_data >= lo) & (num_data <= hi)
+            else:
+                mask = (num_data >= lo) & (num_data < hi)
+            ref_bad_counts.append(int(target[mask.fillna(False)].sum()))
+
+        var_psi[var] = {
+            "edges": edges,
+            "woe_values": None,
+            "ref_counts": ref_counts,
+            "ref_bad_counts": ref_bad_counts,
+        }
 
     return {
         "period_label": "Referans",
@@ -310,23 +314,33 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
                     else:
                         m = (woe_series >= lo) & (woe_series < hi)
                     mon_bad_counts.append(int(target[m].sum()))
-            except Exception:
-                continue
-        else:
-            num_data = pd.to_numeric(period_df[var], errors="coerce")
-            mon_counts = _bin_counts(num_data, edges)
-            mon_bad_counts = []
-            for j in range(len(edges) - 1):
-                lo, hi = edges[j], edges[j + 1]
-                if j == len(edges) - 2:
-                    m = (num_data >= lo) & (num_data <= hi)
-                else:
-                    m = (num_data >= lo) & (num_data < hi)
-                mon_bad_counts.append(int(target[m.fillna(False)].sum()))
+
+                var_psi[var] = {
+                    "edges": edges,
+                    "woe_values": ref_var.get("woe_values"),
+                    "mon_counts": mon_counts,
+                    "mon_bad_counts": mon_bad_counts,
+                }
+                continue  # WoE başarılı
+            except Exception as e:
+                logger.warning("WoE transform failed (period) for %s: %s — raw fallback", var, e)
+
+        # Ham değerler — quantile bin'leme (WoE kapalıysa VEYA fail olduysa)
+        num_data = pd.to_numeric(period_df[var], errors="coerce")
+        ref_edges = ref_var["edges"]
+        mon_counts = _bin_counts(num_data, ref_edges)
+        mon_bad_counts = []
+        for j in range(len(ref_edges) - 1):
+            lo, hi = ref_edges[j], ref_edges[j + 1]
+            if j == len(ref_edges) - 2:
+                m = (num_data >= lo) & (num_data <= hi)
+            else:
+                m = (num_data >= lo) & (num_data < hi)
+            mon_bad_counts.append(int(target[m.fillna(False)].sum()))
 
         var_psi[var] = {
-            "edges": edges,
-            "woe_values": ref_var.get("woe_values"),
+            "edges": ref_edges,
+            "woe_values": None,
             "mon_counts": mon_counts,
             "mon_bad_counts": mon_bad_counts,
         }
@@ -486,6 +500,7 @@ def calc_gini_from_summary(rating_counts, rating_defaults):
     """Rating bazlı Gini/AR hesapla (CAP eğrisi).
     Kötüden iyiye (25→1) sıralama ile.
     Returns (gini, ar, cap_area, details_dict).
+    details_dict["rows"] = satır bazlı detaylar (Gini tablosu için).
     """
     total = sum(rating_counts)
     total_bad = sum(rating_defaults)
@@ -502,6 +517,7 @@ def calc_gini_from_summary(rating_counts, rating_defaults):
     prev_pct_cum_bad = 0.0
     prev_pct_cum_total = 0.0
     gini_area_sum = 0.0
+    gini_rows = []
 
     for idx in indices:
         count = rating_counts[idx]
@@ -511,15 +527,35 @@ def calc_gini_from_summary(rating_counts, rating_defaults):
         cum_bad += default
         cum_total += count
 
-        pct_cum_bad = cum_bad / total_bad if total_bad > 0 else 0
-        pct_cum_total = cum_total / total if total > 0 else 0
+        pct_cum_good = cum_good / total_good * 100 if total_good > 0 else 0
+        pct_cum_bad = cum_bad / total_bad * 100 if total_bad > 0 else 0
+        pct_cum_total = cum_total / total * 100 if total > 0 else 0
 
-        # Trapez alanı
-        gini_area = (pct_cum_bad + prev_pct_cum_bad) / 2 * (pct_cum_total - prev_pct_cum_total)
+        # Trapez alanı (0-1 ölçeğinde hesapla)
+        pct_bad_01 = cum_bad / total_bad if total_bad > 0 else 0
+        pct_total_01 = cum_total / total if total > 0 else 0
+        gini_area = (pct_bad_01 + prev_pct_cum_bad) / 2 * (pct_total_01 - prev_pct_cum_total)
         gini_area_sum += gini_area
 
-        prev_pct_cum_bad = pct_cum_bad
-        prev_pct_cum_total = pct_cum_total
+        gini_rows.append({
+            "rating": idx + 1,
+            "good": good,
+            "bad": default,
+            "total": count,
+            "bad_rate": default / count if count > 0 else 0,
+            "cum_good": cum_good,
+            "cum_bad": cum_bad,
+            "cum_total": cum_total,
+            "pct_cum_good": pct_cum_good,
+            "pct_cum_bad": pct_cum_bad,
+            "pct_cum_total": pct_cum_total,
+            "gini_area": gini_area,
+            "random": pct_cum_total,       # Random = kümülatif % total
+            "perfect_curve": pct_cum_bad,  # Perfect Curve = kümülatif % bad
+        })
+
+        prev_pct_cum_bad = pct_bad_01
+        prev_pct_cum_total = pct_total_01
 
     bad_rate = total_bad / total
     random_area = 0.5
@@ -535,6 +571,7 @@ def calc_gini_from_summary(rating_counts, rating_defaults):
         "perfect_minus_random": perfect_minus_random,
         "accuracy_ratio": ar,
         "gini": gini,
+        "rows": gini_rows,
     }
 
 
