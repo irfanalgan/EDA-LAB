@@ -513,11 +513,13 @@ def mon_open_config_section(loaded, key):
     State("mon-input-maturity",       "value"),
     State("mon-radio-period-freq",    "value"),
     State("mon-chk-woe",             "value"),
+    State("mon-chk-woe-pre",         "value"),
     State("store-mon-key",            "data"),
     prevent_initial_call=True,
 )
 def mon_confirm_config(n_clicks, target_col, date_col, pd_col,
-                       id_col, maturity_months, period_freq, woe_chk, key):
+                       id_col, maturity_months, period_freq, woe_chk,
+                       woe_pre_chk, key):
     if not target_col:
         return no_update, _warn("Target kolonu zorunludur."), False, no_update, no_update, False
     if not date_col:
@@ -526,6 +528,7 @@ def mon_confirm_config(n_clicks, target_col, date_col, pd_col,
         return no_update, _warn("PD kolonu zorunludur."), False, no_update, no_update, False
 
     woe_enabled = bool(woe_chk and "woe" in woe_chk)
+    woe_pretransformed = bool(woe_pre_chk and "pre" in woe_pre_chk)
     maturity_months = int(maturity_months or 12)
     period_freq = period_freq or "M"
 
@@ -545,6 +548,7 @@ def mon_confirm_config(n_clicks, target_col, date_col, pd_col,
         "maturity_months": maturity_months,
         "period_freq":     period_freq,
         "woe_enabled":     woe_enabled,
+        "woe_pretransformed": woe_pretransformed,
         "model_vars":      model_vars,
     }
 

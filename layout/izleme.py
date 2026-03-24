@@ -244,6 +244,15 @@ def build_izleme_sidebar():
             style={"fontSize": "0.75rem", "color": "#c8cdd8",
                    "marginBottom": "0.35rem"},
         ),
+        dbc.Checklist(
+            id="mon-chk-woe-pre",
+            options=[{"label": " Veri zaten WoE dönüştürülmüş",
+                      "value": "pre"}],
+            value=[],
+            inline=True,
+            style={"fontSize": "0.75rem", "color": "#c8cdd8",
+                   "marginBottom": "0.35rem", "marginLeft": "1rem"},
+        ),
         dbc.Collapse(
             html.Div([
                 dcc.Upload(

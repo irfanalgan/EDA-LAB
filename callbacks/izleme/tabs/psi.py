@@ -367,8 +367,12 @@ def mon_psi_populate(signal, key):
         mon_counts = cum["rating_counts"]
         active_ratings = [i + 1 for i in range(len(ref_counts))
                           if ref_counts[i] > 0 or mon_counts[i] > 0]
-        ref_vals = [ref_counts[r - 1] for r in active_ratings]
-        mon_vals = [mon_counts[r - 1] for r in active_ratings]
+        ref_total = sum(ref_counts)
+        mon_total = sum(mon_counts)
+        ref_vals = [ref_counts[r - 1] / ref_total * 100 if ref_total > 0 else 0
+                    for r in active_ratings]
+        mon_vals = [mon_counts[r - 1] / mon_total * 100 if mon_total > 0 else 0
+                    for r in active_ratings]
         rating_labels = [str(r) for r in active_ratings]
 
         bar_fig = go.Figure()
@@ -380,7 +384,7 @@ def mon_psi_populate(signal, key):
             marker_color="#f97316", opacity=0.85))
         bar_fig.update_layout(
             **_CHART_LAYOUT, title="Rating Dağılımı — REF vs MON",
-            xaxis_title="Rating", yaxis_title="Adet",
+            xaxis_title="Rating", yaxis_title="%",
             barmode="group", bargap=0.15, bargroupgap=0.05,
             legend=dict(font=dict(size=9)))
         rating_bar = dcc.Graph(figure=bar_fig, config={"displayModeBar": False})

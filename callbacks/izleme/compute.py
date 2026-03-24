@@ -161,6 +161,7 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
     pd_col = config["pd_col"]
     model_vars = config.get("model_vars", [])
     woe_enabled = config.get("woe_enabled", False)
+    woe_pre = config.get("woe_pretransformed", False)
 
     target = pd.to_numeric(ref_df[target_col], errors="coerce").fillna(0).reset_index(drop=True)
 
@@ -183,8 +184,32 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
             continue
         col_data = ref_df[var].reset_index(drop=True)
 
+        # ── Mod 1: Veri zaten WoE dönüştürülmüş — direkt unique değerlerden bin
+        if woe_enabled and woe_pre:
+            woe_series = pd.to_numeric(col_data, errors="coerce")
+            unique_woe = sorted(set(woe_series.dropna()))
+            if len(unique_woe) < 2:
+                continue
+            edges = [-np.inf] + list(unique_woe) + [np.inf]
+            ref_counts = _bin_counts(woe_series, edges)
+            ref_bad_counts = []
+            for j in range(len(edges) - 1):
+                lo, hi = edges[j], edges[j + 1]
+                if j == len(edges) - 2:
+                    mask = (woe_series >= lo) & (woe_series <= hi)
+                else:
+                    mask = (woe_series >= lo) & (woe_series < hi)
+                ref_bad_counts.append(int(target[mask.fillna(False)].sum()))
+            var_psi[var] = {
+                "edges": edges,
+                "woe_values": list(unique_woe),
+                "ref_counts": ref_counts,
+                "ref_bad_counts": ref_bad_counts,
+            }
+            continue
+
+        # ── Mod 2: Ham veri + opt ile WoE dönüşümü uygula
         if woe_enabled and opt_dict and var in opt_dict:
-            # WoE dönüşümü uygula
             try:
                 woe_values = opt_dict[var].transform(
                     col_data.values,
@@ -192,12 +217,9 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
                     metric_missing="empirical",
                     metric_special="empirical",
                 )
-                # WoE unique değerleri edge olarak kullan (discrete)
                 unique_woe = sorted(set(woe_values[~np.isnan(woe_values)]))
-                # Discrete bin'ler: her unique WoE değeri bir bin
                 edges = [-np.inf] + unique_woe + [np.inf]
                 ref_counts = _bin_counts(pd.Series(woe_values), edges)
-                # Bad counts per bin
                 woe_series = pd.Series(woe_values)
                 ref_bad_counts = []
                 for j in range(len(edges) - 1):
@@ -214,11 +236,11 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
                     "ref_counts": ref_counts,
                     "ref_bad_counts": ref_bad_counts,
                 }
-                continue  # WoE başarılı, sonraki değişkene geç
+                continue
             except Exception as e:
                 logger.warning("WoE transform failed for %s: %s — raw fallback", var, e)
 
-        # Ham değerler — quantile bin'leme (WoE kapalıysa VEYA WoE fail olduysa)
+        # ── Mod 3: Ham değerler — quantile bin'leme
         num_data = pd.to_numeric(col_data, errors="coerce")
         edges = _compute_var_edges_from_ref(num_data, n_bins=10)
         ref_counts = _bin_counts(num_data, edges)
@@ -288,6 +310,8 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
     n_bad = int(target.sum())
 
     # Değişken PSI — referans edge'lerini kullan
+    woe_pre = config.get("woe_pretransformed", False)
+
     var_psi = {}
     for var in model_vars:
         if var not in period_df.columns or var not in ref_summary.get("var_psi", {}):
@@ -295,6 +319,27 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
         ref_var = ref_summary["var_psi"][var]
         edges = ref_var["edges"]
 
+        # ── Mod 1: Veri zaten WoE dönüştürülmüş — referans edge'lerini kullan
+        if woe_enabled and woe_pre:
+            woe_series = pd.to_numeric(period_df[var], errors="coerce").reset_index(drop=True)
+            mon_counts = _bin_counts(woe_series, edges)
+            mon_bad_counts = []
+            for j in range(len(edges) - 1):
+                lo, hi = edges[j], edges[j + 1]
+                if j == len(edges) - 2:
+                    m = (woe_series >= lo) & (woe_series <= hi)
+                else:
+                    m = (woe_series >= lo) & (woe_series < hi)
+                mon_bad_counts.append(int(target[m.fillna(False)].sum()))
+            var_psi[var] = {
+                "edges": edges,
+                "woe_values": ref_var.get("woe_values"),
+                "mon_counts": mon_counts,
+                "mon_bad_counts": mon_bad_counts,
+            }
+            continue
+
+        # ── Mod 2: Ham veri + opt ile WoE dönüşümü
         if woe_enabled and opt_dict and var in opt_dict:
             try:
                 woe_values = opt_dict[var].transform(
