@@ -12,11 +12,59 @@ from callbacks.izleme.compute import (
 
 # ── Ortak stil sabitleri ────────────────────────────────────────────────────
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
-       "fontWeight": "bold", "fontSize": "0.75rem"}
+       "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
+       "borderBottom": "2px solid #3b82f6", "textAlign": "center"}
 _TD = {"backgroundColor": "#0e1117", "color": "#c8cdd8",
-       "fontSize": "0.75rem", "border": "1px solid #2d3a4f",
-       "padding": "4px 8px"}
+       "fontSize": "0.72rem", "border": "1px solid #1e293b",
+       "padding": "3px 6px", "textAlign": "center"}
 _TD_ODD = {"if": {"row_index": "odd"}, "backgroundColor": "#141b27"}
+_TD_TOTAL = {"if": {"filter_query": '{Bins} = "TOPLAM" || {Rating} = "TOPLAM"'},
+             "backgroundColor": "#1a2332", "fontWeight": "bold",
+             "borderTop": "2px solid #3b82f6"}
+
+_SECTION = {"borderLeft": "3px solid #3b82f6", "paddingLeft": "0.7rem",
+            "marginTop": "1.5rem", "marginBottom": "0.5rem"}
+
+
+def _pct_bar_styles(data, pct_cols):
+    """Yüzde kolonları için yeşil/kırmızı arka plan yoğunluğu üret.
+
+    Büyük yüzde → koyu arka plan, küçük yüzde → açık/nötr.
+    REF kolonları yeşil tonlarında, MON kolonları turuncu/kırmızı tonlarında.
+    """
+    styles = []
+    for col in pct_cols:
+        # Kolondaki max değeri bul (bar ölçekleme için)
+        vals = []
+        for row in data:
+            v = row.get(col, "")
+            if isinstance(v, str) and v.endswith("%") and v != "100.00%":
+                try:
+                    vals.append(float(v.replace("%", "").replace(",", ".")))
+                except ValueError:
+                    pass
+        max_val = max(vals) if vals else 1
+
+        is_ref = col.startswith("REF")
+        for row in data:
+            v = row.get(col, "")
+            if isinstance(v, str) and v.endswith("%") and row.get("Bins") != "TOPLAM" and row.get("Rating") != "TOPLAM":
+                try:
+                    num = float(v.replace("%", "").replace(",", "."))
+                except ValueError:
+                    continue
+                intensity = min(num / max_val, 1.0) if max_val > 0 else 0
+                alpha = round(intensity * 0.45, 2)
+                if is_ref:
+                    bg = f"rgba(34, 197, 94, {alpha})"   # yeşil
+                else:
+                    bg = f"rgba(239, 68, 68, {alpha})"    # kırmızı
+                styles.append({
+                    "if": {"filter_query": f'{{{col}}} = "{v}"',
+                           "column_id": col},
+                    "backgroundColor": bg,
+                })
+    return styles
 
 _CHART_LAYOUT = dict(
     template="plotly_dark",
@@ -167,15 +215,18 @@ def _build_var_psi_table(ref_summary, mon_var_psi):
         psi_color = "#ef4444" if psi_val >= 0.25 else (
             "#f59e0b" if psi_val >= 0.10 else "#10b981")
         tables.append(html.Div([
-            html.H6(f"{var} — PSI: {psi_val:.4f} ({_psi_label(psi_val)})",
-                     style={"color": psi_color, "fontSize": "0.85rem",
-                            "marginTop": "1rem", "marginBottom": "0.3rem"}),
+            html.Div([
+                html.H6(f"{var}  |  PSI: {psi_val:.4f}  ({_psi_label(psi_val)})",
+                         style={"color": psi_color, "fontSize": "0.82rem",
+                                "fontWeight": "600", "margin": "0"}),
+            ], style={**_SECTION, "borderLeftColor": psi_color}),
             dash_table.DataTable(
                 columns=[{"name": c, "id": c} for c in cols],
                 data=data,
                 style_header=_TH,
-                style_cell={**_TD, "minWidth": "60px"},
-                style_data_conditional=[_TD_ODD],
+                style_cell={**_TD, "minWidth": "55px"},
+                style_data_conditional=[_TD_ODD, _TD_TOTAL]
+                    + _pct_bar_styles(data, [c for c in cols if c.endswith("%")]),
                 page_size=30,
                 style_table={"overflowX": "auto"},
             ),
@@ -215,15 +266,20 @@ def _build_rating_psi_table(ref_summary, mon_summary):
     })
 
     cols = ["Rating", "REF Adet", "REF %", "MON Adet", "MON %", "PSI Katkı"]
+    rpsi_color = "#ef4444" if psi_val >= 0.25 else (
+        "#f59e0b" if psi_val >= 0.10 else "#10b981")
     return html.Div([
-        html.H6(f"Rating PSI: {psi_val:.4f} — {_psi_label(psi_val)}",
-                style={"color": "#c8cdd8", "fontSize": "0.85rem",
-                       "marginTop": "1rem", "marginBottom": "0.5rem"}),
+        html.Div([
+            html.H6(f"Rating PSI  |  {psi_val:.4f}  ({_psi_label(psi_val)})",
+                     style={"color": rpsi_color, "fontSize": "0.82rem",
+                            "fontWeight": "600", "margin": "0"}),
+        ], style={**_SECTION, "borderLeftColor": rpsi_color}),
         dash_table.DataTable(
             columns=[{"name": c, "id": c} for c in cols],
             data=data,
             style_header=_TH, style_cell=_TD,
-            style_data_conditional=[_TD_ODD],
+            style_data_conditional=[_TD_ODD, _TD_TOTAL]
+                + _pct_bar_styles(data, ["REF %", "MON %"]),
             page_size=30,
             style_table={"overflowX": "auto"},
         ),
@@ -306,10 +362,34 @@ def mon_psi_populate(signal, key):
     # Kümülatif
     cum = aggregate_summaries(summaries)
     if cum:
+        # Rating bazlı REF vs MON adet karşılaştırma bar grafiği
+        ref_counts = ref_summary["rating_counts"]
+        mon_counts = cum["rating_counts"]
+        active_ratings = [i + 1 for i in range(len(ref_counts))
+                          if ref_counts[i] > 0 or mon_counts[i] > 0]
+        ref_vals = [ref_counts[r - 1] for r in active_ratings]
+        mon_vals = [mon_counts[r - 1] for r in active_ratings]
+        rating_labels = [str(r) for r in active_ratings]
+
+        bar_fig = go.Figure()
+        bar_fig.add_trace(go.Bar(
+            x=rating_labels, y=ref_vals, name="REF",
+            marker_color="#3b82f6", opacity=0.85))
+        bar_fig.add_trace(go.Bar(
+            x=rating_labels, y=mon_vals, name="MON",
+            marker_color="#f97316", opacity=0.85))
+        bar_fig.update_layout(
+            **_CHART_LAYOUT, title="Rating Dağılımı — REF vs MON",
+            xaxis_title="Rating", yaxis_title="Adet",
+            barmode="group", bargap=0.15, bargroupgap=0.05,
+            legend=dict(font=dict(size=9)))
+        rating_bar = dcc.Graph(figure=bar_fig, config={"displayModeBar": False})
+
         cum_content = html.Div([
-            html.H6("Kümülatif Değişken PSI",
-                     style={"color": "#c8cdd8", "fontSize": "0.9rem",
-                            "marginBottom": "0.5rem"}),
+            html.H6("Kümülatif PSI",
+                     style={"color": "#e2e8f0", "fontSize": "0.95rem",
+                            "fontWeight": "600", "marginBottom": "0.5rem"}),
+            rating_bar,
             _build_var_psi_table(ref_summary, cum.get("var_psi", {})),
             _build_rating_psi_table(ref_summary, cum),
         ])

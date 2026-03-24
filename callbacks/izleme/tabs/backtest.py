@@ -9,10 +9,11 @@ from server_state import _MON_STORE
 from callbacks.izleme.compute import calc_backtesting_table, aggregate_summaries
 
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
-       "fontWeight": "bold", "fontSize": "0.75rem"}
+       "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
+       "borderBottom": "2px solid #3b82f6", "textAlign": "center"}
 _TD = {"backgroundColor": "#0e1117", "color": "#c8cdd8",
-       "fontSize": "0.75rem", "border": "1px solid #2d3a4f",
-       "padding": "4px 8px"}
+       "fontSize": "0.72rem", "border": "1px solid #1e293b",
+       "padding": "4px 8px", "textAlign": "center"}
 _TD_ODD = {"if": {"row_index": "odd"}, "backgroundColor": "#141b27"}
 
 _CHART_LAYOUT = dict(

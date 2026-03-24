@@ -9,11 +9,15 @@ from server_state import _MON_STORE
 from callbacks.izleme.compute import calc_hhi_from_summary, aggregate_summaries
 
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
-       "fontWeight": "bold", "fontSize": "0.75rem"}
+       "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
+       "borderBottom": "2px solid #3b82f6", "textAlign": "center"}
 _TD = {"backgroundColor": "#0e1117", "color": "#c8cdd8",
-       "fontSize": "0.75rem", "border": "1px solid #2d3a4f",
-       "padding": "4px 8px"}
+       "fontSize": "0.72rem", "border": "1px solid #1e293b",
+       "padding": "4px 8px", "textAlign": "center"}
 _TD_ODD = {"if": {"row_index": "odd"}, "backgroundColor": "#141b27"}
+_TD_TOTAL = {"if": {"filter_query": '{Rating} = "Toplam"'},
+             "backgroundColor": "#1a2332", "fontWeight": "bold",
+             "borderTop": "2px solid #3b82f6"}
 
 _CHART_LAYOUT = dict(
     template="plotly_dark",
@@ -83,7 +87,7 @@ def _render_hhi(rating_counts, title=""):
                      for c in ["Rating", "Adet", "Pay (%)", "HHI Katkı"]],
             data=data,
             style_header=_TH, style_cell=_TD,
-            style_data_conditional=[_TD_ODD],
+            style_data_conditional=[_TD_ODD, _TD_TOTAL],
             page_size=30,
             style_table={"overflowX": "auto"},
         ),

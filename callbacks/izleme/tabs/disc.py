@@ -11,11 +11,18 @@ from callbacks.izleme.compute import (
 )
 
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
-       "fontWeight": "bold", "fontSize": "0.75rem"}
+       "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
+       "borderBottom": "2px solid #3b82f6", "textAlign": "center"}
 _TD = {"backgroundColor": "#0e1117", "color": "#c8cdd8",
-       "fontSize": "0.75rem", "border": "1px solid #2d3a4f",
-       "padding": "4px 8px"}
+       "fontSize": "0.72rem", "border": "1px solid #1e293b",
+       "padding": "4px 8px", "textAlign": "center"}
 _TD_ODD = {"if": {"row_index": "odd"}, "backgroundColor": "#141b27"}
+_TD_TOTAL = {"if": {"filter_query": '{Rating} = "Toplam"'},
+             "backgroundColor": "#1a2332", "fontWeight": "bold",
+             "borderTop": "2px solid #3b82f6"}
+
+_SECTION = {"borderLeft": "3px solid #3b82f6", "paddingLeft": "0.7rem",
+            "marginTop": "1.5rem", "marginBottom": "0.5rem"}
 
 _CHART_LAYOUT = dict(
     template="plotly_dark",
@@ -95,7 +102,7 @@ def _build_ks_table(ks_val, rows):
         columns=[{"name": c, "id": c} for c in cols],
         data=data,
         style_header=_TH, style_cell=_TD,
-        style_data_conditional=[_TD_ODD],
+        style_data_conditional=[_TD_ODD, _TD_TOTAL],
         page_size=30,
         style_table={"overflowX": "auto"},
     )
@@ -149,7 +156,7 @@ def _build_gini_table(gini_val, details):
         columns=[{"name": c, "id": c} for c in cols],
         data=data,
         style_header=_TH, style_cell=_TD,
-        style_data_conditional=[_TD_ODD],
+        style_data_conditional=[_TD_ODD, _TD_TOTAL],
         page_size=30,
         style_table={"overflowX": "auto"},
     )
@@ -159,16 +166,21 @@ def _render_disc(rating_counts, rating_defaults, title_prefix=""):
     ks, ks_rows = calc_ks_from_summary(rating_counts, rating_defaults)
     gini, ar, _, details = calc_gini_from_summary(rating_counts, rating_defaults)
     return html.Div([
-        html.H6(f"{title_prefix}Gini/KS Metrikleri",
-                style={"color": "#c8cdd8", "fontSize": "0.9rem",
-                       "marginBottom": "0.5rem"}),
+        html.H6(f"{title_prefix}Gini/KS",
+                style={"color": "#e2e8f0", "fontSize": "0.95rem",
+                       "fontWeight": "600", "marginBottom": "0.75rem"}),
         _build_metric_cards(ks, gini * 100, ar * 100),
-        html.H6("KS Tablosu", style={"color": "#c8cdd8", "fontSize": "0.85rem",
-                                      "marginTop": "1rem", "marginBottom": "0.5rem"}),
+        html.Div([
+            html.H6("KS Tablosu",
+                     style={"color": "#93c5fd", "fontSize": "0.82rem",
+                            "fontWeight": "600", "margin": "0"}),
+        ], style=_SECTION),
         _build_ks_table(ks, ks_rows),
-        html.H6(f"Gini Tablosu — Gini: {gini * 100:.2f}%",
-                style={"color": "#c8cdd8", "fontSize": "0.85rem",
-                       "marginTop": "1.5rem", "marginBottom": "0.5rem"}),
+        html.Div([
+            html.H6(f"Gini Tablosu  |  Gini: {gini * 100:.2f}%",
+                     style={"color": "#93c5fd", "fontSize": "0.82rem",
+                            "fontWeight": "600", "margin": "0"}),
+        ], style=_SECTION),
         _build_gini_table(gini, details),
     ])
 
