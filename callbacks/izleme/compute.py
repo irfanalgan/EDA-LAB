@@ -162,10 +162,10 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
     model_vars = config.get("model_vars", [])
     woe_enabled = config.get("woe_enabled", False)
 
-    target = pd.to_numeric(ref_df[target_col], errors="coerce").fillna(0)
+    target = pd.to_numeric(ref_df[target_col], errors="coerce").fillna(0).reset_index(drop=True)
 
     # Rating ataması (PD veya Rating kolonu otomatik algılanır)
-    ratings = get_ratings(ref_df[pd_col])
+    ratings = get_ratings(ref_df[pd_col].reset_index(drop=True))
     rating_counts = [0] * N_RATINGS
     rating_defaults = [0] * N_RATINGS
     for r in range(1, N_RATINGS + 1):
@@ -181,7 +181,7 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
     for var in model_vars:
         if var not in ref_df.columns:
             continue
-        col_data = ref_df[var]
+        col_data = ref_df[var].reset_index(drop=True)
 
         if woe_enabled and opt_dict and var in opt_dict:
             # WoE dönüşümü uygula
@@ -273,10 +273,10 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
     model_vars = config.get("model_vars", [])
     woe_enabled = config.get("woe_enabled", False)
 
-    target = pd.to_numeric(period_df[target_col], errors="coerce").fillna(0)
+    target = pd.to_numeric(period_df[target_col], errors="coerce").fillna(0).reset_index(drop=True)
 
     # Rating ataması (PD veya Rating kolonu otomatik algılanır)
-    ratings = get_ratings(period_df[pd_col])
+    ratings = get_ratings(period_df[pd_col].reset_index(drop=True))
     rating_counts = [0] * N_RATINGS
     rating_defaults = [0] * N_RATINGS
     for r in range(1, N_RATINGS + 1):
@@ -326,7 +326,7 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
                 logger.warning("WoE transform failed (period) for %s: %s — raw fallback", var, e)
 
         # Ham değerler — quantile bin'leme (WoE kapalıysa VEYA fail olduysa)
-        num_data = pd.to_numeric(period_df[var], errors="coerce")
+        num_data = pd.to_numeric(period_df[var], errors="coerce").reset_index(drop=True)
         ref_edges = ref_var["edges"]
         mon_counts = _bin_counts(num_data, ref_edges)
         mon_bad_counts = []
