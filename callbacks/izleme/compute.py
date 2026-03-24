@@ -184,31 +184,22 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
             continue
         col_data = ref_df[var].reset_index(drop=True)
 
-        # ── Mod 1: Veri zaten WoE dönüştürülmüş — direkt unique değerlerden bin
+        # ── Mod 1: Veri zaten WoE dönüştürülmüş — exact value matching
         if woe_enabled and woe_pre:
             woe_series = pd.to_numeric(col_data, errors="coerce")
             unique_woe = sorted(set(woe_series.dropna()))
             if len(unique_woe) < 2:
                 continue
-            edges = [-np.inf] + list(unique_woe) + [np.inf]
-            ref_counts = _bin_counts(woe_series, edges)
-            ref_bad_counts = []
-            for j in range(len(edges) - 1):
-                lo, hi = edges[j], edges[j + 1]
-                if j == len(edges) - 2:
-                    mask = (woe_series >= lo) & (woe_series <= hi)
-                else:
-                    mask = (woe_series >= lo) & (woe_series < hi)
-                ref_bad_counts.append(int(target[mask.fillna(False)].sum()))
+            ref_counts = [int((woe_series == v).sum()) for v in unique_woe]
+            ref_bad_counts = [int(target[woe_series == v].sum()) for v in unique_woe]
             var_psi[var] = {
-                "edges": edges,
-                "woe_values": list(unique_woe),
+                "discrete_bins": unique_woe,
                 "ref_counts": ref_counts,
                 "ref_bad_counts": ref_bad_counts,
             }
             continue
 
-        # ── Mod 2: Ham veri + opt ile WoE dönüşümü uygula
+        # ── Mod 2: Ham veri + opt ile WoE dönüşümü — exact value matching
         if woe_enabled and opt_dict and var in opt_dict:
             try:
                 woe_values = opt_dict[var].transform(
@@ -217,22 +208,14 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
                     metric_missing="empirical",
                     metric_special="empirical",
                 )
-                unique_woe = sorted(set(woe_values[~np.isnan(woe_values)]))
-                edges = [-np.inf] + unique_woe + [np.inf]
-                ref_counts = _bin_counts(pd.Series(woe_values), edges)
                 woe_series = pd.Series(woe_values)
-                ref_bad_counts = []
-                for j in range(len(edges) - 1):
-                    lo, hi = edges[j], edges[j + 1]
-                    if j == len(edges) - 2:
-                        mask = (woe_series >= lo) & (woe_series <= hi)
-                    else:
-                        mask = (woe_series >= lo) & (woe_series < hi)
-                    ref_bad_counts.append(int(target[mask].sum()))
-
+                unique_woe = sorted(set(woe_series.dropna()))
+                if len(unique_woe) < 2:
+                    continue
+                ref_counts = [int((woe_series == v).sum()) for v in unique_woe]
+                ref_bad_counts = [int(target[woe_series == v].sum()) for v in unique_woe]
                 var_psi[var] = {
-                    "edges": edges,
-                    "woe_values": unique_woe,
+                    "discrete_bins": unique_woe,
                     "ref_counts": ref_counts,
                     "ref_bad_counts": ref_bad_counts,
                 }
@@ -255,7 +238,6 @@ def compute_ref_summary(ref_df, config, opt_dict=None):
 
         var_psi[var] = {
             "edges": edges,
-            "woe_values": None,
             "ref_counts": ref_counts,
             "ref_bad_counts": ref_bad_counts,
         }
@@ -317,30 +299,22 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
         if var not in period_df.columns or var not in ref_summary.get("var_psi", {}):
             continue
         ref_var = ref_summary["var_psi"][var]
-        edges = ref_var["edges"]
 
-        # ── Mod 1: Veri zaten WoE dönüştürülmüş — referans edge'lerini kullan
-        if woe_enabled and woe_pre:
+        # ── Mod 1: Veri zaten WoE dönüştürülmüş — exact value matching
+        if woe_enabled and woe_pre and "discrete_bins" in ref_var:
             woe_series = pd.to_numeric(period_df[var], errors="coerce").reset_index(drop=True)
-            mon_counts = _bin_counts(woe_series, edges)
-            mon_bad_counts = []
-            for j in range(len(edges) - 1):
-                lo, hi = edges[j], edges[j + 1]
-                if j == len(edges) - 2:
-                    m = (woe_series >= lo) & (woe_series <= hi)
-                else:
-                    m = (woe_series >= lo) & (woe_series < hi)
-                mon_bad_counts.append(int(target[m.fillna(False)].sum()))
+            bins = ref_var["discrete_bins"]
+            mon_counts = [int((woe_series == v).sum()) for v in bins]
+            mon_bad_counts = [int(target[woe_series == v].sum()) for v in bins]
             var_psi[var] = {
-                "edges": edges,
-                "woe_values": ref_var.get("woe_values"),
+                "discrete_bins": bins,
                 "mon_counts": mon_counts,
                 "mon_bad_counts": mon_bad_counts,
             }
             continue
 
-        # ── Mod 2: Ham veri + opt ile WoE dönüşümü
-        if woe_enabled and opt_dict and var in opt_dict:
+        # ── Mod 2: Ham veri + opt ile WoE dönüşümü — exact value matching
+        if woe_enabled and opt_dict and var in opt_dict and "discrete_bins" in ref_var:
             try:
                 woe_values = opt_dict[var].transform(
                     period_df[var].values,
@@ -348,29 +322,20 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
                     metric_missing="empirical",
                     metric_special="empirical",
                 )
-                mon_counts = _bin_counts(pd.Series(woe_values), edges)
-                # Bad counts per bin
                 woe_series = pd.Series(woe_values)
-                mon_bad_counts = []
-                for j in range(len(edges) - 1):
-                    lo, hi = edges[j], edges[j + 1]
-                    if j == len(edges) - 2:
-                        m = (woe_series >= lo) & (woe_series <= hi)
-                    else:
-                        m = (woe_series >= lo) & (woe_series < hi)
-                    mon_bad_counts.append(int(target[m].sum()))
-
+                bins = ref_var["discrete_bins"]
+                mon_counts = [int((woe_series == v).sum()) for v in bins]
+                mon_bad_counts = [int(target[woe_series == v].sum()) for v in bins]
                 var_psi[var] = {
-                    "edges": edges,
-                    "woe_values": ref_var.get("woe_values"),
+                    "discrete_bins": bins,
                     "mon_counts": mon_counts,
                     "mon_bad_counts": mon_bad_counts,
                 }
-                continue  # WoE başarılı
+                continue
             except Exception as e:
                 logger.warning("WoE transform failed (period) for %s: %s — raw fallback", var, e)
 
-        # Ham değerler — quantile bin'leme (WoE kapalıysa VEYA fail olduysa)
+        # ── Mod 3: Ham değerler — referans edge'lerini kullan
         num_data = pd.to_numeric(period_df[var], errors="coerce").reset_index(drop=True)
         ref_edges = ref_var["edges"]
         mon_counts = _bin_counts(num_data, ref_edges)
@@ -385,7 +350,6 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
 
         var_psi[var] = {
             "edges": ref_edges,
-            "woe_values": None,
             "mon_counts": mon_counts,
             "mon_bad_counts": mon_bad_counts,
         }
@@ -463,12 +427,15 @@ def aggregate_summaries(summaries, mature_only=False):
     for s in filtered:
         for var, data in s.get("var_psi", {}).items():
             if var not in var_psi:
-                var_psi[var] = {
-                    "edges": data["edges"],
-                    "woe_values": data.get("woe_values"),
+                init = {
                     "mon_counts": list(data["mon_counts"]),
                     "mon_bad_counts": list(data["mon_bad_counts"]),
                 }
+                if "discrete_bins" in data:
+                    init["discrete_bins"] = data["discrete_bins"]
+                else:
+                    init["edges"] = data["edges"]
+                var_psi[var] = init
             else:
                 existing = var_psi[var]
                 for j in range(len(existing["mon_counts"])):
@@ -740,8 +707,8 @@ def calc_var_psi(ref_var_psi, mon_var_psi):
     """
     ref_counts = ref_var_psi["ref_counts"]
     mon_counts = mon_var_psi["mon_counts"]
-    edges = ref_var_psi["edges"]
-    woe_values = ref_var_psi.get("woe_values")
+    discrete_bins = ref_var_psi.get("discrete_bins")
+    edges = ref_var_psi.get("edges")
 
     ref_total = sum(ref_counts)
     mon_total = sum(mon_counts)
@@ -751,6 +718,11 @@ def calc_var_psi(ref_var_psi, mon_var_psi):
     ref_bad = ref_var_psi.get("ref_bad_counts", [0] * len(ref_counts))
     mon_bad = mon_var_psi.get("mon_bad_counts", [0] * len(mon_counts))
 
+    ref_total_good = ref_total - sum(ref_bad)
+    ref_total_bad = sum(ref_bad)
+    mon_total_good = mon_total - sum(mon_bad)
+    mon_total_bad = sum(mon_bad)
+
     rows = []
     psi_total = 0.0
     for j in range(len(ref_counts)):
@@ -759,18 +731,11 @@ def calc_var_psi(ref_var_psi, mon_var_psi):
         psi_bin = _safe_psi(ref_pct, mon_pct)
         psi_total += psi_bin
 
-        # IV katkı (ref ve mon ayrı)
         ref_good_j = ref_counts[j] - ref_bad[j]
         mon_good_j = mon_counts[j] - mon_bad[j]
-        ref_total_good = ref_total - sum(ref_bad)
-        ref_total_bad = sum(ref_bad)
-        mon_total_good = mon_total - sum(mon_bad)
-        mon_total_bad = sum(mon_bad)
 
         row = {
             "bin_idx": j,
-            "edge_lo": edges[j] if j < len(edges) else None,
-            "edge_hi": edges[j + 1] if j + 1 < len(edges) else None,
             "ref_count": ref_counts[j],
             "ref_pct": ref_pct,
             "mon_count": mon_counts[j],
@@ -780,26 +745,28 @@ def calc_var_psi(ref_var_psi, mon_var_psi):
             "mon_bad": mon_bad[j],
         }
 
-        if woe_values and j < len(woe_values):
-            row["woe"] = woe_values[j]
+        # Bin label bilgisi
+        if discrete_bins and j < len(discrete_bins):
+            row["discrete_val"] = discrete_bins[j]
+        elif edges:
+            row["edge_lo"] = edges[j] if j < len(edges) else None
+            row["edge_hi"] = edges[j + 1] if j + 1 < len(edges) else None
 
-            # Ref IV katkı
-            if ref_total_good > 0 and ref_total_bad > 0:
-                g_pct = ref_good_j / ref_total_good if ref_total_good > 0 else 0
-                b_pct = ref_bad[j] / ref_total_bad if ref_total_bad > 0 else 0
-                eps = 1e-8
-                row["ref_iv_contrib"] = (g_pct - b_pct) * math.log(max(g_pct, eps) / max(b_pct, eps))
-            else:
-                row["ref_iv_contrib"] = 0
+        # IV katkı — tüm modlar için
+        eps = 1e-8
+        if ref_total_good > 0 and ref_total_bad > 0:
+            g_pct = ref_good_j / ref_total_good
+            b_pct = ref_bad[j] / ref_total_bad
+            row["ref_iv_contrib"] = (max(g_pct, eps) - max(b_pct, eps)) * math.log(max(g_pct, eps) / max(b_pct, eps))
+        else:
+            row["ref_iv_contrib"] = 0
 
-            # Mon IV katkı
-            if mon_total_good > 0 and mon_total_bad > 0:
-                g_pct = mon_good_j / mon_total_good if mon_total_good > 0 else 0
-                b_pct = mon_bad[j] / mon_total_bad if mon_total_bad > 0 else 0
-                eps = 1e-8
-                row["mon_iv_contrib"] = (g_pct - b_pct) * math.log(max(g_pct, eps) / max(b_pct, eps))
-            else:
-                row["mon_iv_contrib"] = 0
+        if mon_total_good > 0 and mon_total_bad > 0:
+            g_pct = mon_good_j / mon_total_good
+            b_pct = mon_bad[j] / mon_total_bad
+            row["mon_iv_contrib"] = (max(g_pct, eps) - max(b_pct, eps)) * math.log(max(g_pct, eps) / max(b_pct, eps))
+        else:
+            row["mon_iv_contrib"] = 0
 
         rows.append(row)
 

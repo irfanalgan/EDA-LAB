@@ -236,23 +236,23 @@ def build_izleme_sidebar():
                         "marginBottom": "0.5rem"}),
 
         # ── WoE Dönüşüm ──────────────────────────────────────────────────
-        dbc.Checklist(
-            id="mon-chk-woe",
-            options=[{"label": " WoE dönüşümü uygula", "value": "woe"}],
-            value=[],
-            inline=True,
-            style={"fontSize": "0.75rem", "color": "#c8cdd8",
-                   "marginBottom": "0.35rem"},
-        ),
-        dbc.Checklist(
-            id="mon-chk-woe-pre",
-            options=[{"label": " Veri zaten WoE dönüştürülmüş",
-                      "value": "pre"}],
-            value=[],
-            inline=True,
-            style={"fontSize": "0.75rem", "color": "#c8cdd8",
-                   "marginBottom": "0.35rem", "marginLeft": "1rem"},
-        ),
+        html.Div([
+            dbc.Checklist(
+                id="mon-chk-woe",
+                options=[{"label": " WoE dönüşümü uygula", "value": "woe"}],
+                value=[], inline=True,
+                style={"fontSize": "0.75rem", "color": "#c8cdd8"},
+            ),
+            dbc.Checklist(
+                id="mon-chk-woe-pre",
+                options=[{"label": " Veri zaten WoE dönüştürülmüş",
+                          "value": "pre"}],
+                value=[], inline=True,
+                style={"fontSize": "0.75rem", "color": "#c8cdd8",
+                       "marginLeft": "1.5rem"},
+            ),
+        ], style={"display": "flex", "alignItems": "center",
+                  "marginBottom": "0.35rem"}),
         dbc.Collapse(
             html.Div([
                 dcc.Upload(
