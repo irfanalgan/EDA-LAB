@@ -1445,3 +1445,18 @@ select.form-select {
     background-color: var(--bg-secondary) !important;
     padding: 1rem;
 }
+
+/* DataTable checkbox dark tema */
+.dash-select-cell input[type=checkbox] {
+    accent-color: #4F8EF7;
+}
+
+/* Filtre input stepper ok'larını gizle */
+input[id^="vs-filter-"][type="number"]::-webkit-inner-spin-button,
+input[id^="vs-filter-"][type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[id^="vs-filter-"][type="number"] {
+    -moz-appearance: textfield;
+}

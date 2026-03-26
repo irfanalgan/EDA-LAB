@@ -17,22 +17,15 @@ from utils.anomaly_hints import (build_hint_section, check_iv, check_psi,
 @app.callback(
     Output("tab-deep-dive", "children"),
     Input("store-config", "data"),
-    Input("store-expert-exclude", "data"),
+    Input("store-active-vars", "data"),
     State("store-key", "data"),
 )
-def render_deep_dive_shell(config, expert_excluded, key):
+def render_deep_dive_shell(config, active_vars, key):
     df = _get_df(key)
     if df is None or not config or not config.get("target_col"):
         return html.Div()
 
-    expert_excluded = set(expert_excluded or [])
-    screen_result = _SERVER_STORE.get(f"{key}_screen")
-    if screen_result:
-        passed_cols, _ = screen_result
-        base_cols = [c for c in passed_cols if c != config["target_col"]]
-    else:
-        base_cols = [c for c in df.columns if c != config["target_col"]]
-    cols = [c for c in base_cols if c not in expert_excluded]
+    cols = active_vars if active_vars else []
     col_options = [{"label": f"{c}  [{df[c].dtype}]", "value": c} for c in cols]
 
     # PSI kesim tarihi — OOT date config'den otomatik belirlenir

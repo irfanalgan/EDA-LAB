@@ -753,7 +753,7 @@ def build_main():
             dbc.Tab(dcc.Loading(html.Div(id="tab-outlier"),   type="dot", color="#4F8EF7", delay_show=300), label="Outlier Analizi", tab_id="tab-outlier",   className="tab-content-area"),
             dbc.Tab(dcc.Loading(html.Div(id="tab-deep-dive"), type="dot", color="#4F8EF7", delay_show=300), label="Değişken Analizi", tab_id="tab-deep-dive", className="tab-content-area"),
             dbc.Tab(html.Div([
-                _tab_info("İstatistiksel Testler", "Korelasyon · Chi-Square · ANOVA · KS · VIF",
+                _tab_info("İstatistiksel Testler", "Korelasyon · Chi-Square · ANOVA · KS",
                           "Beş farklı istatistiksel test arasından seçim yapın. Her test için "
                           "amaç, yöntem ve çıktı yorumu test seçimi altında açıklanır. "
                           "Segmentasyon aktifse tüm testler yalnızca aktif segment üzerinde çalışır.",
@@ -769,7 +769,6 @@ def build_main():
                                 {"label": "Chi-Square (Ki-Kare) Bağımsızlık Testi",            "value": "chi_square"},
                                 {"label": "ANOVA (Target vs Sayısal Değişken)",                "value": "anova"},
                                 {"label": "Kolmogorov-Smirnov (KS) Ayırıcılık Testi",         "value": "ks"},
-                                {"label": "VIF Kum Havuzu (Çoklu Doğrusallık)",               "value": "vif_sandbox"},
                             ],
                             value="correlation",
                             className="dark-select",
@@ -971,70 +970,13 @@ def build_main():
                     dcc.Loading(html.Div(id="stat-ks-result"), type="dot", color="#4F8EF7", delay_show=300),
                 ]),
 
-                # ── VIF Kum Havuzu Paneli ─────────────────────────────────
-                html.Div(id="stat-vif-panel", style={"display": "none"}, children=[
-                    html.Div([
-                        html.Div([
-                            html.Span("VIF — Varyans Şişme Faktörü", style={"color": "#c8cdd8", "fontWeight": "700", "fontSize": "0.82rem"}),
-                            html.Span("  ·  Çoklu Doğrusallık", style={"color": "#7e8fa4", "fontSize": "0.78rem"}),
-                        ], style={"marginBottom": "0.45rem"}),
-                        html.Div([
-                            html.Span("Amaç: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Modeldeki bağımsız değişkenlerin birbirini ne kadar tekrar ettiğini ölçer. Yüksek VIF, bir değişkenin diğerlerinin kombinasyonuyla neredeyse tamamen açıklanabildiğini gösterir — bu durumda katsayılar güvenilmez olur.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
-                        ], style={"marginBottom": "0.25rem"}),
-                        html.Div([
-                            html.Span("Nasıl çalışır: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("Her değişken sırayla diğer tüm değişkenlere regresse edilir. Elde edilen R²'den VIF = 1/(1−R²) hesaplanır. R² yüksekse (değişken diğerlerince açıklanıyorsa) VIF büyük çıkar.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
-                        ], style={"marginBottom": "0.25rem"}),
-                        html.Div([
-                            html.Span("Çıktıyı nasıl okurum: ", style={"color": "#a8b2c2", "fontWeight": "600", "fontSize": "0.78rem"}),
-                            html.Span("VIF < 5 → sorun yok · 5–10 → dikkat, korelasyon tablosunu kontrol edin · > 10 → bu değişken diğerleriyle çok ilişkili, modelden çıkarılmalı veya WoE dönüşümü uygulanmalı. En yüksek VIF'li değişkeni çıkarıp tekrar hesaplayın — diğer VIF'ler de düşecektir.", style={"color": "#6b7a94", "fontSize": "0.78rem"}),
-                        ]),
-                    ], style={
-                        "backgroundColor": "#111827", "borderLeft": "3px solid #ef4444",
-                        "borderRadius": "4px", "padding": "0.75rem 1rem",
-                        "marginBottom": "1.25rem",
-                    }),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Değişken Seti", className="form-label"),
-                            html.Div("IV ≥ 0.10 filtresi varsayılan; tümü de seçilebilir", className="form-hint"),
-                            dbc.Select(
-                                id="vif-var-set",
-                                options=[
-                                    {"label": "IV ≥ 0.10 olan değişkenler", "value": "iv_filtered"},
-                                    {"label": "Tüm numerik değişkenler",      "value": "all_numeric"},
-                                ],
-                                value="iv_filtered",
-                                className="dark-select",
-                                style={"maxWidth": "280px"},
-                            ),
-                        ], width=4),
-                        dbc.Col([
-                            dbc.Label("Maks. Kolon", className="form-label"),
-                            html.Div("VIF hesabı için max değişken sayısı", className="form-hint"),
-                            dbc.Select(
-                                id="vif-max-cols",
-                                options=[{"label": str(v), "value": str(v)} for v in [10, 15, 20, 30, 40]],
-                                value="20", className="dark-select",
-                                style={"maxWidth": "120px"},
-                            ),
-                        ], width=2),
-                        dbc.Col([
-                            dbc.Label("\u00a0", className="form-label"),
-                            html.Div("\u00a0", className="form-hint"),
-                            dbc.Button("Hesapla", id="btn-vif-sandbox-compute", color="primary", size="sm"),
-                        ], width=2),
-                    ], className="mb-4"),
-                    dcc.Loading(html.Div(id="stat-vif-result"), type="dot", color="#4F8EF7", delay_show=300),
-                ]),
 
             ]), label="İstatistiksel Testler", tab_id="tab-correlation", className="tab-content-area"),
             dbc.Tab(html.Div([
-                _tab_info("Değişken Özeti", "IV · Eksik% · PSI · Korelasyon · VIF",
+                _tab_info("Değişken Özeti", "IV · Eksik% · PSI · Korelasyon",
                           "Tüm değişkenleri tek tabloda karşılaştırır. IV ayırıcı gücü, "
-                          "eksik oranı, PSI dağılım stabilitesi, max korelasyon ve VIF çoklu "
-                          "doğrusallık bilgilerini yan yana görerek değişken eleme kararlarını "
+                          "eksik oranı, PSI dağılım stabilitesi ve max korelasyon "
+                          "bilgilerini yan yana görerek değişken eleme kararlarını "
                           "tek bakışta verebilirsiniz.",
                           "#10b981"),
                 # Hidden — callback uyumluluğu için (eski checkbox/buton kaldırıldı)
@@ -1055,6 +997,145 @@ def build_main():
                     ],
                     className="mb-3",
                 ),
+                # ── Değişken Seçim Filtreleri ────────────────────────────────
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("IV", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        html.Div([
+                            dbc.Select(id="vs-filter-iv-op", className="dark-select",
+                                       options=[{"label": "≥", "value": "ge"},
+                                                {"label": ">", "value": "gt"},
+                                                {"label": "≤", "value": "le"},
+                                                {"label": "<", "value": "lt"}],
+                                       value="ge",
+                                       style={"width": "52px", "fontSize": "0.75rem",
+                                              "padding": "2px 4px", "display": "inline-block"}),
+                            dbc.Input(id="vs-filter-iv-val", type="number",
+                                      value=None, step="any", min=0,
+                                      style={"width": "72px", "fontSize": "0.75rem",
+                                             "padding": "2px 6px", "marginLeft": "4px",
+                                             "display": "inline-block",
+                                             "backgroundColor": "#111827", "color": "#d1d5db",
+                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("Korr (Target)", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        html.Div([
+                            dbc.Select(id="vs-filter-corr-target-op", className="dark-select",
+                                       options=[{"label": "<", "value": "lt"},
+                                                {"label": "≤", "value": "le"},
+                                                {"label": "≥", "value": "ge"},
+                                                {"label": ">", "value": "gt"}],
+                                       value="lt",
+                                       style={"width": "52px", "fontSize": "0.75rem",
+                                              "padding": "2px 4px", "display": "inline-block"}),
+                            dbc.Input(id="vs-filter-corr-target-val", type="number",
+                                      value=None, step="any", min=0, max=1,
+                                      style={"width": "72px", "fontSize": "0.75rem",
+                                             "padding": "2px 6px", "marginLeft": "4px",
+                                             "display": "inline-block",
+                                             "backgroundColor": "#111827", "color": "#d1d5db",
+                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("Korr (Değişken)", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        html.Div([
+                            dbc.Select(id="vs-filter-corr-var-op", className="dark-select",
+                                       options=[{"label": "<", "value": "lt"},
+                                                {"label": "≤", "value": "le"},
+                                                {"label": "≥", "value": "ge"},
+                                                {"label": ">", "value": "gt"}],
+                                       value="lt",
+                                       style={"width": "52px", "fontSize": "0.75rem",
+                                              "padding": "2px 4px", "display": "inline-block"}),
+                            dbc.Input(id="vs-filter-corr-var-val", type="number",
+                                      value=None, step="any", min=0, max=1,
+                                      style={"width": "72px", "fontSize": "0.75rem",
+                                             "padding": "2px 6px", "marginLeft": "4px",
+                                             "display": "inline-block",
+                                             "backgroundColor": "#111827", "color": "#d1d5db",
+                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("PSI", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        html.Div([
+                            dbc.Select(id="vs-filter-psi-op", className="dark-select",
+                                       options=[{"label": "<", "value": "lt"},
+                                                {"label": "≤", "value": "le"},
+                                                {"label": "≥", "value": "ge"},
+                                                {"label": ">", "value": "gt"}],
+                                       value="lt",
+                                       style={"width": "52px", "fontSize": "0.75rem",
+                                              "padding": "2px 4px", "display": "inline-block"}),
+                            dbc.Input(id="vs-filter-psi-val", type="number",
+                                      value=None, step="any", min=0,
+                                      style={"width": "72px", "fontSize": "0.75rem",
+                                             "padding": "2px 6px", "marginLeft": "4px",
+                                             "display": "inline-block",
+                                             "backgroundColor": "#111827", "color": "#d1d5db",
+                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("Eksik %", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        html.Div([
+                            dbc.Select(id="vs-filter-missing-op", className="dark-select",
+                                       options=[{"label": "≤", "value": "le"},
+                                                {"label": "<", "value": "lt"},
+                                                {"label": "≥", "value": "ge"},
+                                                {"label": ">", "value": "gt"}],
+                                       value="le",
+                                       style={"width": "52px", "fontSize": "0.75rem",
+                                              "padding": "2px 4px", "display": "inline-block"}),
+                            dbc.Input(id="vs-filter-missing-val", type="number",
+                                      value=None, step="any", min=0, max=100,
+                                      style={"width": "72px", "fontSize": "0.75rem",
+                                             "padding": "2px 6px", "marginLeft": "4px",
+                                             "display": "inline-block",
+                                             "backgroundColor": "#111827", "color": "#d1d5db",
+                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
+                        ], style={"display": "flex", "alignItems": "center"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("Test Mono", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        dbc.Select(id="vs-filter-test-mono", className="dark-select",
+                                   options=[{"label": "Hepsi", "value": "Hepsi"},
+                                            {"label": "✅ Monoton", "value": "✅"},
+                                            {"label": "❌ Değil", "value": "❌"}],
+                                   value="Hepsi",
+                                   style={"width": "110px", "fontSize": "0.75rem",
+                                          "padding": "2px 4px"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        dbc.Label("OOT Mono", className="form-label",
+                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        dbc.Select(id="vs-filter-oot-mono", className="dark-select",
+                                   options=[{"label": "Hepsi", "value": "Hepsi"},
+                                            {"label": "✅ Monoton", "value": "✅"},
+                                            {"label": "❌ Değil", "value": "❌"}],
+                                   value="Hepsi",
+                                   style={"width": "110px", "fontSize": "0.75rem",
+                                          "padding": "2px 4px"}),
+                    ], width="auto", style={"paddingRight": "0.8rem"}),
+                    dbc.Col([
+                        html.Div("\u00a0", style={"fontSize": "0.7rem", "marginBottom": "2px"}),
+                        dbc.Button("Temizle", id="btn-vs-filter-reset",
+                                   color="secondary", size="sm", outline=True,
+                                   style={"fontSize": "0.72rem", "padding": "2px 10px"}),
+                    ], width="auto", style={"display": "flex", "alignItems": "end"}),
+                ], className="mb-2", style={"alignItems": "end"}),
+                html.Div(id="vs-active-count",
+                         style={"fontSize": "0.75rem", "color": "#7e8fa4",
+                                "marginBottom": "0.5rem"}),
                 dcc.Loading(html.Div(id="div-var-summary"), type="dot", color="#4F8EF7", delay_show=300),
             ]), label="Değişken Özeti", tab_id="tab-var-summary", className="tab-content-area"),
             dbc.Tab(html.Div([
@@ -1140,101 +1221,6 @@ def build_main():
 
                 # ── Hızlı Model ───────────────────────────────────────────────
                 html.P("Hızlı Model", className="section-title"),
-
-                # Değişken filtre kontrolleri
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Label("IV", className="form-label",
-                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        html.Div([
-                            dbc.Select(id="pg-filter-iv-op", className="dark-select",
-                                       options=[{"label": "≥", "value": "ge"},
-                                                {"label": ">", "value": "gt"},
-                                                {"label": "≤", "value": "le"},
-                                                {"label": "<", "value": "lt"}],
-                                       value="ge",
-                                       style={"width": "52px", "fontSize": "0.75rem",
-                                              "padding": "2px 4px", "display": "inline-block"}),
-                            dbc.Input(id="pg-filter-iv-val", type="number",
-                                      value=0.02, step=0.01, min=0,
-                                      style={"width": "72px", "fontSize": "0.75rem",
-                                             "padding": "2px 6px", "marginLeft": "4px",
-                                             "display": "inline-block",
-                                             "backgroundColor": "#111827", "color": "#d1d5db",
-                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
-                        ], style={"display": "flex", "alignItems": "center"}),
-                    ], width="auto", style={"paddingRight": "1rem"}),
-                    dbc.Col([
-                        dbc.Label("Korr", className="form-label",
-                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        html.Div([
-                            dbc.Select(id="pg-filter-corr-op", className="dark-select",
-                                       options=[{"label": "<", "value": "lt"},
-                                                {"label": "≤", "value": "le"},
-                                                {"label": "≥", "value": "ge"},
-                                                {"label": ">", "value": "gt"}],
-                                       value="lt",
-                                       style={"width": "52px", "fontSize": "0.75rem",
-                                              "padding": "2px 4px", "display": "inline-block"}),
-                            dbc.Input(id="pg-filter-corr-val", type="number",
-                                      value=0.80, step=0.01, min=0, max=1,
-                                      style={"width": "72px", "fontSize": "0.75rem",
-                                             "padding": "2px 6px", "marginLeft": "4px",
-                                             "display": "inline-block",
-                                             "backgroundColor": "#111827", "color": "#d1d5db",
-                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
-                        ], style={"display": "flex", "alignItems": "center"}),
-                    ], width="auto", style={"paddingRight": "1rem"}),
-                    dbc.Col([
-                        dbc.Label("PSI", className="form-label",
-                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        html.Div([
-                            dbc.Select(id="pg-filter-psi-op", className="dark-select",
-                                       options=[{"label": "<", "value": "lt"},
-                                                {"label": "≤", "value": "le"},
-                                                {"label": "≥", "value": "ge"},
-                                                {"label": ">", "value": "gt"}],
-                                       value="lt",
-                                       style={"width": "52px", "fontSize": "0.75rem",
-                                              "padding": "2px 4px", "display": "inline-block"}),
-                            dbc.Input(id="pg-filter-psi-val", type="number",
-                                      value=0.25, step=0.01, min=0,
-                                      style={"width": "72px", "fontSize": "0.75rem",
-                                             "padding": "2px 6px", "marginLeft": "4px",
-                                             "display": "inline-block",
-                                             "backgroundColor": "#111827", "color": "#d1d5db",
-                                             "border": "1px solid #2d3a4f", "borderRadius": "4px"}),
-                        ], style={"display": "flex", "alignItems": "center"}),
-                    ], width="auto", style={"paddingRight": "1rem"}),
-                    dbc.Col([
-                        dbc.Label("Test Mono", className="form-label",
-                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        dbc.Select(id="pg-filter-test-mono", className="dark-select",
-                                   options=[{"label": "Hepsi", "value": "Hepsi"},
-                                            {"label": "✅ Monoton", "value": "✅"},
-                                            {"label": "❌ Değil", "value": "❌"}],
-                                   value="Hepsi",
-                                   style={"width": "120px", "fontSize": "0.75rem",
-                                          "padding": "2px 4px"}),
-                    ], width="auto", style={"paddingRight": "1rem"}),
-                    dbc.Col([
-                        dbc.Label("OOT Mono", className="form-label",
-                                  style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        dbc.Select(id="pg-filter-oot-mono", className="dark-select",
-                                   options=[{"label": "Hepsi", "value": "Hepsi"},
-                                            {"label": "✅ Monoton", "value": "✅"},
-                                            {"label": "❌ Değil", "value": "❌"}],
-                                   value="Hepsi",
-                                   style={"width": "120px", "fontSize": "0.75rem",
-                                          "padding": "2px 4px"}),
-                    ], width="auto", style={"paddingRight": "1rem"}),
-                    dbc.Col([
-                        html.Div("\u00a0", style={"fontSize": "0.7rem", "marginBottom": "2px"}),
-                        dbc.Button("Sıfırla", id="btn-pg-filter-reset",
-                                   color="secondary", size="sm", outline=True,
-                                   style={"fontSize": "0.72rem", "padding": "2px 10px"}),
-                    ], width="auto", style={"display": "flex", "alignItems": "end"}),
-                ], className="mb-2", style={"alignItems": "end"}),
 
                 # Değişken özeti önizleme
                 html.Div([
@@ -1533,8 +1519,8 @@ def _build_slideshow_modal():
             html.H4("İstatistiksel Testler", className="slide-title"),
             html.P(
                 "Korelasyon matrisi, Chi-kare bağımsızlık testi, "
-                "ANOVA (grup farklılığı), KS testi (dağılım karşılaştırma) "
-                "ve VIF (çoklu doğrusal bağımlılık) analizlerini tek tıkla çalıştırın.",
+                "ANOVA (grup farklılığı) ve KS testi (dağılım karşılaştırma) "
+                "analizlerini tek tıkla çalıştırın.",
                 className="slide-text",
             ),
             html.Div([
@@ -1542,7 +1528,6 @@ def _build_slideshow_modal():
                 html.Span("Chi²", className="slide-chip"),
                 html.Span("ANOVA", className="slide-chip"),
                 html.Span("KS Testi", className="slide-chip"),
-                html.Span("VIF", className="slide-chip"),
             ], className="slide-chips"),
         ], className="slide-content"),
 
@@ -1672,6 +1657,9 @@ def build_layout():
         dcc.Store(id="store-key", storage_type="memory"),
         dcc.Store(id="store-config", storage_type="memory"),
         dcc.Store(id="store-expert-exclude", storage_type="memory"),
+        dcc.Store(id="store-active-vars", storage_type="memory"),
+        dcc.Store(id="store-active-snapshot", storage_type="memory"),
+        dcc.Store(id="store-vs-overrides", storage_type="memory"),
         dcc.Store(id="store-expert-thresholds", storage_type="memory"),
         dcc.Store(id="store-precompute-state", storage_type="memory"),
         dcc.Store(id="store-model-signal", storage_type="memory"),

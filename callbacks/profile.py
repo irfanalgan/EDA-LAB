@@ -536,7 +536,7 @@ def show_model_panel(profile_name):
 # ── Yardımcı: Model entry oluştur ────────────────────────────────────────────
 def _build_model_entry(profile_name, model_vars, model_type, test_size,
                        c_val, thr_method, thr_val, pg_target,
-                       split_method, split_date, key):
+                       split_method, split_date, key, filters=None):
     """Kayıt için model_entry dict oluştur."""
     from datetime import datetime
     algo_labels = {"lr": "LR", "lgbm": "LGBM", "xgb": "XGB", "rf": "RF"}
@@ -551,7 +551,7 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
         if cache_key in _SERVER_STORE:
             model_note = _SERVER_STORE[cache_key].get("model_note", "")
 
-    return {
+    entry = {
         "name": auto_name,
         "saved_at": now,
         "model_note": model_note,
@@ -567,6 +567,9 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
             "split_date": split_date,
         },
     }
+    if filters:
+        entry["filters"] = filters
+    return entry
 
 
 # ── Callback: Model Kaydet (yeni veya üstüne yazma onayı) ───────────────────
@@ -588,12 +591,36 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
     State("pg-split-date", "value"),
     State("store-key", "data"),
     State("store-loaded-model-index", "data"),
+    # Filtre state'leri
+    State("vs-filter-iv-op", "value"),
+    State("vs-filter-iv-val", "value"),
+    State("vs-filter-corr-target-op", "value"),
+    State("vs-filter-corr-target-val", "value"),
+    State("vs-filter-corr-var-op", "value"),
+    State("vs-filter-corr-var-val", "value"),
+    State("vs-filter-psi-op", "value"),
+    State("vs-filter-psi-val", "value"),
+    State("vs-filter-missing-op", "value"),
+    State("vs-filter-missing-val", "value"),
+    State("vs-filter-test-mono", "value"),
+    State("vs-filter-oot-mono", "value"),
     prevent_initial_call=True,
 )
 def save_model_cb(_, profile_name, model_vars, model_type, test_size,
                   thr_method, thr_val, pg_target, split_method,
-                  split_date, key, loaded_idx):
+                  split_date, key, loaded_idx,
+                  f_iv_op, f_iv_val, f_ct_op, f_ct_val,
+                  f_cv_op, f_cv_val, f_psi_op, f_psi_val,
+                  f_miss_op, f_miss_val, f_test_mono, f_oot_mono):
     c_val = 1.0
+    filters = {
+        "iv_op": f_iv_op, "iv_val": f_iv_val,
+        "corr_target_op": f_ct_op, "corr_target_val": f_ct_val,
+        "corr_var_op": f_cv_op, "corr_var_val": f_cv_val,
+        "psi_op": f_psi_op, "psi_val": f_psi_val,
+        "missing_op": f_miss_op, "missing_val": f_miss_val,
+        "test_mono": f_test_mono, "oot_mono": f_oot_mono,
+    }
     no = dash.no_update
     if not profile_name:
         return (
@@ -627,7 +654,7 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     # Yeni model → direkt kaydet
     entry = _build_model_entry(profile_name, model_vars, model_type, test_size,
                                c_val, thr_method, thr_val, pg_target,
-                               split_method, split_date, key)
+                               split_method, split_date, key, filters=filters)
     try:
         _save_model_to_profile(profile_name, entry)
         new_opts = _list_saved_models(profile_name)
@@ -664,19 +691,43 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     State("pg-split-date", "value"),
     State("store-key", "data"),
     State("store-loaded-model-index", "data"),
+    # Filtre state'leri
+    State("vs-filter-iv-op", "value"),
+    State("vs-filter-iv-val", "value"),
+    State("vs-filter-corr-target-op", "value"),
+    State("vs-filter-corr-target-val", "value"),
+    State("vs-filter-corr-var-op", "value"),
+    State("vs-filter-corr-var-val", "value"),
+    State("vs-filter-psi-op", "value"),
+    State("vs-filter-psi-val", "value"),
+    State("vs-filter-missing-op", "value"),
+    State("vs-filter-missing-val", "value"),
+    State("vs-filter-test-mono", "value"),
+    State("vs-filter-oot-mono", "value"),
     prevent_initial_call=True,
 )
 def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
                        thr_method, thr_val, pg_target,
-                       split_method, split_date, key, loaded_idx):
+                       split_method, split_date, key, loaded_idx,
+                       f_iv_op, f_iv_val, f_ct_op, f_ct_val,
+                       f_cv_op, f_cv_val, f_psi_op, f_psi_val,
+                       f_miss_op, f_miss_val, f_test_mono, f_oot_mono):
     c_val = 1.0
+    filters = {
+        "iv_op": f_iv_op, "iv_val": f_iv_val,
+        "corr_target_op": f_ct_op, "corr_target_val": f_ct_val,
+        "corr_var_op": f_cv_op, "corr_var_val": f_cv_val,
+        "psi_op": f_psi_op, "psi_val": f_psi_val,
+        "missing_op": f_miss_op, "missing_val": f_miss_val,
+        "test_mono": f_test_mono, "oot_mono": f_oot_mono,
+    }
     no = dash.no_update
     if not profile_name or loaded_idx is None or not model_vars:
         return no, no, no, False, no
 
     entry = _build_model_entry(profile_name, model_vars, model_type, test_size,
                                c_val, thr_method, thr_val, pg_target,
-                               split_method, split_date, key)
+                               split_method, split_date, key, filters=filters)
     try:
         _save_model_to_profile(profile_name, entry, overwrite_index=loaded_idx)
         new_opts = _list_saved_models(profile_name)
@@ -719,6 +770,19 @@ def cancel_overwrite(_):
     Output("model-save-status", "children", allow_duplicate=True),
     Output("store-pending-note", "data", allow_duplicate=True),
     Output("store-loaded-model-index", "data", allow_duplicate=True),
+    # Filtre output'ları
+    Output("vs-filter-iv-op", "value", allow_duplicate=True),
+    Output("vs-filter-iv-val", "value", allow_duplicate=True),
+    Output("vs-filter-corr-target-op", "value", allow_duplicate=True),
+    Output("vs-filter-corr-target-val", "value", allow_duplicate=True),
+    Output("vs-filter-corr-var-op", "value", allow_duplicate=True),
+    Output("vs-filter-corr-var-val", "value", allow_duplicate=True),
+    Output("vs-filter-psi-op", "value", allow_duplicate=True),
+    Output("vs-filter-psi-val", "value", allow_duplicate=True),
+    Output("vs-filter-missing-op", "value", allow_duplicate=True),
+    Output("vs-filter-missing-val", "value", allow_duplicate=True),
+    Output("vs-filter-test-mono", "value", allow_duplicate=True),
+    Output("vs-filter-oot-mono", "value", allow_duplicate=True),
     Input("btn-model-load", "n_clicks"),
     State("store-profile-loaded", "data"),
     State("dd-saved-models", "value"),
@@ -726,7 +790,7 @@ def cancel_overwrite(_):
 )
 def load_model_cb(_, profile_name, model_index):
     no = dash.no_update
-    _N = 12
+    _N = 24  # 12 eski + 12 filtre
     if not profile_name or model_index is None:
         return (no,) * _N
 
@@ -739,6 +803,7 @@ def load_model_cb(_, profile_name, model_index):
     p = models[model_index]["params"]
     model_name = models[model_index]["name"]
     model_note = models[model_index].get("model_note", "")
+    f = models[model_index].get("filters", {})
 
     mvars = p.get("model_vars", [])
     return (
@@ -755,6 +820,19 @@ def load_model_cb(_, profile_name, model_index):
                   color="info", style=_ALERT_STYLE),
         model_note,                        # store-pending-note
         model_index,                       # store-loaded-model-index
+        # Filtre değerleri — kaydedilmişse geri yükle, yoksa no_update
+        f.get("iv_op", no),
+        f.get("iv_val", no),
+        f.get("corr_target_op", no),
+        f.get("corr_target_val", no),
+        f.get("corr_var_op", no),
+        f.get("corr_var_val", no),
+        f.get("psi_op", no),
+        f.get("psi_val", no),
+        f.get("missing_op", no),
+        f.get("missing_val", no),
+        f.get("test_mono", no),
+        f.get("oot_mono", no),
     )
 
 

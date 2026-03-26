@@ -14,23 +14,17 @@ from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, _TABLE_STY
 @app.callback(
     Output("tab-outlier", "children"),
     Input("store-config", "data"),
-    Input("store-expert-exclude", "data"),
+    Input("store-active-vars", "data"),
     State("store-key", "data"),
 )
-def render_outlier_tab(config, expert_excluded, key):
+def render_outlier_tab(config, active_vars, key):
     df = _get_df(key)
     if df is None or not config or not config.get("target_col"):
         return html.Div("Önce veri yükleyin ve yapılandırın.", className="alert-info-custom")
 
-    cfg_cols = {c for c in [config.get("target_col"), config.get("date_col"),
-                             config.get("segment_col")] if c}
-    excluded_set = set(expert_excluded or [])
-    screen_result = _SERVER_STORE.get(f"{key}_screen")
-    passed_set = set(screen_result[0]) if screen_result else None
+    active_set = set(active_vars) if active_vars else set()
     num_cols = [c for c in df.select_dtypes(include="number").columns
-                if c not in cfg_cols and c not in excluded_set]
-    if passed_set is not None:
-        num_cols = [c for c in num_cols if c in passed_set]
+                if c != config.get("target_col") and c in active_set] if active_set else []
     if not num_cols:
         return html.Div("Sayısal değişken bulunamadı.", className="alert-info-custom")
 

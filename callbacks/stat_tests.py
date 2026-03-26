@@ -9,7 +9,7 @@ from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _PLOT_LAYOUT, _TABLE_STYLE
-from modules.correlation import get_numeric_cols, compute_vif
+from modules.correlation import get_numeric_cols
 from callbacks.correlation import _get_stat_data
 
 
@@ -19,7 +19,6 @@ from callbacks.correlation import _get_stat_data
     Output("stat-chi-panel",   "style"),
     Output("stat-anova-panel", "style"),
     Output("stat-ks-panel",    "style"),
-    Output("stat-vif-panel",   "style"),
     Input("stat-test-type", "value"),
 )
 def toggle_stat_panels(test_type):
@@ -30,7 +29,6 @@ def toggle_stat_panels(test_type):
         _show if test_type == "chi_square"  else _hide,
         _show if test_type == "anova"       else _hide,
         _show if test_type == "ks"          else _hide,
-        _show if test_type == "vif_sandbox" else _hide,
     )
 
 
@@ -41,10 +39,10 @@ def toggle_stat_panels(test_type):
     Output("anova-var", "options"), Output("anova-var", "value"),
     Output("ks-var",    "options"), Output("ks-var",    "value"),
     Input("store-config", "data"),
-    Input("store-expert-exclude", "data"),
+    Input("store-active-vars", "data"),
     State("store-key", "data"),
 )
-def populate_stat_dropdowns(config, expert_excluded, key):
+def populate_stat_dropdowns(config, active_vars, key):
     empty = ([], None)
     if not config or not key:
         return empty + empty + empty + empty
@@ -54,22 +52,16 @@ def populate_stat_dropdowns(config, expert_excluded, key):
     target   = config.get("target_col", "")
     date_col = config.get("date_col", "")
     excl     = {c for c in [target, date_col] if c}
-
-    # Ön eleme (screen) + uzman elemeleri ile filtrele
-    screen_result = _SERVER_STORE.get(f"{key}_screen")
-    passed_set = set(screen_result[0]) if screen_result else None
-    expert_set = set(expert_excluded or [])
+    active_set = set(active_vars) if active_vars else set()
 
     all_cols = [c for c in df_orig.columns if c not in excl]
-    if passed_set is not None:
-        all_cols = [c for c in all_cols if c in passed_set]
-    all_cols = [c for c in all_cols if c not in expert_set]
+    if active_set:
+        all_cols = [c for c in all_cols if c in active_set]
 
     num_cols = [c for c in df_orig.select_dtypes(include=[np.number]).columns
                 if c not in excl]
-    if passed_set is not None:
-        num_cols = [c for c in num_cols if c in passed_set]
-    num_cols = [c for c in num_cols if c not in expert_set]
+    if active_set:
+        num_cols = [c for c in num_cols if c in active_set]
 
     all_opts = [{"label": c, "value": c} for c in all_cols]
     num_opts = [{"label": c, "value": c} for c in num_cols]
@@ -419,132 +411,6 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
     ])
 
 
-# ── Render: VIF Sandbox ───────────────────────────────────────────────────────
-def _render_vif_sandbox(df_active: pd.DataFrame, var_set: str, max_cols: int,
-                        config: dict, expert_excluded: list, key: str,
-                        seg_col: str, seg_val: str) -> html.Div:
-    target   = config.get("target_col", "")
-    date_col = config.get("date_col", "")
-    excl     = {c for c in [target, date_col] if c}
-    iv_cache_key = f"{key}_iv_{seg_col}_{seg_val}"
-
-    all_num = get_numeric_cols(df_active, exclude=list(excl), max_cols=max_cols)
-    screen_result = _SERVER_STORE.get(f"{key}_screen")
-    if screen_result:
-        passed_set = set(screen_result[0])
-        all_num = [c for c in all_num if c in passed_set]
-    expert_set = set(expert_excluded or [])
-    all_num = [c for c in all_num if c not in expert_set]
-
-    if var_set == "iv_filtered" and iv_cache_key in _SERVER_STORE:
-        iv_df_c = _SERVER_STORE[iv_cache_key]
-        iv_high = set(iv_df_c[iv_df_c["IV"] >= 0.10]["Değişken"].tolist())
-        filtered = [c for c in all_num if c in iv_high]
-        cols     = filtered if len(filtered) >= 2 else all_num
-        iv_note  = f"IV ≥ 0.10 filtresi uygulandı ({len(cols)} değişken)"
-    else:
-        cols    = all_num
-        iv_note = f"Tüm numerik değişkenler ({len(cols)} adet)"
-
-    if len(cols) < 2:
-        return html.Div("VIF için en az 2 değişken gerekli. Target & IV sekmesini önce açınız.",
-                        className="alert-info-custom")
-
-    vif_df = compute_vif(df_active, cols)
-    if vif_df is None or vif_df.empty:
-        return html.Div("VIF hesaplanamadı.", className="alert-info-custom")
-
-    # "En Benzer" kolonu ekle
-    try:
-        corr_sub = df_active[cols].corr()
-        en_benzer = []
-        for var in vif_df["Değişken"]:
-            if var not in corr_sub.columns:
-                en_benzer.append("—")
-                continue
-            row = corr_sub[var].drop(var, errors="ignore").abs()
-            top = row.idxmax()
-            en_benzer.append(f"{top}  (r = {corr_sub[var][top]:+.3f})")
-        vif_df = vif_df.copy()
-        vif_df.insert(2, "En Benzer", en_benzer)
-    except Exception:
-        pass
-
-    vif_cond = [
-        {"if": {"filter_query": '{Uyarı} = "✗ Yüksek"', "column_id": "Uyarı"},
-         "color": "#ef4444", "fontWeight": "700"},
-        {"if": {"filter_query": '{Uyarı} = "⚠ Orta"',   "column_id": "Uyarı"},
-         "color": "#f59e0b", "fontWeight": "600"},
-        {"if": {"filter_query": '{Uyarı} = "✓ Normal"',  "column_id": "Uyarı"},
-         "color": "#10b981"},
-        {"if": {"filter_query": "{VIF} >= 10", "column_id": "VIF"},
-         "color": "#ef4444", "fontWeight": "700"},
-        {"if": {"filter_query": "{VIF} >= 5 && {VIF} < 10", "column_id": "VIF"},
-         "color": "#f59e0b"},
-        {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
-    ]
-
-    n_high = int((vif_df["VIF"] >= 10).sum()) if "VIF" in vif_df.columns else 0
-    n_mid  = int(((vif_df["VIF"] >= 5) & (vif_df["VIF"] < 10)).sum()) if "VIF" in vif_df.columns else 0
-
-    summary_cards = dbc.Row([
-        dbc.Col(html.Div([
-            html.Div("Değişken Sayısı", className="metric-label"),
-            html.Div(str(len(vif_df)), className="metric-value"),
-        ], className="metric-card"), width=3),
-        dbc.Col(html.Div([
-            html.Div("VIF ≥ 10 (Yüksek)", className="metric-label"),
-            html.Div(str(n_high), className="metric-value",
-                     style={"color": "#ef4444" if n_high > 0 else "#c8cdd8"}),
-        ], className="metric-card"), width=3),
-        dbc.Col(html.Div([
-            html.Div("VIF 5–10 (Orta)", className="metric-label"),
-            html.Div(str(n_mid), className="metric-value",
-                     style={"color": "#f59e0b" if n_mid > 0 else "#c8cdd8"}),
-        ], className="metric-card"), width=3),
-    ], className="mb-3")
-
-    vif_tsv = vif_df.to_csv(sep="\t", index=False)
-    return html.Div([
-        html.P("VIF Kum Havuzu (Çoklu Doğrusallık)", className="section-title"),
-        html.Div(iv_note, className="form-hint", style={"marginBottom": "1rem"}),
-        summary_cards,
-        html.Div([
-            dcc.Clipboard(target_id="vif-sandbox-tsv", title="Kopyala",
-                          style={"cursor": "pointer", "fontSize": "0.72rem",
-                                 "color": "#a8b2c2", "padding": "0.2rem 0.55rem",
-                                 "border": "1px solid #2d3a4f", "borderRadius": "4px",
-                                 "backgroundColor": "#1a2035", "float": "right",
-                                 "marginBottom": "0.4rem"}),
-        ], style={"overflow": "hidden"}),
-        html.Pre(vif_tsv, id="vif-sandbox-tsv", style={"display": "none"}),
-        dash_table.DataTable(
-            data=vif_df.to_dict("records"),
-            columns=[{"name": c, "id": c} for c in vif_df.columns],
-            sort_action="native", filter_action="native",
-            page_size=25,
-            style_table={"overflowX": "auto"},
-            style_header={"backgroundColor": "#111827", "color": "#a8b2c2",
-                          "fontWeight": "700", "fontSize": "0.72rem",
-                          "border": "1px solid #2d3a4f", "textTransform": "uppercase"},
-            style_data={"backgroundColor": "#161C27", "color": "#c8cdd8",
-                        "fontSize": "0.82rem", "border": "1px solid #232d3f"},
-            style_data_conditional=vif_cond,
-            style_cell={"padding": "0.4rem 0.65rem"},
-            style_cell_conditional=[
-                {"if": {"column_id": "VIF"}, "textAlign": "right"},
-                {"if": {"column_id": "En Benzer"}, "color": "#a8b2c2", "fontSize": "0.78rem"},
-            ],
-            style_filter={"backgroundColor": "#0e1117", "color": "#c8cdd8",
-                          "border": "1px solid #2d3a4f"},
-        ),
-        html.Div([
-            html.Span("VIF Eşikleri: ", style={"color": "#7e8fa4", "fontSize": "0.73rem"}),
-            html.Span("< 5 Normal  · ", style={"color": "#10b981", "fontSize": "0.73rem"}),
-            html.Span("5–10 Orta  · ", style={"color": "#f59e0b", "fontSize": "0.73rem"}),
-            html.Span("> 10 Yüksek", style={"color": "#ef4444", "fontSize": "0.73rem"}),
-        ], style={"marginTop": "0.75rem"}),
-    ])
 
 
 # ── Callback: Chi-Square Hesapla ─────────────────────────────────────────────
@@ -641,33 +507,3 @@ def compute_ks_test(n_clicks, var_col, key, config, stat_tab):
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 
 
-# ── Callback: VIF Sandbox Hesapla ─────────────────────────────────────────────
-@app.callback(
-    Output("stat-vif-result", "children"),
-    Input("btn-vif-sandbox-compute", "n_clicks"),
-    State("vif-var-set", "value"),
-    State("vif-max-cols", "value"),
-    State("store-key", "data"),
-    State("store-config", "data"),
-    State("store-expert-exclude", "data"),
-    State("stat-data-tab", "active_tab"),
-    prevent_initial_call=True,
-)
-def compute_vif_sandbox(n_clicks, var_set, max_cols_str, key, config, expert_excluded, stat_tab):
-    if not key or not config:
-        return html.Div()
-    _use_woe = (stat_tab == "stat-tab-woe")
-    df_active = _get_stat_data(key, config, use_woe=_use_woe)
-    if df_active is None:
-        df_orig = _get_df(key)
-        if df_orig is None:
-            return html.Div()
-        seg_col = config.get("segment_col")
-        seg_val = config.get("segment_val")
-        df_active = apply_segment_filter(df_orig, seg_col, seg_val)
-    max_cols  = int(max_cols_str or 20)
-    try:
-        return _render_vif_sandbox(df_active, var_set or "iv_filtered", max_cols,
-                                   config, expert_excluded, key, seg_col, seg_val)
-    except Exception as exc:
-        return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})

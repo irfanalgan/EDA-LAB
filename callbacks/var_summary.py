@@ -7,7 +7,7 @@ import numpy as np
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.chart_helpers import calc_psi, psi_label
-from modules.correlation import compute_correlation_matrix, find_high_corr_pairs, compute_vif
+from modules.correlation import compute_correlation_matrix, find_high_corr_pairs
 
 
 # ── Hesaplama fonksiyonu (precompute + callback ortak) ────────────────────────
@@ -112,16 +112,12 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             pass
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
-    # ── VIF — modelleme sonrası hesaplanır, burada boş bırakılır ────────────
-    summary["Train VIF"] = "—"
-
     # ── Öneri mantığı ────────────────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
         psi_val   = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
         corr_val  = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
-        vif_val   = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
 
         cik_reasons = []
         if iv_val < 0.02:
@@ -143,8 +139,6 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
         if corr_val is not None and abs(corr_val) >= 0.80:
             inc_reasons.append(f"|Korr|={abs(corr_val):.4f}≥0.80")
-        if vif_val is not None and vif_val > 5.0:
-            inc_reasons.append(f"VIF={vif_val:.1f}>5")
 
         if inc_reasons:
             return "2 ⚠️ İncele", "; ".join(inc_reasons)
@@ -164,7 +158,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     col_order = ["Değişken", "Öneri", "Sebep", "IV", "Bin",
                  "Test Monoton", "OOT Monoton",
                  "Korr (Target)", "PSI Değeri", "PSI Durumu",
-                 "Train VIF", "Eksik %"]
+                 "Eksik %"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
     # Cache'e yaz
@@ -175,7 +169,7 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
 
 def compute_var_summary_raw(config, key, seg_col, seg_val):
     """Ham (raw) train+test üzerinden değişken özeti tablosu üretir.
-    Kolonlar: IV, Eksik %, PSI (10 parça), Korelasyon, VIF"""
+    Kolonlar: IV, Eksik %, PSI (10 parça), Korelasyon"""
     target = config["target_col"]
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
 
@@ -234,16 +228,12 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
         pass
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
-    # ── VIF — modelleme sonrası hesaplanır, burada boş bırakılır ────────────
-    summary["Train VIF"] = "—"
-
     # ── Öneri mantığı (aynı) ──────────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val = row["IV"]
         eksik_val = row["Eksik %"]
         psi_val = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
         corr_val = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
-        vif_val = row["Train VIF"] if isinstance(row["Train VIF"], (int, float)) else None
         cik_reasons = []
         if iv_val < 0.02:
             cik_reasons.append(f"IV={iv_val:.4f}<0.02")
@@ -262,8 +252,6 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
         if corr_val is not None and abs(corr_val) >= 0.80:
             inc_reasons.append(f"|Korr|={abs(corr_val):.4f}>=0.80")
-        if vif_val is not None and vif_val > 5.0:
-            inc_reasons.append(f"VIF={vif_val:.1f}>5")
         if inc_reasons:
             return "2 ⚠️ İncele", "; ".join(inc_reasons)
         return "1 ✅ Tut", "—"
@@ -279,15 +267,98 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
     # Ham tab: Monoton kolonları yok
     col_order = ["Değişken", "Öneri", "Sebep", "IV",
                  "Korr (Target)", "PSI Değeri", "PSI Durumu",
-                 "Train VIF", "Eksik %"]
+                 "Eksik %"]
     summary = summary[[c for c in col_order if c in summary.columns]]
 
     _SERVER_STORE[f"{key}_varsummary_raw_{seg_col}_{seg_val}"] = summary.copy()
     return summary
 
 
+# ── Filtre yardımcıları ────────────────────────────────────────────────────────
+
+def _apply_numeric_filter(df, col, op, val):
+    """Sayısal filtre uygula. '—' gibi string değerler (NaN) filtreden muaf tutulur."""
+    if col not in df.columns:
+        return df
+    try:
+        val = float(val)
+    except (TypeError, ValueError):
+        return df
+    nums = pd.to_numeric(df[col], errors="coerce")
+    is_na = nums.isna()
+    if op == "ge":
+        mask = (nums >= val) | is_na
+    elif op == "gt":
+        mask = (nums > val) | is_na
+    elif op == "le":
+        mask = (nums <= val) | is_na
+    elif op == "lt":
+        mask = (nums < val) | is_na
+    else:
+        return df
+    return df[mask]
+
+
+def _greedy_corr_eliminate(summary, corr_matrix, threshold):
+    """Değişkenler arası korelasyon greedy eleme. IV yüksek olan korunur."""
+    if corr_matrix is None or corr_matrix.empty:
+        return set()
+    var_list = summary["Değişken"].tolist()
+    iv_map = dict(zip(summary["Değişken"], summary["IV"]))
+    # IV'ye göre büyükten küçüğe sırala
+    sorted_vars = sorted(var_list, key=lambda v: iv_map.get(v, 0), reverse=True)
+    kept = set()
+    eliminated = set()
+    for var in sorted_vars:
+        if var in eliminated:
+            continue
+        kept.add(var)
+        if var not in corr_matrix.index:
+            continue
+        for other in sorted_vars:
+            if other in kept or other in eliminated or other not in corr_matrix.columns:
+                continue
+            try:
+                c = abs(corr_matrix.loc[var, other])
+                if c >= threshold:
+                    eliminated.add(other)
+            except (KeyError, TypeError):
+                pass
+    return eliminated
+
+
+def _compute_filtered_set(summary, filters, corr_matrix, use_woe):
+    """Filtre kriterlerine göre geçen değişken setini döndürür."""
+    disp = summary.copy()
+    disp = _apply_numeric_filter(disp, "IV", filters["iv_op"], filters["iv_val"])
+    disp = _apply_numeric_filter(disp, "Korr (Target)", filters["corr_target_op"], filters["corr_target_val"])
+    disp = _apply_numeric_filter(disp, "PSI Değeri", filters["psi_op"], filters["psi_val"])
+    disp = _apply_numeric_filter(disp, "Eksik %", filters["missing_op"], filters["missing_val"])
+
+    if use_woe:
+        if filters.get("test_mono") and filters["test_mono"] != "Hepsi" and "Test Monoton" in disp.columns:
+            disp = disp[disp["Test Monoton"] == filters["test_mono"]]
+        if filters.get("oot_mono") and filters["oot_mono"] != "Hepsi" and "OOT Monoton" in disp.columns:
+            disp = disp[disp["OOT Monoton"] == filters["oot_mono"]]
+
+    passed = set(disp["Değişken"].tolist())
+
+    # Greedy korelasyon eleme
+    try:
+        corr_var_val = float(filters.get("corr_var_val"))
+    except (TypeError, ValueError):
+        corr_var_val = None
+    if corr_var_val is not None and corr_matrix is not None:
+        elim = _greedy_corr_eliminate(
+            summary[summary["Değişken"].isin(passed)],
+            corr_matrix, corr_var_val)
+        passed -= elim
+
+    return passed
+
+
 # ── Render yardımcısı ─────────────────────────────────────────────────────────
-def _render_var_summary(summary, use_woe):
+def _render_var_summary(summary, use_woe, selected_vars=None):
     """Cache'den veya taze hesaplamadan gelen summary DataFrame'ini HTML'e çevirir."""
     style_conditions = [
         {"if": {"filter_query": '{Öneri} = "1 ✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
@@ -303,8 +374,6 @@ def _render_var_summary(summary, use_woe):
         {"if": {"filter_query": '{OOT Monoton} = "✅"',  "column_id": "OOT Monoton"},  "color": "#10b981"},
         {"if": {"filter_query": '{OOT Monoton} = "❌"',  "column_id": "OOT Monoton"},  "color": "#ef4444"},
         {"if": {"filter_query": '{Korr (Target)} >= 0.80', "column_id": "Korr (Target)"}, "color": "#f59e0b", "fontWeight": "600"},
-        {"if": {"filter_query": '{Train VIF} >= 10',     "column_id": "Train VIF"},   "color": "#ef4444", "fontWeight": "600"},
-        {"if": {"filter_query": '{Train VIF} >= 5 && {Train VIF} < 10', "column_id": "Train VIF"}, "color": "#f59e0b"},
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
     ]
 
@@ -318,6 +387,25 @@ def _render_var_summary(summary, use_woe):
         "★ Korr (Target) — Train üzerinden  ·  Monotonluk — Train bin sınırlarıyla",
         style={"color": "#a78bfa", "fontSize": "0.75rem", "marginBottom": "0.75rem"},
     ) if use_woe else html.Div()
+
+    # Satır verisine id ekle + seçili satırları hesapla
+    all_vars = summary["Değişken"].tolist()
+    if selected_vars is None:
+        selected_vars = set(all_vars)
+    else:
+        selected_vars = set(selected_vars)
+
+    # Tikli değişkenler üstte sıralama
+    summary = summary.copy()
+    summary["_sel"] = summary["Değişken"].apply(lambda v: 0 if v in selected_vars else 1)
+    summary = summary.sort_values(["_sel", "IV"], ascending=[True, False]).reset_index(drop=True)
+    summary = summary.drop(columns="_sel")
+
+    records = summary.to_dict("records")
+    for r in records:
+        r["id"] = r["Değişken"]
+
+    selected_rows = [i for i, r in enumerate(records) if r["Değişken"] in selected_vars]
 
     return html.Div([
         woe_note,
@@ -340,12 +428,12 @@ def _render_var_summary(summary, use_woe):
             ], className="metric-card"), width=3),
         ], className="mb-4"),
         dbc.Tooltip(
-            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, |Korr| < 0.80, VIF ≤ 5",
+            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, |Korr| < 0.80",
             target="card-tut", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
         dbc.Tooltip(
-            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · |Korr| ≥ 0.80 · VIF > 5",
+            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · |Korr| ≥ 0.80",
             target="card-incele", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
@@ -364,14 +452,17 @@ def _render_var_summary(summary, use_woe):
             html.Pre(tsv, id="var-summary-tsv", style={"display": "none"}),
         ], style={"overflow": "hidden"}),
         dash_table.DataTable(
-            data=summary.to_dict("records"),
+            id="var-summary-table",
+            data=records,
             columns=[{"name": c, "id": c} for c in summary.columns],
+            row_selectable="multi",
+            selected_rows=selected_rows,
             sort_action="native",
             filter_action="native",
             page_size=25,
             tooltip_header={
                 "Değişken":    {"value": "Değişkenin adı", "type": "markdown"},
-                "Öneri":       {"value": "IV, Eksik%, PSI, Korelasyon ve VIF'e göre otomatik öneri:\n"
+                "Öneri":       {"value": "IV, Eksik%, PSI ve Korelasyona göre otomatik öneri:\n"
                                          "- **✅ Tut** — Tüm kriterler tatmin edici\n"
                                          "- **⚠️ İncele** — En az bir zayıf sinyal var\n"
                                          "- **❌ Çıkar** — Kritik sorun tespit edildi", "type": "markdown"},
@@ -398,9 +489,6 @@ def _render_var_summary(summary, use_woe):
                                           "| 0.10–0.25 | Hafif Kayma |\n"
                                           "| > 0.25 | Kritik Kayma |", "type": "markdown"},
                 "PSI Durumu":   {"value": "PSI değerine göre stabilite etiketi", "type": "markdown"},
-                "Train VIF":   {"value": "**Variance Inflation Factor** — çoklu doğrusal bağlantı ölçüsü "
-                                         "(Train WoE üzerinden)\n\n"
-                                         "- **< 5** — Normal\n- **5–10** — Dikkat\n- **> 10** — Kritik", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 60%** → Çıkar\n- **20–60%** → İncele", "type": "markdown"},
                 "Bin":         {"value": "OptBinning'in oluşturduğu **WoE bin sayısı**\n\n"
@@ -439,11 +527,13 @@ def _render_var_summary(summary, use_woe):
     Input("main-tabs", "active_tab"),
     Input("varsummary-data-tab", "active_tab"),
     Input("interval-precompute", "disabled"),
+    Input("store-active-vars", "data"),
     State("store-key", "data"),
     State("chk-varsummary-woe", "value"),
     prevent_initial_call=True,
 )
-def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _precompute_done, key, woe_toggle):
+def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab,
+                       _precompute_done, active_vars, key, woe_toggle):
     if active_tab != "tab-var-summary":
         return dash.no_update
     if not key or not config or not config.get("target_col"):
@@ -461,7 +551,6 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _p
                          className="alert-info-custom")
 
     if use_woe:
-        # WoE tab: mevcut hesaplama (cache'den veya taze)
         cache_key = f"{key}_varsummary_{seg_col}_{seg_val}"
         cached = _SERVER_STORE.get(cache_key)
         if cached is not None and "Bin" in cached.columns:
@@ -469,7 +558,6 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _p
         else:
             summary = compute_var_summary_table(config, key, seg_col, seg_val)
     else:
-        # Ham tab: raw train+test üzerinden
         cache_key_raw = f"{key}_varsummary_raw_{seg_col}_{seg_val}"
         cached_raw = _SERVER_STORE.get(cache_key_raw)
         if cached_raw is not None:
@@ -480,7 +568,6 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _p
     if summary.empty:
         return html.Div("Özet tablosu oluşturulamadı.", className="alert-info-custom")
 
-    # Ön eleme (screen) ile filtrele — elenen değişkenleri çıkar
     screen_result = _SERVER_STORE.get(f"{key}_screen")
     if screen_result:
         passed_set = set(screen_result[0])
@@ -489,4 +576,180 @@ def update_var_summary(config, n_clicks, expert_excluded, active_tab, vs_tab, _p
     if excluded_set:
         summary = summary[~summary["Değişken"].isin(excluded_set)].reset_index(drop=True)
 
-    return _render_var_summary(summary, use_woe)
+    return _render_var_summary(summary, use_woe, selected_vars=active_vars)
+
+
+# ── Yardımcı: özet + filtreleme bağlamını hazırla ────────────────────────────
+def _get_filter_context(key, config, expert_excluded, vs_tab):
+    """Filtre callback'leri için ortak veri hazırlığı."""
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+    use_woe = (vs_tab == "vs-tab-woe")
+
+    if use_woe:
+        summary = _SERVER_STORE.get(f"{key}_varsummary_{seg_col}_{seg_val}")
+    else:
+        summary = _SERVER_STORE.get(f"{key}_varsummary_raw_{seg_col}_{seg_val}")
+
+    if summary is None or summary.empty:
+        return None, None, set(), 0
+
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    if screen_result:
+        summary = summary[summary["Değişken"].isin(set(screen_result[0]))]
+    excluded_set = set(expert_excluded or [])
+    if excluded_set:
+        summary = summary[~summary["Değişken"].isin(excluded_set)]
+    summary = summary.reset_index(drop=True)
+    all_vars = set(summary["Değişken"].tolist())
+
+    # Tab'a göre doğru korelasyon matrisini kullan
+    if use_woe:
+        corr_matrix = _SERVER_STORE.get(f"{key}_corr_{seg_col}_{seg_val}")
+    else:
+        corr_matrix = _SERVER_STORE.get(f"{key}_raw_corr_{seg_col}_{seg_val}")
+
+    return summary, corr_matrix, all_vars, len(all_vars)
+
+
+# ── Callback: Filtre ↔ Checkbox senkronizasyonu (tek callback) ───────────────
+@app.callback(
+    Output("store-active-vars", "data", allow_duplicate=True),
+    Output("store-vs-overrides", "data", allow_duplicate=True),
+    Output("vs-active-count", "children"),
+    Output("store-active-snapshot", "data"),
+    # Filtre input'ları
+    Input("vs-filter-iv-op", "value"),
+    Input("vs-filter-iv-val", "value"),
+    Input("vs-filter-corr-target-op", "value"),
+    Input("vs-filter-corr-target-val", "value"),
+    Input("vs-filter-corr-var-op", "value"),
+    Input("vs-filter-corr-var-val", "value"),
+    Input("vs-filter-psi-op", "value"),
+    Input("vs-filter-psi-val", "value"),
+    Input("vs-filter-missing-op", "value"),
+    Input("vs-filter-missing-val", "value"),
+    Input("vs-filter-test-mono", "value"),
+    Input("vs-filter-oot-mono", "value"),
+    # Kullanıcı checkbox tıklaması
+    Input("var-summary-table", "selected_row_ids"),
+    # States
+    State("store-active-snapshot", "data"),
+    State("store-vs-overrides", "data"),
+    State("store-key", "data"),
+    State("store-config", "data"),
+    State("store-expert-exclude", "data"),
+    State("varsummary-data-tab", "active_tab"),
+    prevent_initial_call=True,
+)
+def sync_var_selection(iv_op, iv_val, corr_t_op, corr_t_val,
+                       corr_v_op, corr_v_val, psi_op, psi_val,
+                       miss_op, miss_val, test_mono, oot_mono,
+                       selected_row_ids,
+                       snapshot, overrides, key, config,
+                       expert_excluded, vs_tab):
+    _no = dash.no_update
+    triggered = dash.ctx.triggered_id
+
+    # ── Tablo tetiklemesi → gerçek kullanıcı tıklaması mı kontrol et ────────
+    if triggered == "var-summary-table":
+        # Tablo DOM'da yok veya yeniden oluşturuluyor
+        if selected_row_ids is None:
+            return _no, _no, _no, _no
+        # Programatik güncelleme (update_var_summary tabloyu yeniden çizdi)
+        if snapshot is not None and sorted(selected_row_ids) == sorted(snapshot):
+            return _no, _no, _no, _no
+
+    if not key or not config or not config.get("target_col"):
+        return _no, _no, "", _no
+
+    summary, corr_matrix, all_vars, total_count = _get_filter_context(
+        key, config, expert_excluded, vs_tab)
+    if summary is None:
+        return _no, _no, "", _no
+
+    overrides = overrides or {"included": [], "excluded": []}
+    filters = {
+        "iv_op": iv_op, "iv_val": iv_val,
+        "corr_target_op": corr_t_op, "corr_target_val": corr_t_val,
+        "corr_var_val": corr_v_val,
+        "psi_op": psi_op, "psi_val": psi_val,
+        "missing_op": miss_op, "missing_val": miss_val,
+        "test_mono": test_mono, "oot_mono": oot_mono,
+    }
+    use_woe = (vs_tab == "vs-tab-woe")
+
+    if triggered == "var-summary-table":
+        # ── Kullanıcı checkbox tıkladı ───────────────────────────────────────
+        user_selected = set(selected_row_ids)
+        filter_passed = _compute_filtered_set(summary, filters, corr_matrix, use_woe)
+
+        new_overrides = {
+            "included": list(user_selected - filter_passed),
+            "excluded": list(filter_passed - user_selected),
+        }
+        active = sorted(user_selected & all_vars)
+        count_txt = f"{len(active)} / {total_count} değişken seçili"
+        return active, new_overrides, count_txt, active  # snapshot = active
+    else:
+        # ── Filtre değişti ───────────────────────────────────────────────────
+        filter_passed = _compute_filtered_set(summary, filters, corr_matrix, use_woe)
+        manual_included = set(overrides.get("included", []))
+        manual_excluded = set(overrides.get("excluded", []))
+
+        active_set = (filter_passed | manual_included) - manual_excluded
+        active_set &= all_vars
+        active = sorted(active_set)
+        count_txt = f"{len(active)} / {total_count} değişken seçili"
+        return active, _no, count_txt, active  # snapshot = active
+
+
+# ── Callback: Temizle butonu ─────────────────────────────────────────────────
+@app.callback(
+    Output("vs-filter-iv-op", "value"),
+    Output("vs-filter-iv-val", "value"),
+    Output("vs-filter-corr-target-op", "value"),
+    Output("vs-filter-corr-target-val", "value"),
+    Output("vs-filter-corr-var-op", "value"),
+    Output("vs-filter-corr-var-val", "value"),
+    Output("vs-filter-psi-op", "value"),
+    Output("vs-filter-psi-val", "value"),
+    Output("vs-filter-missing-op", "value"),
+    Output("vs-filter-missing-val", "value"),
+    Output("vs-filter-test-mono", "value"),
+    Output("vs-filter-oot-mono", "value"),
+    Output("store-vs-overrides", "data"),
+    Input("btn-vs-filter-reset", "n_clicks"),
+    prevent_initial_call=True,
+)
+def reset_vs_filters(_n):
+    # None değerler → filtre uygulanmaz → tüm değişkenler geçer → hepsi tikli
+    return ("ge", None, "lt", None, "lt", None, "lt", None,
+            "le", None, "Hepsi", "Hepsi", {"included": [], "excluded": []})
+
+
+# ── Callback: store-active-vars başlatma (veri yüklendiğinde) ────────────────
+@app.callback(
+    Output("store-active-vars", "data"),
+    Input("store-config", "data"),
+    Input("store-expert-exclude", "data"),
+    Input("interval-precompute", "disabled"),
+    State("store-key", "data"),
+    prevent_initial_call=True,
+)
+def init_active_vars(config, expert_excluded, _precompute_done, key):
+    if not key or not config or not config.get("target_col"):
+        return dash.no_update
+    excluded = set(expert_excluded or [])
+    screen_result = _SERVER_STORE.get(f"{key}_screen")
+    if screen_result:
+        base = [c for c in screen_result[0]
+                if c != config["target_col"] and c not in excluded]
+    else:
+        df = _get_df(key)
+        if df is None:
+            return dash.no_update
+        cfg = {c for c in [config.get("target_col"), config.get("date_col"),
+                            config.get("segment_col")] if c}
+        base = [c for c in df.columns if c not in cfg and c not in excluded]
+    return base

@@ -319,15 +319,25 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
     if _cancelled():
         return
 
-    # ── Adım 3: Korelasyon ─────────────────────────────────────────────────
+    # ── Adım 3: Korelasyon (WoE + Raw) ──────────────────────────────────────
     try:
         t0 = time.perf_counter()
+        # WoE korelasyon matrisi
         _train_woe = _SERVER_STORE.get(f"{_pfx}_train_woe")
         if _train_woe is not None and not _train_woe.empty:
             _woe_cols = [c for c in _train_woe.columns if c in woe_tables]
             if len(_woe_cols) >= 2:
                 corr = compute_correlation_matrix(_train_woe[_woe_cols], _woe_cols)
                 _SERVER_STORE[f"{key}_corr_{seg_col}_{seg_val}"] = corr
+        # Raw korelasyon matrisi
+        _train_raw = _SERVER_STORE.get(f"{_pfx}_train")
+        if _train_raw is not None and not _train_raw.empty:
+            _raw_num_cols = [c for c in passed_cols
+                            if c in _train_raw.columns
+                            and pd.api.types.is_numeric_dtype(_train_raw[c])]
+            if len(_raw_num_cols) >= 2:
+                raw_corr = compute_correlation_matrix(_train_raw[_raw_num_cols], _raw_num_cols)
+                _SERVER_STORE[f"{key}_raw_corr_{seg_col}_{seg_val}"] = raw_corr
         durations["correlation"] = round(time.perf_counter() - t0, 1)
     except Exception:
         durations["correlation"] = None
