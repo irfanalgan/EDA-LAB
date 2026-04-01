@@ -11,6 +11,7 @@ xgboost
 shap
 matplotlib
 optbinning
+optuna
 pyodbc
 sqlalchemy
 psutil

@@ -17,6 +17,7 @@ import xgboost as xgb
 import base64
 import io
 import shap
+import threading
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -602,7 +603,8 @@ def _apply_null_strategies(X, col_strategies):
 
 def _run_model_pipeline(model_vars, key, config, model_type,
                         threshold_method, threshold_val,
-                        pending_note, col_strategies, target_sel=None):
+                        pending_note, col_strategies, target_sel=None,
+                        custom_params=None):
     """Model kurma pipeline'ı — null inceleme sonrası veya direkt çağrılır."""
     _no = dash.no_update
     df_orig = _get_df(key)
@@ -644,7 +646,7 @@ def _run_model_pipeline(model_vars, key, config, model_type,
         return html.Div(f"Yetersiz train verisi: {n_tr:,} satır.",
                         className="alert-info-custom"), _no
 
-    _MODEL_PARAMS = {
+    _DEFAULTS = {
         "lr":    {},
         "lgbm":  dict(n_estimators=200, learning_rate=0.05, num_leaves=31,
                       random_state=42, n_jobs=-1, verbose=-1),
@@ -652,6 +654,10 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                       random_state=42, n_jobs=-1, eval_metric="auc"),
     }
     algo = model_type or "lr"
+    if custom_params and algo in ("lgbm", "xgb"):
+        _MODEL_PARAMS = {algo: {**_DEFAULTS[algo], **custom_params}}
+    else:
+        _MODEL_PARAMS = _DEFAULTS
 
     def _fit_and_render(X_df, disp_names, label, accent):
         """Modeli kur, (compact_html, results_dict, model_obj, scaler_obj) döndür."""
@@ -702,11 +708,16 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 except Exception:
                     lr_summary_text = None
             elif algo == "lgbm":
-                mdl = lgb.LGBMClassifier(**_MODEL_PARAMS["lgbm"])
+                _lgbm_p = dict(_MODEL_PARAMS["lgbm"])
+                if "scale_pos_weight" not in _lgbm_p or _lgbm_p["scale_pos_weight"] in (None, 1):
+                    _lgbm_p.pop("scale_pos_weight", None)
+                mdl = lgb.LGBMClassifier(**_lgbm_p)
             elif algo == "xgb":
-                pos_w = float((y_tr == 0).sum()) / max(float((y_tr == 1).sum()), 1)
-                mdl = xgb.XGBClassifier(**_MODEL_PARAMS["xgb"],
-                                        scale_pos_weight=pos_w)
+                _xgb_p = dict(_MODEL_PARAMS["xgb"])
+                if "scale_pos_weight" not in _xgb_p or _xgb_p["scale_pos_weight"] in (None, 1):
+                    _xgb_p["scale_pos_weight"] = float(
+                        (y_tr == 0).sum()) / max(float((y_tr == 1).sum()), 1)
+                mdl = xgb.XGBClassifier(**_xgb_p)
             else:
                 raise ValueError(f"Bilinmeyen model tipi: {algo}")
             if not _use_sm_logit:
@@ -1290,13 +1301,42 @@ def apply_null_strategies_to_store(_, strategy_values, strategy_ids):
     State("store-key",                 "data"),
     State("store-config",              "data"),
     State("store-pending-note",        "data"),
+    # — LightGBM parametreleri —
+    State("pg-lgbm-n-estimators",      "value"),
+    State("pg-lgbm-learning-rate",     "value"),
+    State("pg-lgbm-num-leaves",        "value"),
+    State("pg-lgbm-max-depth",         "value"),
+    State("pg-lgbm-min-child-samples", "value"),
+    State("pg-lgbm-reg-alpha",         "value"),
+    State("pg-lgbm-reg-lambda",        "value"),
+    State("pg-lgbm-subsample",         "value"),
+    State("pg-lgbm-colsample-bytree",  "value"),
+    State("pg-lgbm-scale-pos-weight",  "value"),
+    # — XGBoost parametreleri —
+    State("pg-xgb-n-estimators",       "value"),
+    State("pg-xgb-learning-rate",      "value"),
+    State("pg-xgb-max-depth",          "value"),
+    State("pg-xgb-min-child-weight",   "value"),
+    State("pg-xgb-subsample",          "value"),
+    State("pg-xgb-colsample-bytree",   "value"),
+    State("pg-xgb-reg-alpha",          "value"),
+    State("pg-xgb-reg-lambda",         "value"),
+    State("pg-xgb-scale-pos-weight",   "value"),
     prevent_initial_call=True,
 )
 def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
                    per_col_strategies, model_type,
                    threshold_method, threshold_val,
                    target_sel, split_method, split_date,
-                   key, config, pending_note):
+                   key, config, pending_note,
+                   # lgbm params
+                   lgbm_n_est, lgbm_lr, lgbm_leaves, lgbm_depth,
+                   lgbm_min_child, lgbm_alpha, lgbm_lam,
+                   lgbm_subsample, lgbm_colsample, lgbm_spw,
+                   # xgb params
+                   xgb_n_est, xgb_lr, xgb_depth,
+                   xgb_min_child_w, xgb_subsample, xgb_colsample,
+                   xgb_alpha, xgb_lam, xgb_spw):
     _no = dash.no_update
     if not model_vars or not key or not config:
         return html.Div("Model listesi boş veya konfigürasyon eksik.",
@@ -1305,6 +1345,39 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
     algo = model_type or "lr"
     is_lr = algo == "lr"
     col_strategies = per_col_strategies or {}
+
+    # UI'daki parametre input'larından custom_params oluştur
+    custom_params = None
+    if algo == "lgbm":
+        custom_params = {
+            k: v for k, v in {
+                "n_estimators": int(lgbm_n_est) if lgbm_n_est else None,
+                "learning_rate": float(lgbm_lr) if lgbm_lr else None,
+                "num_leaves": int(lgbm_leaves) if lgbm_leaves else None,
+                "max_depth": int(lgbm_depth) if lgbm_depth is not None else None,
+                "min_child_samples": int(lgbm_min_child) if lgbm_min_child else None,
+                "reg_alpha": float(lgbm_alpha) if lgbm_alpha is not None else None,
+                "reg_lambda": float(lgbm_lam) if lgbm_lam is not None else None,
+                "subsample": float(lgbm_subsample) if lgbm_subsample else None,
+                "subsample_freq": 1 if lgbm_subsample and float(lgbm_subsample) < 1.0 else 0,
+                "colsample_bytree": float(lgbm_colsample) if lgbm_colsample else None,
+                "scale_pos_weight": float(lgbm_spw) if lgbm_spw else None,
+            }.items() if v is not None
+        }
+    elif algo == "xgb":
+        custom_params = {
+            k: v for k, v in {
+                "n_estimators": int(xgb_n_est) if xgb_n_est else None,
+                "learning_rate": float(xgb_lr) if xgb_lr else None,
+                "max_depth": int(xgb_depth) if xgb_depth else None,
+                "min_child_weight": int(xgb_min_child_w) if xgb_min_child_w else None,
+                "subsample": float(xgb_subsample) if xgb_subsample else None,
+                "colsample_bytree": float(xgb_colsample) if xgb_colsample else None,
+                "reg_alpha": float(xgb_alpha) if xgb_alpha is not None else None,
+                "reg_lambda": float(xgb_lam) if xgb_lam is not None else None,
+                "scale_pos_weight": float(xgb_spw) if xgb_spw else None,
+            }.items() if v is not None
+        }
 
     # Null var mı kontrol et
     df_orig = _get_df(key)
@@ -1328,4 +1401,375 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
         threshold_method, threshold_val,
         pending_note, col_strategies=col_strategies,
         target_sel=target_sel,
+        custom_params=custom_params,
+    )
+
+
+# ── Model Parametreleri: accordion göster/gizle ─────────────────────────────
+@app.callback(
+    Output("pg-param-panel", "style"),
+    Output("pg-params-lgbm", "style"),
+    Output("pg-params-xgb",  "style"),
+    Input("pg-model-type", "value"),
+)
+def toggle_param_panel(model_type):
+    algo = model_type or "lr"
+    if algo == "lr":
+        return {"display": "none"}, {"display": "none"}, {"display": "none"}
+    lgbm_vis = {} if algo == "lgbm" else {"display": "none"}
+    xgb_vis  = {} if algo == "xgb"  else {"display": "none"}
+    return {}, lgbm_vis, xgb_vis
+
+
+# ── Model Parametreleri: Varsayılanlara Dön ──────────────────────────────────
+@app.callback(
+    # LightGBM outputs
+    Output("pg-lgbm-n-estimators",     "value", allow_duplicate=True),
+    Output("pg-lgbm-learning-rate",    "value", allow_duplicate=True),
+    Output("pg-lgbm-num-leaves",       "value", allow_duplicate=True),
+    Output("pg-lgbm-max-depth",        "value", allow_duplicate=True),
+    Output("pg-lgbm-min-child-samples","value", allow_duplicate=True),
+    Output("pg-lgbm-reg-alpha",        "value", allow_duplicate=True),
+    Output("pg-lgbm-reg-lambda",       "value", allow_duplicate=True),
+    Output("pg-lgbm-subsample",        "value", allow_duplicate=True),
+    Output("pg-lgbm-colsample-bytree", "value", allow_duplicate=True),
+    Output("pg-lgbm-scale-pos-weight", "value", allow_duplicate=True),
+    # XGBoost outputs
+    Output("pg-xgb-n-estimators",      "value", allow_duplicate=True),
+    Output("pg-xgb-learning-rate",     "value", allow_duplicate=True),
+    Output("pg-xgb-max-depth",         "value", allow_duplicate=True),
+    Output("pg-xgb-min-child-weight",  "value", allow_duplicate=True),
+    Output("pg-xgb-subsample",         "value", allow_duplicate=True),
+    Output("pg-xgb-colsample-bytree",  "value", allow_duplicate=True),
+    Output("pg-xgb-reg-alpha",         "value", allow_duplicate=True),
+    Output("pg-xgb-reg-lambda",        "value", allow_duplicate=True),
+    Output("pg-xgb-scale-pos-weight",  "value", allow_duplicate=True),
+    Input("btn-pg-params-reset",       "n_clicks"),
+    prevent_initial_call=True,
+)
+def reset_params_to_defaults(_):
+    return (
+        # LightGBM defaults
+        200, 0.05, 31, -1, 20, 0, 0, 1.0, 1.0, 1,
+        # XGBoost defaults
+        200, 0.05, 6, 1, 1.0, 1.0, 0, 1, 1,
+    )
+
+
+# ── Optuna: Çalıştır ────────────────────────────────────────────────────────
+from modules.optuna_tuner import run_optuna as _run_optuna
+
+_OPTUNA_PROGRESS: dict = {}
+_OPTUNA_CANCEL:   dict = {}
+
+
+def _optuna_thread(key, X_tr, y_tr, X_te, y_te, model_type, n_trials, cancel_event):
+    progress = _OPTUNA_PROGRESS.setdefault(key, {})
+    try:
+        _run_optuna(
+            X_tr, y_tr, X_te, y_te,
+            model_type=model_type,
+            n_trials=n_trials,
+            cancel_event=cancel_event,
+            progress_dict=progress,
+        )
+    except Exception as exc:
+        progress["done"] = True
+        progress["error"] = str(exc)
+
+
+@app.callback(
+    Output("interval-pg-optuna",  "disabled"),
+    Output("pg-optuna-progress",  "children"),
+    Output("pg-optuna-result",    "children"),
+    Input("btn-pg-optuna",        "n_clicks"),
+    State("pg-model-type",        "value"),
+    State("pg-optuna-trials",     "value"),
+    State("store-pg-model-vars",  "data"),
+    State("store-key",            "data"),
+    State("store-config",         "data"),
+    State("pg-target-col",        "value"),
+    State("store-pg-null-strategies", "data"),
+    prevent_initial_call=True,
+)
+def start_optuna(_, model_type, n_trials, model_vars, key, config,
+                 target_sel, col_strategies):
+    if not model_vars or not key or not config:
+        return True, html.Div("Model değişkenleri seçilmemiş.",
+                              style={"color": "#ef4444"}), ""
+    algo = model_type or "lr"
+    if algo == "lr":
+        return True, html.Div("Optuna sadece LightGBM ve XGBoost için kullanılabilir.",
+                              style={"color": "#ef4444"}), ""
+
+    n_trials = int(n_trials or 50)
+    target = target_sel or config["target_col"]
+    seg_col = config.get("segment_col")
+    seg_val = config.get("segment_val")
+
+    df_orig = _get_df(key)
+    if df_orig is None:
+        return True, html.Div("Veri bulunamadı.", style={"color": "#ef4444"}), ""
+
+    df_active = apply_segment_filter(df_orig, seg_col, seg_val)
+    y_all = pd.to_numeric(df_active[target], errors="coerce")
+
+    _pfx = f"{key}_ds_{seg_col}_{seg_val}"
+    if f"{_pfx}_train" in _SERVER_STORE:
+        _df_tr = _SERVER_STORE[f"{_pfx}_train"]
+        _df_te = _SERVER_STORE.get(f"{_pfx}_test")
+    else:
+        _split_cfg = {**config, "test_size": int(config.get("test_size", 20))}
+        _df_tr, _df_te, _ = get_splits(df_active, _split_cfg)
+
+    train_mask = df_active.index.isin(_df_tr.index)
+    test_mask = (df_active.index.isin(_df_te.index)
+                 if _df_te is not None else np.zeros(len(df_active), dtype=bool))
+
+    raw_cols = [v for v in model_vars if v in df_active.columns]
+    X = df_active[raw_cols]
+
+    # Null stratejileri uygula (ham veri için)
+    _strats = col_strategies or {}
+    if _strats:
+        X, _ = _apply_null_strategies(X.copy(), _strats)
+
+    X_tr = X.iloc[train_mask].reset_index(drop=True)
+    X_te = X.iloc[test_mask].reset_index(drop=True)
+    y_tr = y_all.iloc[train_mask].reset_index(drop=True)
+    y_te = y_all.iloc[test_mask].reset_index(drop=True)
+
+    if len(X_te) == 0:
+        return True, html.Div("Test verisi yok — Optuna çalıştırılamaz.",
+                              style={"color": "#ef4444"}), ""
+
+    # Önceki çalışmayı iptal et
+    old_cancel = _OPTUNA_CANCEL.get(key)
+    if old_cancel:
+        old_cancel.set()
+
+    cancel_event = threading.Event()
+    _OPTUNA_CANCEL[key] = cancel_event
+    _OPTUNA_PROGRESS[key] = {"trial": 0, "total": n_trials, "done": False}
+
+    t = threading.Thread(
+        target=_optuna_thread,
+        args=(key, X_tr, y_tr, X_te, y_te, algo, n_trials, cancel_event),
+        daemon=True,
+    )
+    t.start()
+
+    return (
+        False,  # interval enabled
+        html.Div([
+            html.Span("⏳ Optuna başlatılıyor...",
+                       style={"color": "#f59e0b", "fontSize": "0.82rem"}),
+        ]),
+        "",  # result area empty
+    )
+
+
+# ── Optuna: Progress tick ───────────────────────────────────────────────────
+@app.callback(
+    Output("pg-optuna-progress", "children", allow_duplicate=True),
+    Output("pg-optuna-result",   "children", allow_duplicate=True),
+    Output("interval-pg-optuna", "disabled", allow_duplicate=True),
+    Output("store-pg-optuna-result", "data"),
+    Input("interval-pg-optuna",  "n_intervals"),
+    State("store-key",           "data"),
+    prevent_initial_call=True,
+)
+def optuna_progress_tick(_, key):
+    prog = _OPTUNA_PROGRESS.get(key or "", {})
+    if not prog:
+        return dash.no_update, dash.no_update, True, dash.no_update
+
+    trial = prog.get("trial", 0)
+    total = prog.get("total", 1)
+    best  = prog.get("best_score")
+    done  = prog.get("done", False)
+
+    pct = int(trial / max(total, 1) * 100)
+    best_txt = f"  (en iyi: {best:.4f})" if best is not None else ""
+
+    progress_bar = html.Div([
+        html.Div(
+            style={"width": f"{pct}%", "height": "6px",
+                   "backgroundColor": "#4F8EF7", "borderRadius": "3px",
+                   "transition": "width 0.3s ease"},
+            className="optuna-bar-fill",
+        ),
+    ], style={"backgroundColor": "#1a1f2e", "borderRadius": "3px",
+              "height": "6px", "marginBottom": "0.3rem"})
+
+    progress_ui = html.Div([
+        progress_bar,
+        html.Span(f"{trial}/{total} trial{best_txt}",
+                   style={"color": "#94a3b8", "fontSize": "0.78rem"}),
+    ])
+
+    if not done:
+        return progress_ui, dash.no_update, False, dash.no_update
+
+    # Tamamlandı veya iptal edildi
+    error = prog.get("error")
+    if error:
+        return (
+            html.Div(f"Hata: {error}", style={"color": "#ef4444", "fontSize": "0.82rem"}),
+            "", True, dash.no_update,
+        )
+
+    result = prog.get("result", {})
+    if not result or not result.get("best_params"):
+        return (
+            html.Div("Optuna tamamlandı ancak sonuç üretilemedi.",
+                      style={"color": "#f59e0b", "fontSize": "0.82rem"}),
+            "", True, dash.no_update,
+        )
+
+    bp = result["best_params"]
+    tr_g = result.get("best_train_gini")
+    te_g = result.get("best_test_gini")
+    gap  = result.get("best_gap")
+    n_done = result.get("n_trials_completed", 0)
+
+    # Sonuç kartı
+    param_items = [
+        html.Span(f"{k}: {v}", style={"color": "#d1d5db", "fontSize": "0.75rem",
+                                       "marginRight": "0.8rem"})
+        for k, v in bp.items()
+        if k not in ("random_state", "n_jobs", "verbose", "verbosity",
+                      "eval_metric", "subsample_freq")
+    ]
+
+    result_ui = html.Div([
+        html.Div([
+            html.Span("✓ ", style={"color": "#10b981"}),
+            html.Span(f"Tamamlandı — {n_done} trial",
+                       style={"color": "#e2e8f0", "fontWeight": "600",
+                              "fontSize": "0.82rem"}),
+        ], style={"marginBottom": "0.4rem"}),
+        html.Div([
+            html.Span(f"Test Gini: {te_g:.4f}" if te_g else "",
+                       style={"color": "#4F8EF7", "fontWeight": "600",
+                              "marginRight": "1rem", "fontSize": "0.82rem"}),
+            html.Span(f"Train Gini: {tr_g:.4f}" if tr_g else "",
+                       style={"color": "#94a3b8", "marginRight": "1rem",
+                              "fontSize": "0.82rem"}),
+            html.Span(f"Fark: {gap:.4f}" if gap is not None else "",
+                       style={"color": "#f59e0b" if gap and gap > 0.05 else "#10b981",
+                              "fontSize": "0.82rem"}),
+        ], style={"marginBottom": "0.4rem"}),
+        html.Div(param_items, style={"display": "flex", "flexWrap": "wrap",
+                                      "marginBottom": "0.5rem"}),
+        dbc.Button("Parametreleri Kabul Et", id="btn-pg-optuna-accept",
+                   color="success", size="sm", outline=True),
+    ], style={"padding": "0.6rem 0.8rem", "backgroundColor": "#0d1520",
+              "borderRadius": "6px", "border": "1px solid #1e3a2a"})
+
+    done_progress = html.Div([
+        progress_bar,
+        html.Span(f"{n_done}/{total} trial tamamlandı",
+                   style={"color": "#10b981", "fontSize": "0.78rem"}),
+    ])
+
+    return done_progress, result_ui, True, result
+
+
+# ── Optuna: Parametreleri Kabul Et ──────────────────────────────────────────
+@app.callback(
+    # LightGBM outputs
+    Output("pg-lgbm-n-estimators",     "value"),
+    Output("pg-lgbm-learning-rate",    "value"),
+    Output("pg-lgbm-num-leaves",       "value"),
+    Output("pg-lgbm-max-depth",        "value"),
+    Output("pg-lgbm-min-child-samples","value"),
+    Output("pg-lgbm-reg-alpha",        "value"),
+    Output("pg-lgbm-reg-lambda",       "value"),
+    Output("pg-lgbm-subsample",        "value"),
+    Output("pg-lgbm-colsample-bytree", "value"),
+    Output("pg-lgbm-scale-pos-weight", "value"),
+    # XGBoost outputs
+    Output("pg-xgb-n-estimators",      "value"),
+    Output("pg-xgb-learning-rate",     "value"),
+    Output("pg-xgb-max-depth",         "value"),
+    Output("pg-xgb-min-child-weight",  "value"),
+    Output("pg-xgb-subsample",         "value"),
+    Output("pg-xgb-colsample-bytree",  "value"),
+    Output("pg-xgb-reg-alpha",         "value"),
+    Output("pg-xgb-reg-lambda",        "value"),
+    Output("pg-xgb-scale-pos-weight",  "value"),
+    Input("btn-pg-optuna-accept",      "n_clicks"),
+    State("store-pg-optuna-result",    "data"),
+    State("pg-model-type",             "value"),
+    prevent_initial_call=True,
+)
+def accept_optuna_params(_, result, model_type):
+    _nu = dash.no_update
+    lgbm_defaults = [_nu] * 10
+    xgb_defaults  = [_nu] * 9
+
+    if not result or not result.get("best_params"):
+        return *lgbm_defaults, *xgb_defaults
+
+    bp = result["best_params"]
+    algo = model_type or "lr"
+
+    if algo == "lgbm":
+        lgbm_vals = [
+            bp.get("n_estimators", _nu),
+            bp.get("learning_rate", _nu),
+            bp.get("num_leaves", _nu),
+            bp.get("max_depth", _nu),
+            bp.get("min_child_samples", _nu),
+            bp.get("reg_alpha", _nu),
+            bp.get("reg_lambda", _nu),
+            bp.get("subsample", _nu),
+            bp.get("colsample_bytree", _nu),
+            bp.get("scale_pos_weight", _nu),
+        ]
+        return *lgbm_vals, *xgb_defaults
+    elif algo == "xgb":
+        xgb_vals = [
+            bp.get("n_estimators", _nu),
+            bp.get("learning_rate", _nu),
+            bp.get("max_depth", _nu),
+            bp.get("min_child_weight", _nu),
+            bp.get("subsample", _nu),
+            bp.get("colsample_bytree", _nu),
+            bp.get("reg_alpha", _nu),
+            bp.get("reg_lambda", _nu),
+            bp.get("scale_pos_weight", _nu),
+        ]
+        return *lgbm_defaults, *xgb_vals
+
+    return *lgbm_defaults, *xgb_defaults
+
+
+# ── Optuna: İptal ───────────────────────────────────────────────────────────
+@app.callback(
+    Output("pg-optuna-progress", "children", allow_duplicate=True),
+    Output("pg-optuna-result",   "children", allow_duplicate=True),
+    Input("btn-pg-optuna-cancel", "n_clicks"),
+    State("store-key", "data"),
+    prevent_initial_call=True,
+)
+def cancel_optuna(_, key):
+    prog = _OPTUNA_PROGRESS.get(key or "", {})
+    is_done = prog.get("done", False)
+
+    if is_done:
+        # Zaten bitmiş — sonuçları temizle
+        _OPTUNA_PROGRESS.pop(key, None)
+        _OPTUNA_CANCEL.pop(key, None)
+        return "", ""
+
+    # Çalışıyor — iptal et
+    cancel_ev = _OPTUNA_CANCEL.get(key)
+    if cancel_ev:
+        cancel_ev.set()
+    return (
+        html.Div("İptal ediliyor...",
+                  style={"color": "#f59e0b", "fontSize": "0.82rem"}),
+        dash.no_update,
     )

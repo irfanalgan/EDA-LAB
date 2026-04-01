@@ -1136,6 +1136,128 @@ def build_main():
                 html.Div(id="vs-active-count",
                          style={"fontSize": "0.75rem", "color": "#7e8fa4",
                                 "marginBottom": "0.5rem"}),
+
+                # ── Gelişmiş Eleme — katlanabilir panel ──────────────────────
+                html.Div([
+                    html.Div([
+                        html.Span("Gelişmiş Eleme", style={"color": "#c8cdd8", "fontWeight": "600",
+                                                            "fontSize": "0.78rem", "cursor": "pointer"}),
+                        html.Span(" ▾", style={"color": "#5a6a82", "fontSize": "0.7rem"}),
+                    ], id="btn-advelim-toggle", n_clicks=0,
+                       style={"cursor": "pointer", "marginBottom": "0.4rem", "userSelect": "none"}),
+
+                    dbc.Collapse(id="collapse-advelim", is_open=False, children=[
+                        html.Div([
+                            # ── Üst satır: Model + Örneklem ──
+                            html.Div([
+                                html.Div([
+                                    html.Div("Model", className="advelim-lbl"),
+                                    dbc.Select(id="advelim-model-type", className="dark-select advelim-ctrl",
+                                               options=[{"label": "LightGBM", "value": "lgbm"},
+                                                        {"label": "XGBoost", "value": "xgb"}],
+                                               value="lgbm"),
+                                ], style={"marginRight": "12px"}),
+                                html.Div([
+                                    html.Div("Örneklem (boş = tümü)", className="advelim-lbl"),
+                                    dbc.Input(id="advelim-sample-size", type="number",
+                                              value=300000, step="any", className="advelim-input advelim-ctrl"),
+                                ]),
+                            ], style={"display": "flex", "alignItems": "flex-end", "marginBottom": "8px"}),
+
+                            # ── WoE uyarı banner ──
+                            html.Div(id="advelim-woe-warning",
+                                     children="WoE değerleri az sayıda unique değer içerir, importance sıralaması ham veriden farklı çıkabilir.",
+                                     style={"display": "none", "fontSize": "0.72rem", "color": "#f59e0b",
+                                            "backgroundColor": "rgba(245,158,11,0.08)", "padding": "4px 8px",
+                                            "borderRadius": "4px", "marginBottom": "8px"}),
+
+                            # ── Pipeline adımları ──
+                            html.Div("Pipeline Adımları (yukarıdan aşağı çalışır)",
+                                     style={"fontSize": "0.72rem", "color": "#5a6a82", "marginBottom": "6px"}),
+
+                            # Adım 1: Tekli Gini
+                            html.Div([
+                                html.Div(dbc.Checkbox(id="chk-advelim-gini", value=False,
+                                                      label="1. Tekli Gini Kontrolü",
+                                                      className="advelim-chk"),
+                                         className="advelim-chk-col"),
+                                html.Div([
+                                    html.Span("Eşik:", className="advelim-param-lbl"),
+                                    dbc.Input(id="advelim-gini-thresh", type="number",
+                                              value=0.85, step="any", className="advelim-input advelim-ctrl"),
+                                ], className="advelim-param"),
+                            ], className="advelim-row"),
+
+                            # Adım 2: Sıfır Kazanç
+                            html.Div([
+                                html.Div(dbc.Checkbox(id="chk-advelim-zerogain", value=False,
+                                                      label="2. Sıfır Kazanç Eleme",
+                                                      className="advelim-chk"),
+                                         className="advelim-chk-col"),
+                            ], className="advelim-row"),
+
+                            # Adım 3: RFE
+                            html.Div([
+                                html.Div(dbc.Checkbox(id="chk-advelim-rfe", value=False,
+                                                      label="3. RFE",
+                                                      className="advelim-chk"),
+                                         className="advelim-chk-col"),
+                                html.Div([
+                                    html.Span("Min:", className="advelim-param-lbl"),
+                                    dbc.Input(id="advelim-rfe-min", type="number",
+                                              value=10, step="any", className="advelim-input advelim-ctrl"),
+                                ], className="advelim-param"),
+                                html.Div([
+                                    html.Span("Adım:", className="advelim-param-lbl"),
+                                    dbc.Input(id="advelim-rfe-step", type="number",
+                                              value=5, step="any", className="advelim-input advelim-ctrl"),
+                                ], className="advelim-param"),
+                            ], className="advelim-row"),
+
+                            # Adım 4: Performans Eğrisi
+                            html.Div([
+                                html.Div(dbc.Checkbox(id="chk-advelim-perfcurve", value=False,
+                                                      label="4. Performans Eğrisi",
+                                                      className="advelim-chk"),
+                                         className="advelim-chk-col"),
+                                html.Div([
+                                    html.Span("Adım:", className="advelim-param-lbl"),
+                                    dbc.Input(id="advelim-pc-step", type="number",
+                                              value=5, step="any", className="advelim-input advelim-ctrl"),
+                                ], className="advelim-param"),
+                                html.Div([
+                                    html.Span("Metrik:", className="advelim-param-lbl"),
+                                    dbc.Select(id="advelim-pc-metric", className="dark-select advelim-ctrl",
+                                               options=[{"label": "Gini", "value": "gini"},
+                                                        {"label": "AUC", "value": "auc"}],
+                                               value="gini"),
+                                ], className="advelim-param"),
+                            ], className="advelim-row", style={"marginBottom": "8px"}),
+
+                            # ── Butonlar ──
+                            html.Div([
+                                dbc.Button("Hesapla", id="btn-advelim-compute",
+                                           color="primary", size="sm",
+                                           style={"fontSize": "0.73rem", "padding": "3px 14px", "marginRight": "6px"}),
+                                dbc.Button("İptal", id="btn-advelim-cancel",
+                                           color="danger", size="sm", outline=True, disabled=True,
+                                           style={"fontSize": "0.73rem", "padding": "3px 14px", "marginRight": "12px"}),
+                                dbc.Button("Sonuçları Kabul Et", id="btn-advelim-accept",
+                                           color="success", size="sm", disabled=True,
+                                           style={"fontSize": "0.73rem", "padding": "3px 14px"}),
+                            ], style={"marginBottom": "8px"}),
+
+                            # ── Sonuçlar alanı ──
+                            dcc.Loading(
+                                html.Div(id="advelim-results-area"),
+                                type="dot", color="#4F8EF7", delay_show=300,
+                            ),
+
+                        ], style={"backgroundColor": "rgba(22,27,34,0.6)", "padding": "10px 14px",
+                                  "borderRadius": "6px", "border": "1px solid #21262d"}),
+                    ]),
+                ], style={"marginBottom": "0.5rem"}),
+
                 dcc.Loading(html.Div(id="div-var-summary"), type="dot", color="#4F8EF7", delay_show=300),
             ]), label="Değişken Özeti", tab_id="tab-var-summary", className="tab-content-area"),
             dbc.Tab(html.Div([
@@ -1401,6 +1523,192 @@ def build_main():
                                    color="success", size="sm"),
                     ], width=2),
                 ], className="mb-3"),
+
+                # ── Model Parametreleri accordion (lgbm/xgb'de görünür) ──
+                html.Div(id="pg-param-panel", style={"display": "none"}, children=[
+                    dbc.Accordion([
+                        dbc.AccordionItem([
+                            # — LightGBM parametreleri —
+                            html.Div(id="pg-params-lgbm", children=[
+                                html.Div("LightGBM Parametreleri",
+                                         style={"color": "#e2e8f0", "fontWeight": "600",
+                                                "fontSize": "0.82rem", "marginBottom": "0.5rem"}),
+                                html.Div([
+                                    html.Div([
+                                        html.Label("n_estimators", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-n-estimators", type="number",
+                                                  value=200, min=20, step=20,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("learning_rate", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-learning-rate", type="number",
+                                                  value=0.05, min=0.001, max=1, step=0.005,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("num_leaves", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-num-leaves", type="number",
+                                                  value=31, min=2, max=256, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("max_depth", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-max-depth", type="number",
+                                                  value=-1, min=-1, max=30, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("min_child_samples", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-min-child-samples", type="number",
+                                                  value=20, min=1, step=10,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("reg_alpha", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-reg-alpha", type="number",
+                                                  value=0, min=0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("reg_lambda", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-reg-lambda", type="number",
+                                                  value=0, min=0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("subsample", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-subsample", type="number",
+                                                  value=1.0, min=0.1, max=1.0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("colsample_bytree", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-colsample-bytree", type="number",
+                                                  value=1.0, min=0.1, max=1.0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("scale_pos_weight", className="param-lbl"),
+                                        dbc.Input(id="pg-lgbm-scale-pos-weight", type="number",
+                                                  value=1, min=1, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                ], className="param-grid"),
+                            ]),
+
+                            # — XGBoost parametreleri —
+                            html.Div(id="pg-params-xgb", style={"display": "none"}, children=[
+                                html.Div("XGBoost Parametreleri",
+                                         style={"color": "#e2e8f0", "fontWeight": "600",
+                                                "fontSize": "0.82rem", "marginBottom": "0.5rem"}),
+                                html.Div([
+                                    html.Div([
+                                        html.Label("n_estimators", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-n-estimators", type="number",
+                                                  value=200, min=20, step=20,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("learning_rate", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-learning-rate", type="number",
+                                                  value=0.05, min=0.001, max=1, step=0.005,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("max_depth", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-max-depth", type="number",
+                                                  value=6, min=1, max=30, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("min_child_weight", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-min-child-weight", type="number",
+                                                  value=1, min=1, max=50, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("subsample", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-subsample", type="number",
+                                                  value=1.0, min=0.1, max=1.0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("colsample_bytree", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-colsample-bytree", type="number",
+                                                  value=1.0, min=0.1, max=1.0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("reg_alpha", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-reg-alpha", type="number",
+                                                  value=0, min=0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("reg_lambda", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-reg-lambda", type="number",
+                                                  value=1, min=0, step=0.1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                    html.Div([
+                                        html.Label("scale_pos_weight", className="param-lbl"),
+                                        dbc.Input(id="pg-xgb-scale-pos-weight", type="number",
+                                                  value=1, min=1, step=1,
+                                                  className="param-input"),
+                                    ], className="param-cell"),
+                                ], className="param-grid"),
+                            ]),
+
+                            # — Varsayılanlara dön —
+                            html.Div([
+                                dbc.Button("Varsayılanlara Dön", id="btn-pg-params-reset",
+                                           color="secondary", size="sm", outline=True,
+                                           style={"fontSize": "0.72rem"}),
+                            ], style={"marginTop": "0.5rem", "marginBottom": "0.3rem"}),
+
+                            # — Optuna bölümü —
+                            html.Hr(style={"borderColor": "#1f2a3c", "margin": "0.8rem 0"}),
+                            html.Div("Optuna Hiperparametre Optimizasyonu",
+                                     style={"color": "#e2e8f0", "fontWeight": "600",
+                                            "fontSize": "0.82rem", "marginBottom": "0.5rem"}),
+                            html.Div([
+                                html.Div([
+                                    html.Label("Deneme Sayısı", className="param-lbl"),
+                                    dbc.Input(id="pg-optuna-trials", type="number",
+                                              value=50, min=10, max=500, step=10,
+                                              className="param-input"),
+                                ], className="param-cell"),
+                                html.Div([
+                                    dbc.Button("Optuna Çalıştır", id="btn-pg-optuna",
+                                               color="primary", size="sm",
+                                               style={"marginTop": "1.2rem"}),
+                                ], className="param-cell"),
+                                html.Div([
+                                    dbc.Button("İptal", id="btn-pg-optuna-cancel",
+                                               color="danger", size="sm", outline=True,
+                                               style={"marginTop": "1.2rem"}),
+                                ], className="param-cell"),
+                            ], className="param-grid"),
+                            html.Div(id="pg-optuna-progress",
+                                     style={"marginTop": "0.5rem"}),
+                            html.Div(id="pg-optuna-result",
+                                     style={"marginTop": "0.5rem"}),
+
+                        ], title="Model Parametreleri", item_id="param-review"),
+                    ], start_collapsed=True, flush=True,
+                       style={"marginBottom": "0.75rem",
+                              "--bs-accordion-bg": "#0e1117",
+                              "--bs-accordion-active-bg": "#0e1117",
+                              "--bs-accordion-btn-bg": "#161d2e",
+                              "--bs-accordion-btn-active-color": "#e2e8f0",
+                              "--bs-accordion-btn-color": "#e2e8f0",
+                              "--bs-accordion-border-color": "#1f2a3c"}),
+                    dcc.Interval(id="interval-pg-optuna", interval=1500,
+                                 disabled=True),
+                    dcc.Store(id="store-pg-optuna-result", storage_type="memory"),
+                ]),
+
                 html.Div(id="pg-null-review-panel"),
                 dcc.Loading(html.Div(id="pg-model-output"),
                             type="dot", color="#4F8EF7", delay_show=300),
@@ -1667,6 +1975,8 @@ def build_layout():
         dcc.Store(id="store-pending-note", storage_type="memory"),
         dcc.Store(id="store-loaded-model-index", storage_type="memory"),
         dcc.Interval(id="interval-precompute", interval=300, disabled=True, n_intervals=0),
+        dcc.Store(id="store-advelim-results", storage_type="memory"),
+        dcc.Interval(id="interval-advelim", interval=500, disabled=True, n_intervals=0),
 
         # ── İzleme Store'ları (tamamen bağımsız) ─────────────────────────────────
         dcc.Store(id="store-mon-key", storage_type="memory"),

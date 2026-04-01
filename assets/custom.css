@@ -1460,3 +1460,82 @@ input[id^="vs-filter-"][type="number"]::-webkit-outer-spin-button {
 input[id^="vs-filter-"][type="number"] {
     -moz-appearance: textfield;
 }
+
+/* ── Gelişmiş Eleme Panel Stilleri ─────────────────────────────────── */
+.advelim-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+    gap: 0;
+}
+.advelim-chk-col {
+    width: 190px;
+    flex-shrink: 0;
+}
+.advelim-chk {
+    font-size: 0.75rem;
+    color: #c8cdd8;
+}
+.advelim-param {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+}
+.advelim-param-lbl {
+    font-size: 0.72rem;
+    color: #7e8fa4;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+.advelim-lbl {
+    font-size: 0.7rem;
+    color: #7e8fa4;
+    margin-bottom: 2px;
+}
+.advelim-ctrl {
+    width: 90px !important;
+    font-size: 0.75rem !important;
+    padding: 2px 6px !important;
+    height: 28px !important;
+}
+.advelim-input {
+    background-color: #0d1117;
+    color: #c8cdd8;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+}
+/* Gelişmiş eleme inputları için stepper gizle */
+.advelim-input[type="number"]::-webkit-inner-spin-button,
+.advelim-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.advelim-input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* ── Model Parametre Grid Stilleri ────────────────────────────────── */
+.param-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+}
+.param-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 130px;
+    max-width: 160px;
+}
+.param-lbl {
+    color: #94a3b8;
+    font-size: 0.72rem;
+    margin-bottom: 2px;
+}
+.param-input {
+    background-color: #111827 !important;
+    color: #e2e8f0 !important;
+    border: 1px solid #1f2a3c !important;
+    font-size: 0.78rem !important;
+    height: 30px !important;
+    padding: 0.2rem 0.4rem !important;
+}
