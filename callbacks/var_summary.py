@@ -687,6 +687,7 @@ def sync_var_selection(iv_op, iv_val, corr_t_op, corr_t_val,
         new_overrides = {
             "included": list(user_selected - filter_passed),
             "excluded": list(filter_passed - user_selected),
+            "adv_excluded": overrides.get("adv_excluded", []),
         }
         active = sorted(user_selected & all_vars)
         count_txt = f"{len(active)} / {total_count} değişken seçili"
@@ -697,7 +698,8 @@ def sync_var_selection(iv_op, iv_val, corr_t_op, corr_t_val,
         manual_included = set(overrides.get("included", []))
         manual_excluded = set(overrides.get("excluded", []))
 
-        active_set = (filter_passed | manual_included) - manual_excluded
+        adv_excluded = set(overrides.get("adv_excluded", []))
+        active_set = (filter_passed | manual_included) - manual_excluded - adv_excluded
         active_set &= all_vars
         active = sorted(active_set)
         count_txt = f"{len(active)} / {total_count} değişken seçili"
@@ -725,7 +727,7 @@ def sync_var_selection(iv_op, iv_val, corr_t_op, corr_t_val,
 def reset_vs_filters(_n):
     # None değerler → filtre uygulanmaz → tüm değişkenler geçer → hepsi tikli
     return ("ge", None, "lt", None, "lt", None, "lt", None,
-            "le", None, "Hepsi", "Hepsi", {"included": [], "excluded": []})
+            "le", None, "Hepsi", "Hepsi", {"included": [], "excluded": [], "adv_excluded": []})
 
 
 # ── Callback: store-active-vars başlatma (veri yüklendiğinde) ────────────────

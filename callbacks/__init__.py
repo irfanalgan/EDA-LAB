@@ -13,6 +13,7 @@ from callbacks import (
     results,
     help_overlay,
     profile,
+    advanced_elim,
 )
 
 # İzleme (Monitoring) callback'leri — tamamen bağımsız
