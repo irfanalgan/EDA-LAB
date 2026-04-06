@@ -590,16 +590,18 @@ def _apply_null_strategies(X, col_strategies):
         if strat == "keep":
             continue
         if strat == "mean":
+            _m = X[col].mode()
             fill = X[col].mean() if pd.api.types.is_numeric_dtype(X[col]) \
-                   else X[col].mode().iloc[0]
+                   else (_m.iloc[0] if len(_m) > 0 else 0)
         elif strat == "mode":
             _m = X[col].mode()
             fill = _m.iloc[0] if len(_m) > 0 else 0
         elif strat == "zero":
             fill = 0
         else:  # median
+            _m = X[col].mode()
             fill = X[col].median() if pd.api.types.is_numeric_dtype(X[col]) \
-                   else X[col].mode().iloc[0]
+                   else (_m.iloc[0] if len(_m) > 0 else 0)
         X[col] = X[col].fillna(fill)
     if rejected:
         X = X.drop(columns=rejected)

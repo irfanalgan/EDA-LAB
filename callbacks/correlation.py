@@ -81,12 +81,15 @@ def render_correlation_content(config, threshold, max_cols_str, active_vars, sta
     # ── Cache: Korelasyon Matrisi ─────────────────────────────────────────────
     _tab_sfx = "woe" if _use_woe else "raw"
     cache_key = f"{key}_corr_{seg_col}_{seg_val}_{max_cols}_{_tab_sfx}"
-    if cache_key in _SERVER_STORE:
-        corr_df, cols = _SERVER_STORE[cache_key]
+    _cached = _SERVER_STORE.get(cache_key)
+    if _cached is not None and isinstance(_cached, tuple) and len(_cached) == 2:
+        corr_df, cols = _cached
         if active_set:
             cols = [c for c in cols if c in active_set]
         corr_df = corr_df.loc[cols, cols] if cols else corr_df
     else:
+        if _cached is not None:
+            del _SERVER_STORE[cache_key]  # bozuk cache'i temizle
         excl = [c for c in [target, config.get("date_col")] if c]
         cols = get_numeric_cols(df_active, exclude=excl, max_cols=max_cols)
         screen_result = _SERVER_STORE.get(f"{key}_screen")
@@ -146,10 +149,13 @@ def render_correlation_content(config, threshold, max_cols_str, active_vars, sta
     # ── 3. Korelasyon Çifti dropdownları ──────────────────────────────────────
     var_opts = [{"label": c, "value": c} for c in cols]
     default2 = cols[1] if len(cols) > 1 else cols[0]
-    try:
-        init_r = float(df_active[[cols[0], default2]].corr().iloc[0, 1])
-    except Exception as e:
-        log.debug("İlk korelasyon hesaplanamadı, nan fallback: %s", e)
+    if len(cols) > 1 and cols[0] != default2:
+        try:
+            init_r = float(df_active[[cols[0], default2]].corr().iloc[0, 1])
+        except Exception as e:
+            log.debug("İlk korelasyon hesaplanamadı, nan fallback: %s", e)
+            init_r = float("nan")
+    else:
         init_r = float("nan")
 
     # ── Legend notu ───────────────────────────────────────────────────────────

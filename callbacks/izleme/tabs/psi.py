@@ -285,108 +285,112 @@ def _build_rating_psi_table(ref_summary, mon_summary):
 def mon_psi_populate(signal, key):
     if not signal or not key:
         return [], None, _NO_DATA, _NO_DATA
+    try:
+        ref_summary = _MON_STORE.get(key + "_ref_summary")
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        if not ref_summary or not summaries:
+            return [], None, _NO_DATA, _NO_DATA
 
-    ref_summary = _MON_STORE.get(key + "_ref_summary")
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    if not ref_summary or not summaries:
-        return [], None, _NO_DATA, _NO_DATA
+        # Dropdown seçenekleri
+        options = [{"label": s["period_label"], "value": s["period_label"]}
+                   for s in summaries]
+        default = summaries[-1]["period_label"]
 
-    # Dropdown seçenekleri
-    options = [{"label": s["period_label"], "value": s["period_label"]}
-               for s in summaries]
-    default = summaries[-1]["period_label"]
+        # Trend chart — Rating PSI + per-variable PSI
+        ref_var = ref_summary.get("var_psi", {})
+        labels = [s["period_label"] for s in summaries]
 
-    # Trend chart — Rating PSI + per-variable PSI
-    ref_var = ref_summary.get("var_psi", {})
-    labels = [s["period_label"] for s in summaries]
+        # Rating PSI trendi
+        rating_psis = []
+        for s in summaries:
+            rpsi, _ = calc_rating_psi(ref_summary["rating_counts"], s["rating_counts"])
+            rating_psis.append(rpsi)
 
-    # Rating PSI trendi
-    rating_psis = []
-    for s in summaries:
-        rpsi, _ = calc_rating_psi(ref_summary["rating_counts"], s["rating_counts"])
-        rating_psis.append(rpsi)
+        # Per-variable PSI trendi
+        var_names = sorted(ref_var.keys())
+        var_psi_series = {v: [] for v in var_names}
+        for s in summaries:
+            for var in var_names:
+                if var in s.get("var_psi", {}):
+                    pv, _ = calc_var_psi(ref_var[var], s["var_psi"][var])
+                    var_psi_series[var].append(pv)
+                else:
+                    var_psi_series[var].append(0)
 
-    # Per-variable PSI trendi
-    var_names = sorted(ref_var.keys())
-    var_psi_series = {v: [] for v in var_names}
-    for s in summaries:
-        for var in var_names:
-            if var in s.get("var_psi", {}):
-                pv, _ = calc_var_psi(ref_var[var], s["var_psi"][var])
-                var_psi_series[var].append(pv)
-            else:
-                var_psi_series[var].append(0)
+        # Renk paleti (değişkenler için)
+        _VAR_COLORS = [
+            "#60a5fa", "#34d399", "#c084fc", "#fb923c", "#f472b6",
+            "#38bdf8", "#a3e635", "#e879f9", "#fbbf24", "#22d3ee",
+        ]
 
-    # Renk paleti (değişkenler için)
-    _VAR_COLORS = [
-        "#60a5fa", "#34d399", "#c084fc", "#fb923c", "#f472b6",
-        "#38bdf8", "#a3e635", "#e879f9", "#fbbf24", "#22d3ee",
-    ]
-
-    fig = go.Figure()
-    # Rating PSI — kalın ana çizgi
-    fig.add_trace(go.Scatter(
-        x=labels, y=rating_psis, mode="lines+markers",
-        name="Rating PSI", line=dict(color="#ef4444", width=3),
-        marker=dict(size=7)))
-    # Per-variable PSI — ince çizgiler
-    for i, var in enumerate(var_names):
-        color = _VAR_COLORS[i % len(_VAR_COLORS)]
+        fig = go.Figure()
+        # Rating PSI — kalın ana çizgi
         fig.add_trace(go.Scatter(
-            x=labels, y=var_psi_series[var], mode="lines+markers",
-            name=var, line=dict(color=color, width=1.5),
-            marker=dict(size=4), opacity=0.7))
-    fig.add_hline(y=0.10, line_dash="dash", line_color="#f59e0b",
-                  annotation_text="Orta (0.10)")
-    fig.add_hline(y=0.25, line_dash="dash", line_color="#ef4444",
-                  annotation_text="Yüksek (0.25)")
-    fig.update_layout(**_CHART_LAYOUT, title="PSI Trendi",
-                      yaxis_title="PSI",
-                      legend=dict(font=dict(size=9)))
-    chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
+            x=labels, y=rating_psis, mode="lines+markers",
+            name="Rating PSI", line=dict(color="#ef4444", width=3),
+            marker=dict(size=7)))
+        # Per-variable PSI — ince çizgiler
+        for i, var in enumerate(var_names):
+            color = _VAR_COLORS[i % len(_VAR_COLORS)]
+            fig.add_trace(go.Scatter(
+                x=labels, y=var_psi_series[var], mode="lines+markers",
+                name=var, line=dict(color=color, width=1.5),
+                marker=dict(size=4), opacity=0.7))
+        fig.add_hline(y=0.10, line_dash="dash", line_color="#f59e0b",
+                      annotation_text="Orta (0.10)")
+        fig.add_hline(y=0.25, line_dash="dash", line_color="#ef4444",
+                      annotation_text="Yüksek (0.25)")
+        fig.update_layout(**_CHART_LAYOUT, title="PSI Trendi",
+                          yaxis_title="PSI",
+                          legend=dict(font=dict(size=9)))
+        chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
 
-    # Kümülatif
-    cum = aggregate_summaries(summaries)
-    if cum:
-        # Rating bazlı REF vs MON adet karşılaştırma bar grafiği
-        ref_counts = ref_summary["rating_counts"]
-        mon_counts = cum["rating_counts"]
-        active_ratings = [i + 1 for i in range(len(ref_counts))
-                          if ref_counts[i] > 0 or mon_counts[i] > 0]
-        ref_total = sum(ref_counts)
-        mon_total = sum(mon_counts)
-        ref_vals = [ref_counts[r - 1] / ref_total * 100 if ref_total > 0 else 0
-                    for r in active_ratings]
-        mon_vals = [mon_counts[r - 1] / mon_total * 100 if mon_total > 0 else 0
-                    for r in active_ratings]
-        rating_labels = [str(r) for r in active_ratings]
+        # Kümülatif
+        cum = aggregate_summaries(summaries)
+        if cum:
+            # Rating bazlı REF vs MON adet karşılaştırma bar grafiği
+            ref_counts = ref_summary["rating_counts"]
+            mon_counts = cum["rating_counts"]
+            active_ratings = [i + 1 for i in range(len(ref_counts))
+                              if ref_counts[i] > 0 or mon_counts[i] > 0]
+            ref_total = sum(ref_counts)
+            mon_total = sum(mon_counts)
+            ref_vals = [ref_counts[r - 1] / ref_total * 100 if ref_total > 0 else 0
+                        for r in active_ratings]
+            mon_vals = [mon_counts[r - 1] / mon_total * 100 if mon_total > 0 else 0
+                        for r in active_ratings]
+            rating_labels = [str(r) for r in active_ratings]
 
-        bar_fig = go.Figure()
-        bar_fig.add_trace(go.Bar(
-            x=rating_labels, y=ref_vals, name="REF",
-            marker_color="#3b82f6", opacity=0.85))
-        bar_fig.add_trace(go.Bar(
-            x=rating_labels, y=mon_vals, name="MON",
-            marker_color="#f97316", opacity=0.85))
-        bar_fig.update_layout(
-            **_CHART_LAYOUT, title="Rating Dağılımı — REF vs MON",
-            xaxis_title="Rating", yaxis_title="%",
-            barmode="group", bargap=0.15, bargroupgap=0.05,
-            legend=dict(font=dict(size=9)))
-        rating_bar = dcc.Graph(figure=bar_fig, config={"displayModeBar": False})
+            bar_fig = go.Figure()
+            bar_fig.add_trace(go.Bar(
+                x=rating_labels, y=ref_vals, name="REF",
+                marker_color="#3b82f6", opacity=0.85))
+            bar_fig.add_trace(go.Bar(
+                x=rating_labels, y=mon_vals, name="MON",
+                marker_color="#f97316", opacity=0.85))
+            bar_fig.update_layout(
+                **_CHART_LAYOUT, title="Rating Dağılımı — REF vs MON",
+                xaxis_title="Rating", yaxis_title="%",
+                barmode="group", bargap=0.15, bargroupgap=0.05,
+                legend=dict(font=dict(size=9)))
+            rating_bar = dcc.Graph(figure=bar_fig, config={"displayModeBar": False})
 
-        cum_content = html.Div([
-            html.H6("Kümülatif PSI",
-                     style={"color": "#e2e8f0", "fontSize": "0.95rem",
-                            "fontWeight": "600", "marginBottom": "0.5rem"}),
-            rating_bar,
-            _build_var_psi_table(ref_summary, cum.get("var_psi", {})),
-            _build_rating_psi_table(ref_summary, cum),
-        ])
-    else:
-        cum_content = _NO_DATA
+            cum_content = html.Div([
+                html.H6("Kümülatif PSI",
+                         style={"color": "#e2e8f0", "fontSize": "0.95rem",
+                                "fontWeight": "600", "marginBottom": "0.5rem"}),
+                rating_bar,
+                _build_var_psi_table(ref_summary, cum.get("var_psi", {})),
+                _build_rating_psi_table(ref_summary, cum),
+            ])
+        else:
+            cum_content = _NO_DATA
 
-    return options, default, chart, cum_content
+        return options, default, chart, cum_content
+    except Exception as exc:
+        log.error("mon_psi_populate hatası: %s", exc, exc_info=True)
+        return [], None, html.Div("PSI hesaplanırken hata oluştu.",
+                                  style={"color": "#ef4444", "padding": "1rem"}), _NO_DATA
 
 
 # ── Callback 2: Dönem seçimi → trend detail ────────────────────────────────
@@ -399,21 +403,25 @@ def mon_psi_populate(signal, key):
 def mon_psi_select_period(period_label, key):
     if not period_label or not key:
         return _NO_DATA
+    try:
+        ref_summary = _MON_STORE.get(key + "_ref_summary")
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        if not ref_summary or not summaries:
+            return _NO_DATA
 
-    ref_summary = _MON_STORE.get(key + "_ref_summary")
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    if not ref_summary or not summaries:
-        return _NO_DATA
+        # Seçilen dönemi bul
+        selected = next((s for s in summaries if s["period_label"] == period_label), None)
+        if not selected:
+            return _NO_DATA
 
-    # Seçilen dönemi bul
-    selected = next((s for s in summaries if s["period_label"] == period_label), None)
-    if not selected:
-        return _NO_DATA
-
-    return html.Div([
-        html.H6(f"Dönem: {period_label}",
-                style={"color": "#c8cdd8", "fontSize": "0.9rem",
-                       "marginBottom": "0.5rem"}),
-        _build_var_psi_table(ref_summary, selected.get("var_psi", {})),
-        _build_rating_psi_table(ref_summary, selected),
-    ])
+        return html.Div([
+            html.H6(f"Dönem: {period_label}",
+                    style={"color": "#c8cdd8", "fontSize": "0.9rem",
+                           "marginBottom": "0.5rem"}),
+            _build_var_psi_table(ref_summary, selected.get("var_psi", {})),
+            _build_rating_psi_table(ref_summary, selected),
+        ])
+    except Exception as exc:
+        log.error("mon_psi_select_period hatası: %s", exc, exc_info=True)
+        return html.Div("Dönem detayı yüklenirken hata oluştu.",
+                         style={"color": "#ef4444", "padding": "1rem"})

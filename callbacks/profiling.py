@@ -1,8 +1,12 @@
+import logging
+
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
 
 from app_instance import app
+
+log = logging.getLogger(__name__)
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info
@@ -20,6 +24,15 @@ def update_profiling(config, key):
     if df_orig is None or not config or not config.get("target_col"):
         return html.Div()
 
+    try:
+        return _build_profiling(config, key, df_orig)
+    except Exception as exc:
+        log.error("update_profiling hatası: %s", exc, exc_info=True)
+        return html.Div("Profiling hesaplanırken bir hata oluştu.",
+                         style={"color": "#ef4444", "padding": "1rem"})
+
+
+def _build_profiling(config, key, df_orig):
     seg_col = config.get("segment_col")
     seg_val = config.get("segment_val")
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"

@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 from dash import dcc, html, Input, Output, State, dash_table
@@ -5,6 +7,8 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 
 from app_instance import app
+
+log = logging.getLogger(__name__)
 from server_state import _SERVER_STORE, get_df as _get_df
 from utils.helpers import apply_segment_filter, get_splits
 from utils.chart_helpers import _tab_info, _PLOT_LAYOUT, _AXIS_STYLE, _TABLE_STYLE
@@ -125,6 +129,17 @@ def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
     if df_orig is None or not config:
         return html.Div("Veri yok.", className="alert-info-custom")
 
+    try:
+        return _build_outlier(df_orig, id_col, method, iqr_k, z_k, vis_var,
+                              key, config)
+    except Exception as exc:
+        log.error("run_outlier_analysis hatası: %s", exc, exc_info=True)
+        return html.Div("Outlier analizi sırasında bir hata oluştu.",
+                         style={"color": "#ef4444", "padding": "1rem"})
+
+
+def _build_outlier(df_orig, id_col, method, iqr_k, z_k, vis_var,
+                   key, config):
     seg_col = config.get("segment_col")
     seg_val = config.get("segment_val")
     _pfx = f"{key}_ds_{seg_col}_{seg_val}"
@@ -168,14 +183,15 @@ def run_outlier_analysis(_, id_col, method, iqr_k, z_k, vis_var,
         n_out = int(mask.sum())
         n_tot = int(df[col].notna().sum())
         pct   = round(n_out / n_tot * 100, 2) if n_tot > 0 else 0.0
+        _nn = df[col].dropna()
         summary_rows.append({
             "Değişken":    col,
             "N Outlier":   n_out,
             "% Outlier":   pct,
             "Alt Sınır":   round(lo, 4),
             "Üst Sınır":   round(hi, 4),
-            "Min":         round(float(df[col].min()), 4),
-            "Max":         round(float(df[col].max()), 4),
+            "Min":         round(float(_nn.min()), 4) if len(_nn) > 0 else None,
+            "Max":         round(float(_nn.max()), 4) if len(_nn) > 0 else None,
         })
         outlier_count += mask.fillna(False).astype(int)
 

@@ -10,7 +10,7 @@ import pandas as pd
 from optbinning import OptimalBinning
 
 from app_instance import app
-from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df, clear_store
+from server_state import _SERVER_STORE, _PRECOMPUTE_PROGRESS, get_df as _get_df, clear_store, log_store_usage
 from utils.helpers import apply_segment_filter, get_splits
 from modules.profiling import compute_profile
 from modules.correlation import compute_correlation_matrix
@@ -375,6 +375,7 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         durations["var_summary_raw"] = None
 
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 6, "durations": dict(durations), "done": True}
+    log_store_usage()
 
 
 # ── Callback: Yapılandırmayı Onayla ──────────────────────────────────────────

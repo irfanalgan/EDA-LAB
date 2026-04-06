@@ -6,6 +6,14 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 
+# ── Güvenli bölme yardımcısı ─────────────────────────────────────────────────
+def safe_divide(numerator, denominator, default=0.0):
+    """Sıfıra bölme korumalı bölme. Scalar, Series ve ndarray destekler."""
+    if isinstance(denominator, (pd.Series, np.ndarray)):
+        return np.where(denominator != 0, numerator / denominator, default)
+    return numerator / denominator if denominator != 0 else default
+
+
 # Türkçe sayı formatı kalıpları
 # "10.000,50" veya "1.234.567" — nokta binlik, virgül ondalık
 _TR_FULL = re.compile(r'^-?\d{1,3}(\.\d{3})+(,\d*)?$')

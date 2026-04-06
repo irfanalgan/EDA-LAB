@@ -488,8 +488,8 @@ def calc_ks_from_summary(rating_counts, rating_defaults):
         good = count - default
         cum_good += good
         cum_bad += default
-        pct_cum_good = cum_good / total_good * 100
-        pct_cum_bad = cum_bad / total_bad * 100
+        pct_cum_good = cum_good / total_good * 100 if total_good > 0 else 0
+        pct_cum_bad = cum_bad / total_bad * 100 if total_bad > 0 else 0
         diff = pct_cum_bad - pct_cum_good
         rows.append({
             "rating": i + 1,
@@ -726,8 +726,8 @@ def calc_var_psi(ref_var_psi, mon_var_psi):
     rows = []
     psi_total = 0.0
     for j in range(len(ref_counts)):
-        ref_pct = ref_counts[j] / ref_total
-        mon_pct = mon_counts[j] / mon_total
+        ref_pct = ref_counts[j] / ref_total if ref_total > 0 else 0
+        mon_pct = mon_counts[j] / mon_total if mon_total > 0 else 0
         psi_bin = _safe_psi(ref_pct, mon_pct)
         psi_total += psi_bin
 

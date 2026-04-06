@@ -1,5 +1,7 @@
 """İzleme — Gini/KS tab callback'leri."""
 
+import logging
+
 from dash import html, dcc, Input, Output, State, no_update, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
@@ -9,6 +11,8 @@ from server_state import _MON_STORE
 from callbacks.izleme.compute import (
     calc_ks_from_summary, calc_gini_from_summary, aggregate_summaries,
 )
+
+log = logging.getLogger(__name__)
 
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
        "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
@@ -198,45 +202,49 @@ def _render_disc(rating_counts, rating_defaults, title_prefix=""):
 def mon_disc_populate(signal, key):
     if not signal or not key:
         return [], None, _NO_DATA, _NO_DATA
+    try:
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        mature = [s for s in summaries if s.get("is_mature", False)]
+        if not mature:
+            return [], None, _NO_DATA, _NO_DATA
 
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    mature = [s for s in summaries if s.get("is_mature", False)]
-    if not mature:
-        return [], None, _NO_DATA, _NO_DATA
+        options = [{"label": s["period_label"], "value": s["period_label"]}
+                   for s in mature]
+        default = mature[-1]["period_label"]
 
-    options = [{"label": s["period_label"], "value": s["period_label"]}
-               for s in mature]
-    default = mature[-1]["period_label"]
+        # Trend chart
+        labels, ks_vals, gini_vals = [], [], []
+        for s in mature:
+            labels.append(s["period_label"])
+            ks, _ = calc_ks_from_summary(s["rating_counts"], s["rating_defaults"])
+            gini, _, _, _ = calc_gini_from_summary(s["rating_counts"], s["rating_defaults"])
+            ks_vals.append(ks)
+            gini_vals.append(gini * 100)
 
-    # Trend chart
-    labels, ks_vals, gini_vals = [], [], []
-    for s in mature:
-        labels.append(s["period_label"])
-        ks, _ = calc_ks_from_summary(s["rating_counts"], s["rating_defaults"])
-        gini, _, _, _ = calc_gini_from_summary(s["rating_counts"], s["rating_defaults"])
-        ks_vals.append(ks)
-        gini_vals.append(gini * 100)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=labels, y=ks_vals, mode="lines+markers",
+                                 name="KS (%)", line=dict(color="#4F8EF7", width=2),
+                                 marker=dict(size=6)))
+        fig.add_trace(go.Scatter(x=labels, y=gini_vals, mode="lines+markers",
+                                 name="Gini (%)", line=dict(color="#10b981", width=2),
+                                 marker=dict(size=6)))
+        fig.update_layout(**_CHART_LAYOUT, title="Gini/KS Trendi",
+                          yaxis_title="%")
+        chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=labels, y=ks_vals, mode="lines+markers",
-                             name="KS (%)", line=dict(color="#4F8EF7", width=2),
-                             marker=dict(size=6)))
-    fig.add_trace(go.Scatter(x=labels, y=gini_vals, mode="lines+markers",
-                             name="Gini (%)", line=dict(color="#10b981", width=2),
-                             marker=dict(size=6)))
-    fig.update_layout(**_CHART_LAYOUT, title="Gini/KS Trendi",
-                      yaxis_title="%")
-    chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
+        # Kümülatif
+        cum = aggregate_summaries(mature)
+        if cum:
+            cum_content = _render_disc(cum["rating_counts"], cum["rating_defaults"],
+                                       "Kümülatif ")
+        else:
+            cum_content = _NO_DATA
 
-    # Kümülatif
-    cum = aggregate_summaries(mature)
-    if cum:
-        cum_content = _render_disc(cum["rating_counts"], cum["rating_defaults"],
-                                   "Kümülatif ")
-    else:
-        cum_content = _NO_DATA
-
-    return options, default, chart, cum_content
+        return options, default, chart, cum_content
+    except Exception as exc:
+        log.error("mon_disc_populate hatası: %s", exc, exc_info=True)
+        return [], None, html.Div("Discrimination hesaplanırken hata oluştu.",
+                                  style={"color": "#ef4444", "padding": "1rem"}), _NO_DATA
 
 
 # ── Callback 2: Dönem seçimi ───────────────────────────────────────────────
@@ -249,9 +257,14 @@ def mon_disc_populate(signal, key):
 def mon_disc_select_period(period_label, key):
     if not period_label or not key:
         return _NO_DATA
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    selected = next((s for s in summaries if s["period_label"] == period_label), None)
-    if not selected:
-        return _NO_DATA
-    return _render_disc(selected["rating_counts"], selected["rating_defaults"],
-                        f"Dönem: {period_label} — ")
+    try:
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        selected = next((s for s in summaries if s["period_label"] == period_label), None)
+        if not selected:
+            return _NO_DATA
+        return _render_disc(selected["rating_counts"], selected["rating_defaults"],
+                            f"Dönem: {period_label} — ")
+    except Exception as exc:
+        log.error("mon_disc_select_period hatası: %s", exc, exc_info=True)
+        return html.Div("Dönem detayı yüklenirken hata oluştu.",
+                         style={"color": "#ef4444", "padding": "1rem"})

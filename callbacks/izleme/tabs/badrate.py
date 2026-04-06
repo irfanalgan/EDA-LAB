@@ -1,5 +1,7 @@
 """İzleme — Temerrüt Oranı tab callback'leri."""
 
+import logging
+
 from dash import html, dcc, Input, Output, State, no_update, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
@@ -7,6 +9,8 @@ import plotly.graph_objects as go
 from app_instance import app
 from server_state import _MON_STORE
 from callbacks.izleme.compute import aggregate_summaries
+
+log = logging.getLogger(__name__)
 
 _TH = {"backgroundColor": "#1a2332", "color": "#c8cdd8",
        "fontWeight": "600", "fontSize": "0.7rem", "padding": "6px 8px",
@@ -83,7 +87,7 @@ def _render_bad_rate(n_total, n_bad, bad_rate, rating_counts=None,
                 "Good": good,
                 "Bad": default,
                 "Toplam": count,
-                "Temerrüt Oranı": f"{default / count:.2%}",
+                "Temerrüt Oranı": f"{default / count:.2%}" if count > 0 else "0.00%",
                 "Küm Good": cum_good,
                 "Küm Bad": cum_bad,
                 "%Küm Good": f"{pct_cum_good:.2f}%",
@@ -137,40 +141,44 @@ def _render_bad_rate(n_total, n_bad, bad_rate, rating_counts=None,
 def mon_badrate_populate(signal, key):
     if not signal or not key:
         return [], None, _NO_DATA, _NO_DATA
+    try:
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        mature = [s for s in summaries if s.get("is_mature", False)]
+        if not mature:
+            return [], None, _NO_DATA, _NO_DATA
 
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    mature = [s for s in summaries if s.get("is_mature", False)]
-    if not mature:
-        return [], None, _NO_DATA, _NO_DATA
+        options = [{"label": s["period_label"], "value": s["period_label"]}
+                   for s in mature]
+        default = mature[-1]["period_label"]
 
-    options = [{"label": s["period_label"], "value": s["period_label"]}
-               for s in mature]
-    default = mature[-1]["period_label"]
+        # Trend chart
+        labels = [s["period_label"] for s in mature]
+        rates = [s["bad_rate"] * 100 for s in mature]
 
-    # Trend chart
-    labels = [s["period_label"] for s in mature]
-    rates = [s["bad_rate"] * 100 for s in mature]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=labels, y=rates, mode="lines+markers",
+                                 name="Temerrüt Oranı (%)",
+                                 line=dict(color="#ef4444", width=2),
+                                 marker=dict(size=6)))
+        fig.update_layout(**_CHART_LAYOUT, title="Temerrüt Oranı Trendi",
+                          yaxis_title="Temerrüt Oranı (%)")
+        chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=labels, y=rates, mode="lines+markers",
-                             name="Temerrüt Oranı (%)",
-                             line=dict(color="#ef4444", width=2),
-                             marker=dict(size=6)))
-    fig.update_layout(**_CHART_LAYOUT, title="Temerrüt Oranı Trendi",
-                      yaxis_title="Temerrüt Oranı (%)")
-    chart = dcc.Graph(figure=fig, config={"displayModeBar": False})
+        # Kümülatif
+        cum = aggregate_summaries(mature)
+        if cum:
+            cum_content = _render_bad_rate(
+                cum["n_total"], cum["n_bad"], cum["bad_rate"],
+                cum["rating_counts"], cum["rating_defaults"],
+                "Kümülatif Temerrüt Oranı")
+        else:
+            cum_content = _NO_DATA
 
-    # Kümülatif
-    cum = aggregate_summaries(mature)
-    if cum:
-        cum_content = _render_bad_rate(
-            cum["n_total"], cum["n_bad"], cum["bad_rate"],
-            cum["rating_counts"], cum["rating_defaults"],
-            "Kümülatif Temerrüt Oranı")
-    else:
-        cum_content = _NO_DATA
-
-    return options, default, chart, cum_content
+        return options, default, chart, cum_content
+    except Exception as exc:
+        log.error("mon_badrate_populate hatası: %s", exc, exc_info=True)
+        return [], None, html.Div("Temerrüt oranı hesaplanırken hata oluştu.",
+                                  style={"color": "#ef4444", "padding": "1rem"}), _NO_DATA
 
 
 # ── Callback 2: Dönem seçimi ───────────────────────────────────────────────
@@ -183,11 +191,16 @@ def mon_badrate_populate(signal, key):
 def mon_badrate_select_period(period_label, key):
     if not period_label or not key:
         return _NO_DATA
-    summaries = _MON_STORE.get(key + "_period_summaries", [])
-    selected = next((s for s in summaries if s["period_label"] == period_label), None)
-    if not selected:
-        return _NO_DATA
-    return _render_bad_rate(
-        selected["n_total"], selected["n_bad"], selected["bad_rate"],
-        selected["rating_counts"], selected["rating_defaults"],
-        f"Dönem: {period_label}")
+    try:
+        summaries = _MON_STORE.get(key + "_period_summaries", [])
+        selected = next((s for s in summaries if s["period_label"] == period_label), None)
+        if not selected:
+            return _NO_DATA
+        return _render_bad_rate(
+            selected["n_total"], selected["n_bad"], selected["bad_rate"],
+            selected["rating_counts"], selected["rating_defaults"],
+            f"Dönem: {period_label}")
+    except Exception as exc:
+        log.error("mon_badrate_select_period hatası: %s", exc, exc_info=True)
+        return html.Div("Dönem detayı yüklenirken hata oluştu.",
+                         style={"color": "#ef4444", "padding": "1rem"})

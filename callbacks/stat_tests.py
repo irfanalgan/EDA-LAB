@@ -94,9 +94,12 @@ def _render_chi_square(df_active: pd.DataFrame, var1: str, var2: str, max_cats: 
         s2 = _cap_categories(df_active[var2].fillna("(boş)").astype(str), max_cats)
 
     ctab = pd.crosstab(s1, s2)
+    if ctab.empty or ctab.shape[0] < 2 or ctab.shape[1] < 2:
+        return html.Div("Yeterli kategori yok (en az 2×2 kontenjans tablosu gerekli).",
+                         className="alert-info-custom")
     chi2, p, dof, _ = scipy_stats.chi2_contingency(ctab)
     n_total = ctab.values.sum()
-    cramers_v = float(np.sqrt(chi2 / (n_total * (min(ctab.shape) - 1)))) if min(ctab.shape) > 1 else 0.0
+    cramers_v = float(np.sqrt(chi2 / (n_total * (min(ctab.shape) - 1)))) if n_total > 0 and min(ctab.shape) > 1 else 0.0
 
     # p-value yorumu
     if p < 0.001:
@@ -211,6 +214,9 @@ def _render_anova(df_active: pd.DataFrame, var_col: str, target: str) -> html.Di
     sampled = [g if len(g) <= MAX_PER_GROUP else np.random.default_rng(42).choice(g, MAX_PER_GROUP, replace=False)
                for g in group_list]
     f_stat, p_val = scipy_stats.f_oneway(*sampled)
+    if np.isnan(f_stat) or np.isnan(p_val):
+        f_stat = f_stat if not np.isnan(f_stat) else 0.0
+        p_val = p_val if not np.isnan(p_val) else 1.0
 
     # Grup istatistikleri (tüm veri üzerinden)
     grp_stats = col_data.groupby(target)[var_col].agg(

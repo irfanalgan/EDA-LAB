@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 
 # ── Target Dağılımı ───────────────────────────────────────────────────────────
@@ -49,7 +50,11 @@ def compute_target_over_time(df: pd.DataFrame, target: str, date_col: str,
         bad_count="sum",
         total_count="count"
     ).reset_index()
-    resampled["bad_rate"] = (resampled["bad_count"] / resampled["total_count"] * 100).round(4)
+    resampled["bad_rate"] = np.where(
+        resampled["total_count"] > 0,
+        (resampled["bad_count"] / resampled["total_count"] * 100).round(4),
+        0.0,
+    )
     resampled = resampled.rename(columns={date_col: "Tarih"})
 
     return resampled

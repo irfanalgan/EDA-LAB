@@ -168,7 +168,7 @@ def get_variable_stats(df: pd.DataFrame, col: str, target: str) -> dict:
     s           = df[col].copy()
     n           = len(s)
     missing     = int(s.isna().sum())
-    missing_pct = round(missing / n * 100, 2)
+    missing_pct = round(missing / n * 100, 2) if n > 0 else 0.0
     unique      = int(s.nunique(dropna=True))
     is_numeric  = pd.api.types.is_numeric_dtype(s)
 

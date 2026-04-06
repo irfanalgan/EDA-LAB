@@ -65,7 +65,7 @@ def get_data_from_sql(
 
     top_clause = f"TOP {int(top_n)} " if top_n else ""
     conn_str = _build_conn_str(server, database, driver)
-    with pyodbc.connect(conn_str) as conn:
+    with pyodbc.connect(conn_str, timeout=30) as conn:
         df = pd.read_sql(f"SELECT {top_clause}* FROM {_quote_table(table_name)}", conn)
     return df
 
@@ -97,7 +97,7 @@ def get_data_from_sql_multi(
     left_keys = join_keys_per_table[0] if join_keys_per_table else []
 
     top_clause = f"TOP {int(top_n)} " if top_n else ""
-    with pyodbc.connect(conn_str) as conn:
+    with pyodbc.connect(conn_str, timeout=30) as conn:
         result = pd.read_sql(f"SELECT {top_clause}* FROM {_quote_table(tables[0])}", conn)
 
         if not left_keys or len(tables) < 2:

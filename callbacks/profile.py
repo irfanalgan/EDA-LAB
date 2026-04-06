@@ -73,8 +73,11 @@ def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
     # 2. DataFrame → pickle
     df = _SERVER_STORE.get(key)
     if df is not None:
-        with open(profile_dir / "data.pkl", "wb") as f:
-            pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
+        try:
+            with open(profile_dir / "data.pkl", "wb") as f:
+                pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:
+            log.error("Profil data.pkl yazılamadı: %s", e)
 
     # 3. Cache → pickle (UUID prefix çıkar, sadece suffix sakla)
     cache = {}
@@ -83,8 +86,11 @@ def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
         if k.startswith(prefix):
             suffix = k[len(prefix):]
             cache[suffix] = v
-    with open(profile_dir / "cache.pkl", "wb") as f:
-        pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+    try:
+        with open(profile_dir / "cache.pkl", "wb") as f:
+            pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as e:
+        log.error("Profil cache.pkl yazılamadı: %s", e)
 
     return folder_name
 
@@ -105,8 +111,11 @@ def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
     parquet_path = profile_dir / "data.parquet"
     df = None
     if pkl_data_path.exists():
-        with open(pkl_data_path, "rb") as f:
-            df = pickle.load(f)
+        try:
+            with open(pkl_data_path, "rb") as f:
+                df = pickle.load(f)
+        except Exception as e:
+            log.warning("Profil data.pkl okunamadı: %s", e)
     if df is None and parquet_path.exists():
         try:
             df = pd.read_parquet(parquet_path)
@@ -120,10 +129,13 @@ def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
     # Cache — re-key with new UUID
     cache_path = profile_dir / "cache.pkl"
     if cache_path.exists():
-        with open(cache_path, "rb") as f:
-            cache = pickle.load(f)
-        for suffix, value in cache.items():
-            _SERVER_STORE[f"{new_key}_{suffix}"] = value
+        try:
+            with open(cache_path, "rb") as f:
+                cache = pickle.load(f)
+            for suffix, value in cache.items():
+                _SERVER_STORE[f"{new_key}_{suffix}"] = value
+        except Exception as e:
+            log.warning("Profil cache.pkl okunamadı: %s", e)
 
     return new_key, config, expert_exclude, df
 
@@ -270,12 +282,21 @@ def save_profile_cb(_, name, key, config, expert_exclude,
     Output("pg-model-output", "children", allow_duplicate=True),
     Output("store-model-signal", "data", allow_duplicate=True),
     Output("store-loaded-model-index", "data", allow_duplicate=True),
+    # Profil değişince filtreleme / eleme state'lerini sıfırla
+    Output("store-active-vars", "data", allow_duplicate=True),
+    Output("store-active-snapshot", "data", allow_duplicate=True),
+    Output("store-vs-overrides", "data", allow_duplicate=True),
+    Output("store-expert-thresholds", "data", allow_duplicate=True),
+    Output("store-advelim-results", "data", allow_duplicate=True),
+    Output("store-pg-model-vars", "data", allow_duplicate=True),
+    Output("store-pg-null-strategies", "data", allow_duplicate=True),
+    Output("store-pg-optuna-result", "data", allow_duplicate=True),
     Input("btn-profile-load", "n_clicks"),
     State("dd-profile", "value"),
     prevent_initial_call=True,
 )
 def load_profile_cb(_, profile_name):
-    _N_OUTPUTS = 34
+    _N_OUTPUTS = 45
     no = dash.no_update
     if not profile_name:
         return (no,) * _N_OUTPUTS
@@ -395,6 +416,15 @@ def load_profile_cb(_, profile_name):
         "",                                             # pg-model-output (temizle)
         None,                                           # store-model-signal (temizle)
         None,                                           # store-loaded-model-index (temizle)
+        # Filtreleme / eleme state'leri sıfırla
+        None,                                           # store-active-vars
+        None,                                           # store-active-snapshot
+        None,                                           # store-vs-overrides
+        None,                                           # store-expert-thresholds
+        None,                                           # store-advelim-results
+        None,                                           # store-pg-model-vars
+        None,                                           # store-pg-null-strategies
+        None,                                           # store-pg-optuna-result
     )
 
 

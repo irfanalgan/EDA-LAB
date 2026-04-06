@@ -282,11 +282,11 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
 
 def _apply_numeric_filter(df, col, op, val):
     """Sayısal filtre uygula. '—' gibi string değerler (NaN) filtreden muaf tutulur."""
-    if col not in df.columns:
+    if col not in df.columns or val is None or val == "":
         return df
     try:
         val = float(val)
-    except (TypeError, ValueError) as e:
+    except (ValueError, TypeError) as e:
         log.debug("Filtre değeri dönüştürülemedi: %s", e)
         return df
     nums = pd.to_numeric(df[col], errors="coerce")
@@ -349,10 +349,14 @@ def _compute_filtered_set(summary, filters, corr_matrix, use_woe):
     passed = set(disp["Değişken"].tolist())
 
     # Greedy korelasyon eleme
-    try:
-        corr_var_val = float(filters.get("corr_var_val"))
-    except (TypeError, ValueError) as e:
-        log.debug("Korelasyon filtre değeri dönüştürülemedi: %s", e)
+    _corr_raw = filters.get("corr_var_val")
+    if _corr_raw is not None and _corr_raw != "":
+        try:
+            corr_var_val = float(_corr_raw)
+        except (TypeError, ValueError) as e:
+            log.debug("Korelasyon filtre değeri dönüştürülemedi: %s", e)
+            corr_var_val = None
+    else:
         corr_var_val = None
     if corr_var_val is not None and corr_matrix is not None:
         elim = _greedy_corr_eliminate(
