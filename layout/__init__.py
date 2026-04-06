@@ -2,7 +2,10 @@ from dash import dcc, html
 import dash_bootstrap_components as dbc
 
 from utils.chart_helpers import _tab_info
+from utils.config import get_database_config
 from layout.izleme import build_izleme_container
+
+_DB_CFG = get_database_config()
 
 # ── Sidebar geçiş sabitleri ────────────────────────────────────────────────────
 _T = "max-width 0.3s ease-in-out, flex 0.3s ease-in-out, opacity 0.25s ease-in-out"
@@ -273,6 +276,7 @@ def build_sidebar():
                 dbc.Col([
                     dbc.Label("Server", className="form-label"),
                     dbc.Input(id="input-sql-server", type="text",
+                              value=_DB_CFG.get("server", ""),
                               placeholder="SERVERNAME",
                               className="form-control",
                               style={"fontSize": "0.82rem"}),
@@ -280,6 +284,7 @@ def build_sidebar():
                 dbc.Col([
                     dbc.Label("Database", className="form-label"),
                     dbc.Input(id="input-sql-database", type="text",
+                              value=_DB_CFG.get("database", ""),
                               placeholder="DatabaseName",
                               className="form-control",
                               style={"fontSize": "0.82rem"}),
@@ -293,6 +298,7 @@ def build_sidebar():
                             {"label": "ODBC Driver 17", "value": "ODBC Driver 17 for SQL Server"},
                             {"label": "ODBC Driver 13", "value": "ODBC Driver 13 for SQL Server"},
                         ],
+                        value=_DB_CFG.get("driver", "ODBC Driver 18 for SQL Server"),
                         className="dark-select",
                         style={"fontSize": "0.82rem"},
                     ),
