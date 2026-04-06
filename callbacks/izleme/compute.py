@@ -390,8 +390,8 @@ def compute_period_summary(period_df, period_label, config, ref_summary,
                         matrix[rr - 1][mr - 1] += 1
                 summary["migration_matrix"] = matrix
                 summary["migration_matched_count"] = len(merged)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Migration matrix merge atlandı: %s", e)
 
     return summary
 
@@ -814,7 +814,8 @@ def apply_maturity(summaries, maturity_months):
         try:
             period = pd.Period(s["period_label"])
             s["is_mature"] = period.end_time <= cutoff
-        except Exception:
+        except Exception as e:
+            logger.debug("Period parse edilemedi, is_mature=False: %s", e)
             s["is_mature"] = False
 
     return summaries
@@ -892,6 +893,7 @@ def run_mon_compute(key, config, cancel_event):
         _PRECOMPUTE_PROGRESS[prog_key]["done"] = True
 
     except Exception as e:
+        logger.exception("İzleme compute pipeline hatası")
         _PRECOMPUTE_PROGRESS[prog_key]["error"] = str(e)
         _PRECOMPUTE_PROGRESS[prog_key]["done"] = True
 
@@ -969,6 +971,7 @@ def run_mon_incremental(key, config, cancel_event, new_mon_df):
         _PRECOMPUTE_PROGRESS[prog_key]["done"] = True
 
     except Exception as e:
+        logger.exception("İzleme incremental compute hatası")
         _PRECOMPUTE_PROGRESS[prog_key]["error"] = str(e)
         _PRECOMPUTE_PROGRESS[prog_key]["done"] = True
 

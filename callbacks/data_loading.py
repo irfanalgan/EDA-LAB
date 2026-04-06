@@ -1,8 +1,11 @@
+import logging
 import uuid
 import base64
 import io
 
 import dash
+
+log = logging.getLogger(__name__)
 from dash import html, dcc, Input, Output, State, clientside_callback, ALL, MATCH
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -236,6 +239,7 @@ def load_csv(n_clicks,
         return key, _ok(f"{len(result):,} satır  ·  {result.shape[1]} kolon  ·  {files_str}{join_note}{conv_note}"), *_RESET
 
     except Exception as e:
+        log.error("CSV okuma hatası: %s", e)
         return dash.no_update, _err(f"Okuma hatası: {e}"), *_RESET
 
 
@@ -314,6 +318,7 @@ def load_data(n_clicks,
         return key, _ok(f"{len(df):,} satır  ·  {df.shape[1]} kolon{join_note}{conv_note}{top_note}"), *_RESET
 
     except Exception as e:
+        log.error("SQL okuma hatası: %s", e)
         return dash.no_update, _err(str(e)), *_RESET
 
 

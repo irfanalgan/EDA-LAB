@@ -153,7 +153,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         _SERVER_STORE[f"{key}_screen"] = (passed, screen_report)
         _SERVER_STORE[f"{key}_screen_base"] = (list(passed), screen_report.copy())
         durations["screening"] = round(time.perf_counter() - t0, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Screening adımı başarısız: %s", e)
         durations["screening"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 1, "durations": dict(durations), "done": False}
     if _cancelled():
@@ -173,7 +174,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         prof = compute_profile(df_raw_train_test)
         _SERVER_STORE[f"{key}_profile_{seg_col}_{seg_val}"] = prof
         durations["profiling"] = round(time.perf_counter() - t0, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Profiling adımı başarısız: %s", e)
         durations["profiling"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 2, "durations": dict(durations), "done": False}
     if _cancelled():
@@ -339,7 +341,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
                 raw_corr = compute_correlation_matrix(_train_raw[_raw_num_cols], _raw_num_cols)
                 _SERVER_STORE[f"{key}_raw_corr_{seg_col}_{seg_val}"] = raw_corr
         durations["correlation"] = round(time.perf_counter() - t0, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Korelasyon adımı başarısız: %s", e)
         durations["correlation"] = None
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 4, "durations": dict(durations), "done": False}
     if _cancelled():
@@ -352,7 +355,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         if summary is not None and not summary.empty:
             _SERVER_STORE[f"{key}_varsummary_{seg_col}_{seg_val}"] = summary
         durations["var_summary"] = round(time.perf_counter() - t0, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Değişken özeti (WoE) başarısız: %s", e)
         durations["var_summary"] = None
 
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 5, "durations": dict(durations), "done": False}
@@ -366,7 +370,8 @@ def _run_precompute_background(prog_key: str, key: str, target: str,
         if summary_raw is not None and not summary_raw.empty:
             _SERVER_STORE[f"{key}_varsummary_raw_{seg_col}_{seg_val}"] = summary_raw
         durations["var_summary_raw"] = round(time.perf_counter() - t0, 1)
-    except Exception:
+    except Exception as e:
+        logger.warning("Değişken özeti (raw) başarısız: %s", e)
         durations["var_summary_raw"] = None
 
     _PRECOMPUTE_PROGRESS[prog_key] = {"step": 6, "durations": dict(durations), "done": True}

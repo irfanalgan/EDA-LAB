@@ -1,8 +1,12 @@
 """İzleme — PSI tab callback'leri (Değişken PSI + Rating PSI)."""
 
+import logging
+
 from dash import html, dcc, Input, Output, State, no_update, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
+
+log = logging.getLogger(__name__)
 
 from app_instance import app
 from server_state import _MON_STORE
@@ -41,8 +45,8 @@ def _pct_bar_styles(data, pct_cols):
             if isinstance(v, str) and v.endswith("%") and v != "100.00%":
                 try:
                     vals.append(float(v.replace("%", "").replace(",", ".")))
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    log.debug("PSI yüzde parse edilemedi: %s", e)
         max_val = max(vals) if vals else 1
 
         is_ref = col.startswith("REF")
@@ -51,7 +55,8 @@ def _pct_bar_styles(data, pct_cols):
             if isinstance(v, str) and v.endswith("%") and row.get("Bins") != "TOPLAM" and row.get("Rating") != "TOPLAM":
                 try:
                     num = float(v.replace("%", "").replace(",", "."))
-                except ValueError:
+                except ValueError as e:
+                    log.debug("PSI stil yüzde parse edilemedi: %s", e)
                     continue
                 intensity = min(num / max_val, 1.0) if max_val > 0 else 0
                 alpha = round(intensity * 0.45, 2)

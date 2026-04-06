@@ -37,8 +37,8 @@ try:
             return x, y
 
         _ob_metrics._check_x_y = _patched_check_x_y
-except Exception:
-    pass
+except Exception as e:
+    logger.debug("Monkey-patch atlandı: %s", e)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -101,6 +101,7 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
                 edges[0]  = -np.inf
                 edges[-1] =  np.inf
             except Exception as e:
+                logger.warning("Bin hatası: %s", e)
                 return {"psi": None, "error": f"Bin hatası: {e}"}
 
         try:
@@ -108,6 +109,7 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
             base_binned = pd.cut(df_base[col], bins=edges, include_lowest=True)
             comp_binned = pd.cut(df_comp[col], bins=edges, include_lowest=True)
         except Exception as e:
+            logger.warning("Cut hatası: %s", e)
             return {"psi": None, "error": f"Cut hatası: {e}"}
     else:
         top_cats    = df_base[col].value_counts().head(max_n_bins).index
@@ -122,7 +124,8 @@ def compute_psi(df: pd.DataFrame, col: str, target: str,
     # Kategorik: string olarak alfabetik sıra
     try:
         all_bins = sorted(set(base_dist.index) | set(comp_dist.index))
-    except TypeError:
+    except TypeError as e:
+        logger.debug("Sort TypeError, string fallback: %s", e)
         all_bins = sorted(set(base_dist.index) | set(comp_dist.index), key=str)
     eps       = 1e-9
     psi_total = 0.0

@@ -1,5 +1,9 @@
+import logging
+
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 # ── Kolon seçimi ──────────────────────────────────────────────────────────────
@@ -79,7 +83,8 @@ def compute_vif(df: pd.DataFrame,
         try:
             col_idx = list(X.columns).index(col)
             vif = round(variance_inflation_factor(X.values, col_idx), 2)
-        except Exception:
+        except Exception as e:
+            log.warning("VIF hesaplanamadı (%s): %s", col, e)
             vif = 999.0
         uyari = "✓ Normal" if vif < 5 else "⚠ Orta" if vif < 10 else "✗ Yüksek"
         records.append({"Değişken": col, "VIF": vif, "Uyarı": uyari})

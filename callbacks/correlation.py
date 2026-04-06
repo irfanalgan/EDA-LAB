@@ -1,8 +1,12 @@
+import logging
+
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -144,7 +148,8 @@ def render_correlation_content(config, threshold, max_cols_str, active_vars, sta
     default2 = cols[1] if len(cols) > 1 else cols[0]
     try:
         init_r = float(df_active[[cols[0], default2]].corr().iloc[0, 1])
-    except Exception:
+    except Exception as e:
+        log.debug("İlk korelasyon hesaplanamadı, nan fallback: %s", e)
         init_r = float("nan")
 
     # ── Legend notu ───────────────────────────────────────────────────────────
@@ -275,7 +280,8 @@ def render_pair_scatter(var1, var2, key, config, stat_tab):
     if is_num1 and is_num2:
         try:
             r = float(df_active[[var1, var2]].corr().iloc[0, 1])
-        except Exception:
+        except Exception as e:
+            log.debug("Pair korelasyon hesaplanamadı: %s", e)
             r = float("nan")
         r_badge = _make_r_badge(r)
     else:
@@ -292,6 +298,7 @@ def render_pair_scatter(var1, var2, key, config, stat_tab):
     try:
         pair_chart = _make_pair_scatter(df_active, var1, var2, target)
     except Exception as exc:
+        log.error("Korelasyon grafiği oluşturulamadı: %s", exc)
         pair_chart = html.Div(
             f"Grafik oluşturulamadı: {exc}",
             style={"color": "#ef4444", "padding": "1rem", "fontSize": "0.8rem"},

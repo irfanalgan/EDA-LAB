@@ -58,5 +58,8 @@ test_results.csv
 HESAPLAMA_AKISI.md
 VERI_KAYNAKLARI_NOTU.md
 
+# Log dosyaları
+logs/
+
 # Claude Code (yerel ayarlar)
 .claude/

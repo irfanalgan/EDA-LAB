@@ -1,8 +1,12 @@
 """Sonuç Sekmesi — Model sonuçlarını detaylı accordion yapısında gösterir."""
 
+import logging
+
 import dash
 from dash import dcc, html, Input, Output, State, dash_table, clientside_callback
 import dash_bootstrap_components as dbc
+
+log = logging.getLogger(__name__)
 import plotly.graph_objects as go
 
 from app_instance import app
@@ -1384,6 +1388,7 @@ def push_to_sql(_, key, server, database, driver, table_name, extra_cols, config
             f"✓ {n_rows:,} satır × {n_cols} kolon → [{database}].[dbo].[{tbl}]",
             color="success", style=_A)
     except Exception as e:
+        log.error("SQL export hatası: %s", e)
         return dbc.Alert(f"SQL hatası: {e}", color="danger", style=_A)
 
 

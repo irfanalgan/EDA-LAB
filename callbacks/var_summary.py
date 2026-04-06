@@ -1,8 +1,12 @@
+import logging
+
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -45,8 +49,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
                 _exclude = {"Totals", "Missing"}
                 _data = _bt[~_bt["Bin"].isin(_exclude)]
                 return len(_data)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Bin sayısı alınamadı: %s", e)
         return "—"
     summary["Bin"] = summary["Değişken"].map(_get_n_bins)
 
@@ -65,8 +69,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
                 psi_val = round(calc_psi(tr_vals, oot_vals), 4)
                 psi_map[var] = psi_val
                 psi_label_map[var] = psi_label(psi_val)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("WoE PSI hesaplanamadı (%s): %s", var, e)
 
     # PSI map'i cache'e yaz (sonuç kısmı buradan okuyacak)
     if psi_map:
@@ -108,8 +112,8 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
                     r = train_woe[v].corr(y)
                     if pd.notna(r):
                         corr_map[v] = round(abs(r), 4)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("WoE target korelasyonu hesaplanamadı: %s", e)
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
     # ── Öneri mantığı ────────────────────────────────────────────────────────
@@ -205,8 +209,8 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
                 psi_val = round(calc_psi(tr_vals.values, oot_vals.values, n_bins=10, discrete=False), 4)
                 psi_map[var] = psi_val
                 psi_label_map[var] = psi_label(psi_val)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Raw PSI hesaplanamadı (%s): %s", var, e)
 
     # Raw PSI map'i cache'e yaz (deep dive, sonuç kısmı buradan okuyacak)
     if psi_map:
@@ -224,8 +228,8 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
                 r = df_train[v].corr(y)
                 if pd.notna(r):
                     corr_map[v] = round(abs(r), 4)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("Raw target korelasyonu hesaplanamadı: %s", e)
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
     # ── Öneri mantığı (aynı) ──────────────────────────────────────────────
@@ -282,7 +286,8 @@ def _apply_numeric_filter(df, col, op, val):
         return df
     try:
         val = float(val)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
+        log.debug("Filtre değeri dönüştürülemedi: %s", e)
         return df
     nums = pd.to_numeric(df[col], errors="coerce")
     is_na = nums.isna()
@@ -322,8 +327,8 @@ def _greedy_corr_eliminate(summary, corr_matrix, threshold):
                 c = abs(corr_matrix.loc[var, other])
                 if c >= threshold:
                     eliminated.add(other)
-            except (KeyError, TypeError):
-                pass
+            except (KeyError, TypeError) as e:
+                log.debug("Korelasyon eleme atlandı: %s", e)
     return eliminated
 
 
@@ -346,7 +351,8 @@ def _compute_filtered_set(summary, filters, corr_matrix, use_woe):
     # Greedy korelasyon eleme
     try:
         corr_var_val = float(filters.get("corr_var_val"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as e:
+        log.debug("Korelasyon filtre değeri dönüştürülemedi: %s", e)
         corr_var_val = None
     if corr_var_val is not None and corr_matrix is not None:
         elim = _greedy_corr_eliminate(

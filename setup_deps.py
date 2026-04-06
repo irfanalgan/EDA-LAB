@@ -31,6 +31,7 @@ PACKAGES = [
     ("xgboost",                 "xgboost>=2.0",                     None),
     ("statsmodels",             "statsmodels",                      None),
     ("optbinning",              "optbinning",                       None),
+    ("optuna",                  "optuna",                           None),
     ("matplotlib",              "matplotlib",                       None),
     ("pyodbc",                  "pyodbc",                           None),
     ("sqlalchemy",              "sqlalchemy",                       None),

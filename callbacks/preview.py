@@ -1,7 +1,11 @@
+import logging
+
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -128,7 +132,8 @@ def update_metrics(config, key):
             d_max   = dates.max().strftime("%Y-%m")
             date_card = card(f"{d_min} – {d_max}", f"Tarih Aralığı  ({date_col})",
                              "#7e8fa4")
-        except Exception:
+        except Exception as e:
+            log.debug("Tarih aralığı parse edilemedi: %s", e)
             date_card = card("—", f"Tarih Aralığı  ({date_col})", "#7e8fa4")
     else:
         date_card = card("—", "Tarih Aralığı", "#7e8fa4")

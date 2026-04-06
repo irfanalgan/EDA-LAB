@@ -1,8 +1,12 @@
+import logging
+
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+
+log = logging.getLogger(__name__)
 from scipy import stats as scipy_stats
 
 from app_instance import app
@@ -299,8 +303,8 @@ def _render_ks(df_active: pd.DataFrame, var_col: str, target: str) -> html.Div:
                         col_data[var_col].apply(lambda x: isinstance(x, (int, float)))]
     try:
         col_data[var_col] = pd.to_numeric(col_data[var_col], errors="coerce")
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("Sayısala dönüştürme başarısız: %s", e)
     col_data = col_data.dropna()
 
     good = col_data[col_data[target] == 0][var_col].values
@@ -442,6 +446,7 @@ def compute_chi_square(n_clicks, var1, var2, max_cats_str, key, config, stat_tab
     try:
         return _render_chi_square(df_active, var1, var2, max_cats)
     except Exception as exc:
+        log.error("Chi-Square testi hatası: %s", exc)
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 
 
@@ -473,6 +478,7 @@ def compute_anova(n_clicks, var_col, key, config, stat_tab):
     try:
         return _render_anova(df_active, var_col, target)
     except Exception as exc:
+        log.error("ANOVA testi hatası: %s", exc)
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 
 
@@ -504,6 +510,7 @@ def compute_ks_test(n_clicks, var_col, key, config, stat_tab):
     try:
         return _render_ks(df_active, var_col, target)
     except Exception as exc:
+        log.error("KS testi hatası: %s", exc)
         return html.Div(f"Hata: {exc}", style={"color": "#ef4444", "padding": "1rem"})
 
 

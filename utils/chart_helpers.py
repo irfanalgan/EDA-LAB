@@ -1,8 +1,12 @@
+import logging
+
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 
 
@@ -208,7 +212,8 @@ def _make_pair_scatter(df_active, var1, var2, target):
     if is_num1 and is_num2:
         try:
             r = float(local[[var1, var2]].corr().iloc[0, 1])
-        except Exception:
+        except Exception as e:
+            log.debug("Pearson korelasyon hesaplanamadı: %s", e)
             r = float("nan")
         r_str = f"{r:+.4f}" if not np.isnan(r) else "—"
 
@@ -219,7 +224,8 @@ def _make_pair_scatter(df_active, var1, var2, target):
         try:
             work["_b1"] = pd.qcut(work[var1], q=N_BINS, duplicates="drop", labels=False)
             work["_b2"] = pd.qcut(work[var2], q=N_BINS, duplicates="drop", labels=False)
-        except Exception:
+        except Exception as e:
+            log.debug("qcut başarısız, cut fallback: %s", e)
             work["_b1"] = pd.cut(work[var1], bins=N_BINS, labels=False)
             work["_b2"] = pd.cut(work[var2], bins=N_BINS, labels=False)
 
@@ -367,6 +373,7 @@ def _safe_pair_scatter(df_active, var1, var2, target):
     try:
         return _make_pair_scatter(df_active, var1, var2, target)
     except Exception as exc:
+        log.error("Chart helpers grafik oluşturulamadı: %s", exc)
         return html.Div(
             f"Grafik oluşturulamadı: {exc}",
             style={"color": "#ef4444", "padding": "1rem", "fontSize": "0.8rem"},

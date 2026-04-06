@@ -1,8 +1,12 @@
+import logging
+
 from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -206,8 +210,8 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
                                    "detail_df": pd.DataFrame(_psi_rows),
                                    "split_label": "Train", "comp_label": "OOT",
                                    "n_baseline": int(_tr_tot), "n_compare": int(_ot_tot)}
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("Deep dive PSI karşılaştırma atlandı: %s", e)
         else:
             _tv = df_train[col].dropna().values
             _ov = df_oot[col].dropna().values
@@ -218,8 +222,8 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
                                "detail_df": pd.DataFrame(_d["rows"]),
                                "split_label": "Train", "comp_label": "OOT",
                                "n_baseline": len(_tv), "n_compare": len(_ov)}
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("Deep dive PSI karşılaştırma (cont) atlandı: %s", e)
 
     is_num = (vstats["is_numeric"] if _force_dtype is None
               else (_force_dtype == "numerical"))
@@ -352,7 +356,8 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
             try:
                 local_br["_decile"] = pd.qcut(local_br[col], q=10, labels=False,
                                                duplicates="drop")
-            except Exception:
+            except Exception as e:
+                log.debug("qcut başarısız, pd.cut fallback: %s", e)
                 local_br["_decile"] = pd.cut(local_br[col], bins=10, labels=False)
             decile_agg = (
                 local_br.groupby("_decile", observed=True)

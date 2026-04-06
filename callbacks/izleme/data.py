@@ -10,7 +10,10 @@ Veri mimarisi:
   _MON_STORE[key]           → Aktif toggle'a göre gösterilen veri (config/preview için)
 """
 
+import logging
 import uuid
+
+log = logging.getLogger(__name__)
 import base64
 import io
 
@@ -353,6 +356,7 @@ def mon_load_csv(n_clicks,
                 toast_open, toast_msg)
 
     except Exception as e:
+        log.error("İzleme CSV okuma hatası: %s", e)
         return no_update, no_update, _err(f"Okuma hatası: {e}"), False, ""
 
 
@@ -443,6 +447,7 @@ def mon_load_data(n_clicks, t1, t2, t3,
                 toast_open, toast_msg)
 
     except Exception as e:
+        log.error("İzleme SQL okuma hatası: %s", e)
         return no_update, no_update, _err(str(e)), False, ""
 
 
@@ -653,7 +658,8 @@ def mon_update_metrics(config, key):
             d_min = dates.min().strftime("%Y-%m")
             d_max = dates.max().strftime("%Y-%m")
             date_card = card(f"{d_min} – {d_max}", f"Tarih Aralığı  ({date_col})", "#7e8fa4")
-        except Exception:
+        except Exception as e:
+            log.debug("İzleme tarih aralığı parse edilemedi: %s", e)
             date_card = card("—", f"Tarih Aralığı  ({date_col})", "#7e8fa4")
     else:
         date_card = card("—", "Tarih Aralığı", "#7e8fa4")
@@ -762,6 +768,7 @@ def mon_upload_opt_pickle(contents, filename, key):
 
         return html.Span(f"✓ {filename} yüklendi", style={"color": "#10b981"})
     except Exception as e:
+        log.error("Opt pickle yükleme hatası: %s", e)
         return html.Span(f"Hata: {e}", style={"color": "#ef4444"})
 
 

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
+
+log = logging.getLogger(__name__)
 from typing import Optional
 
 import numpy as np
@@ -142,7 +146,7 @@ def run_optuna(
             ],
         )
     except optuna.exceptions.OptunaError:
-        pass  # iptal edildi — kısmi sonuç döndür
+        log.info("Optuna çalışması iptal edildi")
 
     # Sonuçları derle
     n_completed = len(study.trials)

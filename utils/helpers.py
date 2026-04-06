@@ -1,6 +1,9 @@
+import logging
 import re
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 
 # Türkçe sayı formatı kalıpları
@@ -176,7 +179,8 @@ def get_splits(df: pd.DataFrame, config: dict) -> tuple:
             stratify = y.values if y is not None and y.nunique() <= 10 else None
             tr_idx, te_idx = _tts(indices, test_size=test_pct, random_state=42,
                                   stratify=stratify)
-        except Exception:
+        except Exception as e:
+            log.warning("Stratified split başarısız, random fallback: %s", e)
             tr_idx, te_idx = _tts(indices, test_size=test_pct, random_state=42)
         return df_pool.iloc[tr_idx].copy(), df_pool.iloc[te_idx].copy()
 

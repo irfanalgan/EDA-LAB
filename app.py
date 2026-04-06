@@ -8,6 +8,20 @@ except Exception as _dep_err:
     print(f"[setup_deps] Atlandı: {_dep_err}")
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Merkezi loglama ──────────────────────────────────────────────────────────
+import logging, os
+os.makedirs("logs", exist_ok=True)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    handlers=[
+        logging.FileHandler("logs/eda_lab.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+logging.getLogger(__name__).info("EDA Laboratuvarı başlatılıyor…")
+# ─────────────────────────────────────────────────────────────────────────────
+
 import threading
 import webbrowser
 

@@ -1,5 +1,9 @@
+import logging
+
 import dash
 from dash import dcc, html, Input, Output, State, dash_table, ALL, MATCH
+
+log = logging.getLogger(__name__)
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -165,8 +169,8 @@ def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
                     df["__x_period__"] = parsed.dt.strftime(_DATE_UNIT_FMT[unit])
                 x_display_col = "__x_period__"
                 x_is_date = True
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Tarih period parse edilemedi: %s", e)
 
     def _agg_series(frame, grp_cols, col):
         is_numeric = pd.api.types.is_numeric_dtype(frame[col]) if col in frame.columns else False
@@ -291,6 +295,7 @@ def _render_pg_chart(n, x_col, y_col, chart_type, agg, color_col,
         )
         return dcc.Graph(figure=fig, config={"displayModeBar": False})
     except Exception as e:
+        log.error("Playground grafik oluşturulamadı: %s", e)
         return html.Div(f"Grafik oluşturulamadı: {e}", className="alert-info-custom")
 
 
@@ -705,7 +710,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 mdl = SmLogitWrapper(sm_res)
                 try:
                     lr_summary_text = sm_res.summary().as_text()
-                except Exception:
+                except Exception as e:
+                    log.warning("LR summary alınamadı: %s", e)
                     lr_summary_text = None
             elif algo == "lgbm":
                 _lgbm_p = dict(_MODEL_PARAMS["lgbm"])
@@ -723,6 +729,7 @@ def _run_model_pipeline(model_vars, key, config, model_type,
             if not _use_sm_logit:
                 mdl.fit(X_tr_s, y_tr)
         except Exception as e:
+            log.exception("Model kurulamadı")
             return html.Div(f"Model kurulamadı: {e}", className="alert-info-custom"), None, None, None
 
         # ── Binary classification çıkışı ──────────────────────────────────────
@@ -863,7 +870,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 plt.close("all")
                 buf.seek(0)
                 shap_img_b64 = base64.b64encode(buf.read()).decode()
-            except Exception:
+            except Exception as e:
+                log.warning("SHAP grafiği oluşturulamadı: %s", e)
                 shap_img_b64 = None
 
         # ── Sonuçları serialize et (Sonuç sekmesi için) ───────────────────────
@@ -1062,7 +1070,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
         for j in range(_X.shape[1]):
             try:
                 v = float(_vif(_X, j))
-            except Exception:
+            except Exception as e:
+                log.debug("VIF hesaplanamadı (kolon %d): %s", j, e)
                 v = None
             vif_list.append(round(v, 2) if v is not None else None)
         return vif_list
@@ -1093,7 +1102,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 if vif_oot is not None:
                     row["OOT VIF"] = vif_oot[i]
                 vif_data.append(row)
-        except Exception:
+        except Exception as e:
+            log.warning("WoE VIF tablosu oluşturulamadı: %s", e)
             vif_data = None
 
     # ── Raw VIF — Train / Test / OOT, ham değerler üzerinden ─────────────────
@@ -1124,7 +1134,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 if _rvif_oot is not None:
                     row["OOT VIF"] = _rvif_oot[i]
                 raw_vif_data.append(row)
-        except Exception:
+        except Exception as e:
+            log.warning("Raw VIF tablosu oluşturulamadı: %s", e)
             raw_vif_data = None
 
     # ── Describe — cache'den oku (precompute'da hesaplandı) ──────────────────
@@ -1136,7 +1147,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
             if _desc_cols:
                 _desc_df = _cached_profile[_cached_profile["Kolon"].isin(_desc_cols)]
                 describe_data = _desc_df.to_dict("records")
-        except Exception:
+        except Exception as e:
+            log.warning("Describe verisi oluşturulamadı: %s", e)
             describe_data = None
 
     # ── Sonuçları cache'e yaz ─────────────────────────────────────────────────
@@ -1474,6 +1486,7 @@ def _optuna_thread(key, X_tr, y_tr, X_te, y_te, model_type, n_trials, cancel_eve
             progress_dict=progress,
         )
     except Exception as exc:
+        log.exception("Optuna pipeline hatası")
         progress["done"] = True
         progress["error"] = str(exc)
 
