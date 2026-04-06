@@ -1,10 +1,12 @@
 """Profil Kaydet / Yükle / Sil — kullanıcı oturumunu dosyaya persist eder."""
 
+import logging
 import json
 import pickle
 import shutil
+
+log = logging.getLogger(__name__)
 import uuid
-from pathlib import Path
 
 import dash
 from dash import html, dcc, Input, Output, State
@@ -14,8 +16,10 @@ import pandas as pd
 from app_instance import app
 from server_state import _SERVER_STORE, clear_store
 
-_PROFILES_DIR = Path(__file__).parent.parent / "profiles"
-_PROFILES_DIR.mkdir(exist_ok=True)
+from utils.config import get_profiles_root
+
+_PROFILES_DIR = get_profiles_root() / "gelistirme"
+_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
 _ALERT_STYLE = {"padding": "0.4rem 0.75rem", "fontSize": "0.78rem"}
 
@@ -34,25 +38,27 @@ def _list_profiles() -> list[dict]:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
                 label = f"{d.name}  ({meta.get('saved_at', '?')})"
                 profiles.append({"label": label, "value": d.name})
-            except Exception:
+            except Exception as e:
+                log.debug("Profil meta.json okunamadı (%s): %s", d.name, e)
                 profiles.append({"label": d.name, "value": d.name})
         elif d.is_dir() and not any(d.iterdir()):
             # Boş klasör — silme artığı, temizle
             try:
                 d.rmdir()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Boş profil klasörü silinemedi (%s): %s", d.name, e)
     return profiles
 
 
 def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
                    connection_info: dict | None = None):
     """Profili diske yaz: meta.json + data.parquet + cache.pkl"""
-    profile_dir = _PROFILES_DIR / name
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    profile_dir = _PROFILES_DIR / f"{name}_{timestamp}"
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Meta
-    from datetime import datetime
     meta = {
         "config": config,
         "expert_exclude": expert_exclude or [],
@@ -101,8 +107,8 @@ def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
     if df is None and parquet_path.exists():
         try:
             df = pd.read_parquet(parquet_path)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Profil parquet dosyası okunamadı: %s", e)
     clear_store()
 
     if df is not None:
@@ -212,6 +218,7 @@ def save_profile_cb(_, name, key, config, expert_exclude,
             name,   # store-profile-loaded
         )
     except Exception as e:
+        log.error("Profil kaydetme hatası: %s", e)
         return (
             dbc.Alert(f"Kaydetme hatası: {e}", color="danger", style=_ALERT_STYLE),
             no, no, no, False, "", no,
@@ -275,6 +282,7 @@ def load_profile_cb(_, profile_name):
     try:
         new_key, config, expert_exclude, df = _load_profile(profile_name)
     except Exception as e:
+        log.error("Profil yükleme hatası: %s", e)
         out = [no] * _N_OUTPUTS
         out[_IDX_PROFILE_STATUS] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
         return tuple(out)
@@ -442,6 +450,7 @@ def confirm_delete_profile_cb(_, profile_name):
             False,  # modal kapat
         )
     except Exception as e:
+        log.error("Profil silme hatası: %s", e)
         return (
             dbc.Alert(f"Silme hatası: {e}", color="danger", style=_ALERT_STYLE),
             dash.no_update, dash.no_update, True,
@@ -472,7 +481,8 @@ def _list_saved_models(profile_name: str) -> list[dict]:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         models = meta.get("saved_models", [])
         return [{"label": m["name"], "value": i} for i, m in enumerate(models)]
-    except Exception:
+    except Exception as e:
+        log.warning("Kayıtlı model listesi okunamadı: %s", e)
         return []
 
 
@@ -486,7 +496,8 @@ def _get_saved_models(profile_name: str) -> list[dict]:
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         return meta.get("saved_models", [])
-    except Exception:
+    except Exception as e:
+        log.warning("Kayıtlı modeller okunamadı: %s", e)
         return []
 
 
@@ -666,6 +677,7 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
             False, "",
         )
     except Exception as e:
+        log.error("Model kaydetme hatası: %s", e)
         return (
             dbc.Alert(f"Kaydetme hatası: {e}", color="danger", style=_ALERT_STYLE),
             no, no, False, "",
@@ -740,6 +752,7 @@ def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
             loaded_idx,  # index'i koru
         )
     except Exception as e:
+        log.error("Model üzerine yazma hatası: %s", e)
         return (
             dbc.Alert(f"Kaydetme hatası: {e}", color="danger", style=_ALERT_STYLE),
             no, no, False, no,
@@ -894,6 +907,7 @@ def confirm_delete_model_cb(_, profile_name, model_index):
             hide,
         )
     except Exception as e:
+        log.error("Model silme hatası: %s", e)
         return (
             dbc.Alert(f"Silme hatası: {e}", color="danger", style=_ALERT_STYLE),
             no, no, hide,

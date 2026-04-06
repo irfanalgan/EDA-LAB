@@ -2,3 +2,6 @@
 server   = ""
 database = ""
 driver   = "ODBC Driver 18 for SQL Server"
+
+[profiles]
+shared_dir = ""

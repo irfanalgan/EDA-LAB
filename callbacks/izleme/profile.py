@@ -4,11 +4,13 @@ Profiller profiles/izleme/<isim>/ altına kaydedilir.
 Geliştirme profilleriyle (profiles/<isim>/) hiçbir ilişkisi yoktur.
 """
 
+import logging
 import json
 import pickle
 import shutil
 import uuid
-from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 import dash
 from dash import html, dcc, Input, Output, State
@@ -20,7 +22,9 @@ from server_state import _MON_STORE, clear_mon_store
 from callbacks.izleme.compute import start_mon_compute, start_mon_incremental
 from data.loader import _build_conn_str, _quote_table
 
-_MON_PROFILES_DIR = Path(__file__).parent.parent.parent / "profiles" / "izleme"
+from utils.config import get_profiles_root
+
+_MON_PROFILES_DIR = get_profiles_root() / "izleme"
 _MON_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
 _ALERT_STYLE = {"padding": "0.4rem 0.75rem", "fontSize": "0.78rem"}
@@ -67,7 +71,8 @@ def _check_sql_for_new_data(conn_info, config, last_period, saved_count,
                 try:
                     period_end = pd.Period(last_period).end_time.strftime("%Y-%m-%d")
                     where = f"WHERE [{date_col}] > '{period_end}'"
-                except Exception:
+                except Exception as e:
+                    log.debug("İzleme period parse fail: %s", e)
                     where = ""
             else:
                 where = ""
@@ -114,6 +119,7 @@ def _check_sql_for_new_data(conn_info, config, last_period, saved_count,
             return "new_data", new_df, None
 
     except Exception as e:
+        log.error("İzleme yeni veri kontrolü hatası: %s", e)
         return "error", None, str(e)
 
 
@@ -130,23 +136,24 @@ def _list_mon_profiles() -> list[dict]:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
                 label = f"{d.name}  ({meta.get('saved_at', '?')})"
                 profiles.append({"label": label, "value": d.name})
-            except Exception:
+            except Exception as e:
+                log.debug("İzleme profil meta okunamadı (%s): %s", d.name, e)
                 profiles.append({"label": d.name, "value": d.name})
         elif d.is_dir() and not any(d.iterdir()):
             try:
                 d.rmdir()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("İzleme boş klasör silinemedi: %s", e)
     return profiles
 
 
 def _save_mon_profile(name: str, key: str, config: dict,
                       connection_info: dict | None = None):
     """Özet tabanlı profil kaydet — ref_df + özetler saklanır."""
-    profile_dir = _MON_PROFILES_DIR / name
-    profile_dir.mkdir(parents=True, exist_ok=True)
-
     from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    profile_dir = _MON_PROFILES_DIR / f"{name}_{timestamp}"
+    profile_dir.mkdir(parents=True, exist_ok=True)
 
     ref_summary = _MON_STORE.get(key + "_ref_summary")
     period_summaries = _MON_STORE.get(key + "_period_summaries")
@@ -370,6 +377,7 @@ def mon_save_profile_cb(_, name, key, config,
             f"'{name}' başarıyla kaydedildi.",
         )
     except Exception as e:
+        log.error("İzleme profil kaydetme hatası: %s", e)
         return (
             dbc.Alert(f"Kaydetme hatası: {e}", color="danger", style=_ALERT_STYLE),
             no, no, no, False, "",
@@ -427,6 +435,7 @@ def mon_load_profile_cb(_, profile_name):
     try:
         new_key, config, opt, is_new_format = _load_mon_profile(profile_name)
     except Exception as e:
+        log.error("İzleme profil yükleme hatası: %s", e)
         out = [no] * _N_OUTPUTS
         out[_IDX_PROFILE_STATUS] = dbc.Alert(f"Yükleme hatası: {e}", color="danger", style=_ALERT_STYLE)
         return tuple(out)
@@ -651,6 +660,7 @@ def mon_confirm_delete_profile_cb(_, profile_name):
             False,
         )
     except Exception as e:
+        log.error("İzleme profil silme hatası: %s", e)
         return (
             dbc.Alert(f"Silme hatası: {e}", color="danger", style=_ALERT_STYLE),
             dash.no_update, dash.no_update, True,
