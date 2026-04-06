@@ -148,11 +148,12 @@ def _list_mon_profiles() -> list[dict]:
 
 
 def _save_mon_profile(name: str, key: str, config: dict,
-                      connection_info: dict | None = None):
-    """Özet tabanlı profil kaydet — ref_df + özetler saklanır."""
+                      connection_info: dict | None = None) -> str:
+    """Özet tabanlı profil kaydet — ref_df + özetler saklanır. Klasör adını döndürür."""
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    profile_dir = _MON_PROFILES_DIR / f"{name}_{timestamp}"
+    folder_name = f"{name}_{timestamp}"
+    profile_dir = _MON_PROFILES_DIR / folder_name
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     ref_summary = _MON_STORE.get(key + "_ref_summary")
@@ -215,6 +216,8 @@ def _save_mon_profile(name: str, key: str, config: dict,
         old_path = profile_dir / old_file
         if old_path.exists():
             old_path.unlink()
+
+    return folder_name
 
 
 def _load_mon_profile(name: str):
@@ -367,11 +370,11 @@ def mon_save_profile_cb(_, name, key, config,
         "join_keys": [jk1 or "", jk2 or "", jk3 or ""],
     }
     try:
-        _save_mon_profile(name, key, config, connection_info=conn_info)
+        folder_name = _save_mon_profile(name, key, config, connection_info=conn_info)
         return (
             dbc.Alert(f"✓ '{name}' kaydedildi.", color="success", style=_ALERT_STYLE),
             _list_mon_profiles(),
-            name,
+            folder_name,
             False,
             True,
             f"'{name}' başarıyla kaydedildi.",

@@ -1438,8 +1438,9 @@ def save_model_pickle(_, key, profile_name, active_tab):
         "opt_thr": results.get("opt_thr", 0.5),
     }
 
+    from utils.config import get_profiles_root
     suffix = "_woe" if tab_key == "woe" else "_raw"
-    profile_dir = Path(__file__).parent.parent / "profiles" / profile_name
+    profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
     pkl_path = profile_dir / f"{algo}_model{suffix}.pkl"
     with open(pkl_path, "wb") as f:
@@ -1483,8 +1484,9 @@ def save_opt_pickle(_, key, profile_name, active_tab):
     if not opt_dict:
         return dbc.Alert("OPT verisi bulunamadı.", color="warning", style=_A)
 
+    from utils.config import get_profiles_root
     algo = results.get("algo", "model")
-    profile_dir = Path(__file__).parent.parent / "profiles" / profile_name
+    profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
     pkl_path = profile_dir / f"{algo}_opt_binning.pkl"
     with open(pkl_path, "wb") as f:
@@ -2621,7 +2623,8 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     # ═══════════════════════════════════════════════════════════════════════════
     # Dosyayı profil klasörüne kaydet
     # ═══════════════════════════════════════════════════════════════════════════
-    profile_dir = Path(__file__).parent.parent / "profiles" / profile_name
+    from utils.config import get_profiles_root
+    profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
     xl_path = profile_dir / f"{fname}.xlsx"
     wb.save(xl_path)

@@ -51,11 +51,12 @@ def _list_profiles() -> list[dict]:
 
 
 def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
-                   connection_info: dict | None = None):
-    """Profili diske yaz: meta.json + data.parquet + cache.pkl"""
+                   connection_info: dict | None = None) -> str:
+    """Profili diske yaz: meta.json + data.pkl + cache.pkl. Klasör adını döndürür."""
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    profile_dir = _PROFILES_DIR / f"{name}_{timestamp}"
+    folder_name = f"{name}_{timestamp}"
+    profile_dir = _PROFILES_DIR / folder_name
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Meta
@@ -84,6 +85,8 @@ def _save_profile(name: str, key: str, config: dict, expert_exclude: list,
             cache[suffix] = v
     with open(profile_dir / "cache.pkl", "wb") as f:
         pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return folder_name
 
 
 def _load_profile(name: str) -> tuple[str, dict, list, pd.DataFrame | None]:
@@ -207,15 +210,15 @@ def save_profile_cb(_, name, key, config, expert_exclude,
         "join_keys": [jk1 or "", jk2 or "", jk3 or ""],
     }
     try:
-        _save_profile(name, key, config, expert_exclude or [], connection_info=conn_info)
+        folder_name = _save_profile(name, key, config, expert_exclude or [], connection_info=conn_info)
         return (
             dbc.Alert(f"✓ '{name}' kaydedildi.", color="success", style=_ALERT_STYLE),
             _list_profiles(),
-            name,
+            folder_name,
             False,  # modal kapat
             True,   # toast aç
             f"'{name}' başarıyla kaydedildi.",
-            name,   # store-profile-loaded
+            folder_name,   # store-profile-loaded
         )
     except Exception as e:
         log.error("Profil kaydetme hatası: %s", e)
