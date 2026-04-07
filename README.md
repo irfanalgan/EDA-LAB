@@ -1,6 +1,6 @@
-# EDA Lab
+# Acuity
 
-Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA, model geliştirme, model izleme ve skorlama aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
+Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif model yaşam döngüsü platformu** — EDA, model geliştirme, izleme ve skorlama tek çatı altında. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
 
 ---
 
@@ -305,7 +305,7 @@ Windows Authentication kullanılır, kullanıcı adı/şifre gerekmez.
 ## Klasör Yapısı
 
 ```
-EDA-LAB/
+Acuity/
 ├── app.py                  # Giriş noktası (23 satır)
 ├── app_instance.py         # Dash app tanımı — tek yer
 ├── server_state.py         # Paylaşılan state (_SERVER_STORE, _PRECOMPUTE_PROGRESS, _MON_STORE)
@@ -426,7 +426,7 @@ EDA-LAB/
 - **Describe Sekmesi** — Profiling sekmesi "Describe" olarak yeniden adlandırıldı
 
 ### v1.5
-- **Loading Slideshow** — 8 eğitim slaytı (EDA Lab nedir, Veri Yükleme, Önizleme, Target & IV, Deep Dive, İstatistiksel Testler, Değişken Özeti, Playground); otomatik 8-saniye ilerleme; tıklanabilir navigasyon noktaları (●○○○); geçen süre sayacı
+- **Loading Slideshow** — 8 eğitim slaytı (Acuity nedir, Veri Yükleme, Önizleme, Target & IV, Deep Dive, İstatistiksel Testler, Değişken Özeti, Playground); otomatik 8-saniye ilerleme; tıklanabilir navigasyon noktaları (●○○○); geçen süre sayacı
 - **CDN Reachability Check** — Google Fonts ve Bootstrap Icons iş ağında bloke olunca düşüş kalmıyor; conditional loading ile graceful fallback
 - **Playground WoE + LR** — Logistic Regression (statsmodels) için StandardScaler otomatik atlanıyor, sm.Logit doğrudan WoE değerlerine uygulanıyor
 - **Train/Test Split** — Otomatik stratify (target ≤10 unique değerse)

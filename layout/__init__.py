@@ -32,9 +32,8 @@ def build_navbar():
             # ── Brand + Top-level nav links ──
             html.Div([
                 html.Div([
-                    html.Span("EDA", className="navbar-logo-text"),
-                    html.Span("LAB", className="navbar-brand-title"),
-                ], style={"display": "flex", "alignItems": "baseline", "gap": "0.4rem"}),
+                    html.Span("ACUITY", className="navbar-brand-title"),
+                ], style={"display": "flex", "alignItems": "center"}),
                 html.Div([
                     html.Button("Geliştirme", id="btn-nav-gelistirme", n_clicks=0,
                                 className="top-nav-link active"),
@@ -46,7 +45,7 @@ def build_navbar():
             ], style={"display": "flex", "alignItems": "center"}),
             # ── Right side ──
             html.Div([
-                html.Span("Keşifsel Veri Analizi", className="navbar-subtitle"),
+                html.Span("CLARITY IN COMPLEXITY", className="navbar-subtitle"),
                 html.Button(
                     html.I(className="bi bi-question-circle"),
                     id="btn-help-open",
@@ -121,7 +120,7 @@ def _faq_item(q: str, bullets: list[str], level: str = "warning") -> "html.Div":
 def _build_help_tab() -> "html.Div":
     return html.Div([
         html.Div([
-            html.Span("EDA Lab", style={"fontWeight": "700", "color": "#4F8EF7"}),
+            html.Span("Acuity", style={"fontWeight": "700", "color": "#4F8EF7"}),
             html.Span("  ·  Yardım & Referans", style={"color": "#7e8fa4"}),
         ], style={"fontSize": "0.9rem", "marginBottom": "1.5rem",
                   "borderBottom": "1px solid #2d3a4f", "paddingBottom": "0.75rem"}),
@@ -1741,14 +1740,14 @@ def build_main():
 def _build_slideshow_modal():
     """Veri yüklenirken gösterilen eğitim slayt gösterisi modalı."""
     slides = [
-        # Slide 0 — EDA Lab nedir?
+        # Slide 0 — Acuity nedir?
         html.Div([
-            html.H4("EDA Lab Nedir?", className="slide-title"),
+            html.H4("Acuity Nedir?", className="slide-title"),
             html.P(
-                "EDA Lab, veri bilimciler ve analistler için tasarlanmış "
-                "interaktif bir keşifsel veri analizi platformudur. "
-                "Verilerinizi yükleyin, otomatik profilleme ile hızlıca tanıyın "
-                "ve model kurmadan önce değişkenlerinizi derinlemesine inceleyin.",
+                "Acuity, veri bilimciler ve analistler için tasarlanmış "
+                "interaktif bir model yaşam döngüsü platformudur. "
+                "Verilerinizi yükleyin, otomatik profilleme ile hızlıca tanıyın, "
+                "model kurun, izleyin ve büyük veri setlerini toplu olarak skorlayın.",
                 className="slide-text",
             ),
             html.Div([

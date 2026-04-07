@@ -68,11 +68,11 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     handlers=[
-        logging.FileHandler("logs/eda_lab.log", encoding="utf-8"),
+        logging.FileHandler("logs/acuity.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
-logging.getLogger(__name__).info("EDA Laboratuvarı başlatılıyor…")
+logging.getLogger(__name__).info("Acuity başlatılıyor…")
 # ─────────────────────────────────────────────────────────────────────────────
 
 import threading
