@@ -1,6 +1,6 @@
 # EDA Laboratuvarı
 
-Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA, model geliştirme ve model izleme aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
+Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA, model geliştirme, model izleme ve skorlama aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
 
 ---
 
@@ -32,6 +32,27 @@ Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel,
 | **Göç Matrisi** | Referans vs izleme rating geçiş heatmap'i (ID eşleştirmeli) |
 
 Her tab **Trend** (dönem dropdown + trend grafiği) ve **Kümülatif** (tüm dönemlerin birleşik sonucu) alt sekmelerinden oluşur.
+
+### Skorlama (Model Scoring)
+
+| Alt Tab | İçerik |
+|---------|--------|
+| **Tekli Skorlama** | Tek CSV/Parquet/SQL tablosu yükle → skorla → sonuçları SQL'e yaz |
+| **Toplu Skorlama** | Büyük veri setleri için chunk'lı skorlama (SQL veya çoklu dosya kaynağı) |
+
+**Tekli Skorlama:** Model pickle + opsiyonel OPT pickle yüklenir, tek dosya/SQL tablosu skorlanır, sonuç SQL'e yazılır. İşlem bitince tüm veri bellekten silinir.
+
+**Toplu Skorlama:** 5M+ satırlık veriler için tasarlanmıştır. Bellekte aynı anda sadece 1 chunk bulunur.
+
+- **SQL kaynağı** — `pd.read_sql(chunksize=N)` ile otomatik chunk'lara böler
+- **Dosya kaynağı** — Birden fazla CSV/Parquet dosyasını sırayla işler
+- **Background thread** — Chunk oku → skorla → SQL'e yaz → sonraki chunk (İzleme pattern'i ile aynı)
+- **Progress modal** — Anlık ilerleme, adım bilgisi, geçen süre
+- **Tahmini süre** — Veri büyüklüğüne göre başlamadan önce tahmini süre gösterir
+- **Rehber modal** — Toplu skorlamanın nasıl çalıştığını açıklayan bilgi butonu
+- **WoE dönüşümü** — Sadece OPT pickle yüklendiğinde aktif; yüklenmezse ham değerlerle skorlanır
+- **Bellek temizliği** — Skorlama bitince (başarılı/hatalı/iptal) tüm session verisi silinir
+- **Hedef SQL yazma** — `fast_executemany=True` ile ~10x hızlı insert; ilk chunk `replace`, sonrakiler `append`
 
 ### Veri Kaynakları
 - **MS SQL Server** — Windows Authentication, `config.toml` üzerinden bağlantı
@@ -207,6 +228,27 @@ Referans (SQL/CSV) ──┐
 
 **Artımlı güncelleme:** Profil yüklendiğinde SQL'den `WHERE tarih > last_period` ile sadece yeni satırlar çekilir, yeni dönemlerin özetleri hesaplanıp mevcut listeye eklenir.
 
+### Skorlama tarafı
+
+```
+Tab 1 — Tekli Skorlama          Tab 2 — Toplu Skorlama
+─────────────────────            ──────────────────────────
+CSV/Parquet/SQL → df             SQL tablo (chunk'lı) veya çoklu dosya
+       │                                │
+ model.pkl + opt.pkl              model.pkl + opt.pkl
+       │                                │
+   skorla (WoE?)                  ┌─ chunk 1 → skorla → SQL yaz ─┐
+       │                          ├─ chunk 2 → skorla → SQL yaz  │ background
+   SQL'e yaz                      ├─ chunk 3 → skorla → SQL yaz  │ thread
+       │                          └─ ...                         ─┘
+   bellek temizle                       │
+                                  bellek temizle (finally)
+```
+
+**Bellek politikası:** Skorlama tek seferlik bir iştir — veriye başka bir işlem uygulanmaz. SQL yazma tamamlanınca (başarılı/hatalı/iptal) model, veri ve config dahil tüm session verisi bellekten silinir. Geliştirme/İzleme tabları bellek baskısı hissetmez.
+
+**Toplu skorlama chunk stratejisi:** `pd.read_sql(chunksize=N)` iterator döndürür — bellekte aynı anda sadece 1 chunk bulunur. Hedef SQL'e `fast_executemany=True` ile yazılır.
+
 ---
 
 ## Kurulum
@@ -267,7 +309,6 @@ EDA-LAB/
 ├── app.py                  # Giriş noktası (23 satır)
 ├── app_instance.py         # Dash app tanımı — tek yer
 ├── server_state.py         # Paylaşılan state (_SERVER_STORE, _PRECOMPUTE_PROGRESS, _MON_STORE)
-├── benchmark.py            # Performans test scripti
 ├── setup_deps.py           # Otomatik bağımlılık yükleyici
 ├── pip_prefix.txt          # Kurumsal pip prefix (opsiyonel)
 ├── config.toml             # DB bağlantı ayarları
@@ -277,7 +318,8 @@ EDA-LAB/
 │   └── loader.py           # SQL bağlantısı
 ├── layout/
 │   ├── __init__.py         # build_layout() — sidebar, tab yapıları, store'lar
-│   └── izleme.py           # İzleme sekmesi layout'u (config, tab'lar, progress modal)
+│   ├── izleme.py           # İzleme sekmesi layout'u (config, tab'lar, progress modal)
+│   └── skorlama.py         # Skorlama sekmesi layout'u (tekli + toplu, iki tab)
 ├── callbacks/
 │   ├── __init__.py         # Tüm modülleri import eder (kayıt tetikler)
 │   ├── data_loading.py     # CSV/SQL yükleme, config, segment
@@ -293,6 +335,10 @@ EDA-LAB/
 │   ├── playground.py       # Grafik + Hızlı Model + SHAP
 │   ├── results.py          # Sonuç sekmesi — detaylı model raporu
 │   ├── profile.py          # Profil kaydet/yükle/sil + model kaydet/yükle
+│   ├── skorlama/           # ── Skorlama modülü ──
+│   │   ├── __init__.py     # Alt modül import'ları
+│   │   ├── callbacks.py    # Tekli skorlama callback'leri (model yükle, skorla, SQL'e yaz)
+│   │   └── batch.py        # Toplu skorlama callback'leri (background thread, progress, chunk skorlama)
 │   └── izleme/             # ── İzleme modülü ──
 │       ├── __init__.py     # Alt modül import'ları
 │       ├── compute.py      # Hesaplama motoru (ref/dönem özeti, kümülatif, background thread)
@@ -331,6 +377,21 @@ EDA-LAB/
 
 ## Değişiklik Geçmişi
 
+### v2.1 — Skorlama (Model Scoring)
+- **Skorlama Sekmesi** — Tekli ve Toplu olmak üzere iki tab'lı skorlama sistemi; İzleme pattern'i ile projeye entegre
+- **Tekli Skorlama (Tab 1)** — CSV/Parquet/SQL yükle → model pickle ile skorla → SQL'e yaz; 10 callback
+- **Toplu Skorlama (Tab 2)** — 5M+ satır için chunk'lı background thread skorlama; SQL veya çoklu dosya kaynağı; 9 callback
+- **Chunk Stratejisi** — `pd.read_sql(chunksize=N)` ile bellekte aynı anda sadece 1 chunk; `fast_executemany=True` ile ~10x hızlı SQL yazma
+- **WoE Dönüşümü** — OPT pickle yüklendiğinde otomatik aktif; yüklenmezse ham değerlerle skorlama
+- **Bellek Temizliği** — Her iki tab'da skorlama + SQL yazma bitince tüm session verisi (model, veri, config) bellekten silinir
+- **Progress Modal** — Background thread ilerlemesi anlık gösterilir; adım bilgisi, progress bar, geçen süre
+- **Tahmini Süre** — Veri büyüklüğü ve kolon sayısına göre başlamadan önce tahmini süre hesaplanır
+- **Rehber Modal** — Toplu skorlamanın nasıl çalıştığını açıklayan bilgi butonu + modal
+- **Bağlan & Önizle** — SQL kaynağında `SELECT TOP 1` + `COUNT(*)` ile kolon doğrulama ve chunk sayısı hesabı
+- **Sticky Navbar** — Navbar scroll'da sabit kalır (`position: sticky`)
+- **Değişken Özeti Fixed Headers** — Playground'daki değişken özeti tablosunda kolon başlıkları sabit
+- **benchmark.py silindi** — Artık kullanılmıyordu
+
 ### v2.0 — İzleme (Model Monitoring)
 - **İzleme Sekmesi** — Canlıya alınmış modellerin dönemsel performans takibi; Referans + İzleme veri yükleme, tek tıkla yapılandırma
 - **6 Metrik Tabı** — PSI (Değişken + Rating), Gini/KS, Temerrüt Oranı, HHI, Backtesting (Binomial Test), Göç Matrisi
@@ -363,7 +424,6 @@ EDA-LAB/
 - **OPT Pickle Bugfix** — Eski 2-tuple WoE cache formatında `_opt_dict` boş geliyordu; `_build_woe_dataset` ile yeniden hesaplanarak düzeltildi
 - **SmLogitWrapper** — statsmodels Logit sonucu modül düzeyinde sarmalanarak pickle uyumlu hale getirildi
 - **Describe Sekmesi** — Profiling sekmesi "Describe" olarak yeniden adlandırıldı
-- **Sticky Navbar** — Sekme navigasyonu sabitlendi, scroll ile kaybolmaz
 
 ### v1.5
 - **Loading Slideshow** — 8 eğitim slaytı (EDA Lab nedir, Veri Yükleme, Önizleme, Target & IV, Deep Dive, İstatistiksel Testler, Değişken Özeti, Playground); otomatik 8-saniye ilerleme; tıklanabilir navigasyon noktaları (●○○○); geçen süre sayacı
@@ -394,7 +454,6 @@ EDA-LAB/
 - **PSI bin düzeltmesi** — PSI artık WOE ile aynı bin sınırlarını kullanır; bin sayısı ve aralıklar birebir eşleşir, x ekseni numerik sırayla görünür
 - **Korelasyon çiftleri** — |r| < 0.60 çiftler tabloda gösterilmez, gürültü azaltıldı
 - **Benchmark testi** — 5.7M satır veri seti üzerinde tüm modüller ölçüldü, sonuçlar README'ye eklendi
-- `benchmark.py` scripti eklendi
 
 ### v1.1
 - **Outlier Analizi sekmesi** eklendi (IQR / Z-score, müşteri bazında detay tablosu)
