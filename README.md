@@ -1,4 +1,4 @@
-# EDA Laboratuvarı
+# EDA Lab
 
 Kredi riski ve ikili sınıflandırma problemleri için geliştirilmiş **yerel, interaktif EDA, model geliştirme, model izleme ve skorlama aracı**. Dash + Plotly tabanlı, tamamen Python ile çalışır. Hiçbir veri dışarı çıkmaz.
 
