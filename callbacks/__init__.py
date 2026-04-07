@@ -19,3 +19,6 @@ from callbacks import (
 # İzleme (Monitoring) callback'leri — tamamen bağımsız
 from callbacks.izleme import nav as _mon_nav, data as _mon_data, profile as _mon_profile
 from callbacks.izleme import tabs as _mon_tabs
+
+# Skorlama callback'leri
+from callbacks.skorlama import callbacks as _skorlama_cb

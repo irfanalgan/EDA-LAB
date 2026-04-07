@@ -65,8 +65,9 @@ body {
     border-bottom: 1px solid var(--border-subtle) !important;
     box-shadow: 0 1px 12px rgba(0,0,0,0.3);
     padding: 0.55rem 0 !important;
-    position: relative;
-    z-index: 100;
+    position: sticky !important;
+    top: 0;
+    z-index: 1030;
 }
 .navbar::after {
     content: "";

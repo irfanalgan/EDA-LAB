@@ -4,6 +4,7 @@ import dash_bootstrap_components as dbc
 from utils.chart_helpers import _tab_info
 from utils.config import get_database_config
 from layout.izleme import build_izleme_container
+from layout.skorlama import build_skorlama_container
 
 _DB_CFG = get_database_config()
 
@@ -39,6 +40,8 @@ def build_navbar():
                                 className="top-nav-link active"),
                     html.Button("İzleme", id="btn-nav-izleme", n_clicks=0,
                                 className="top-nav-link"),
+                    html.Button("Skorlama", id="btn-nav-skorlama", n_clicks=0,
+                                className="top-nav-link"),
                 ], style={"display": "flex", "gap": "0.2rem", "marginLeft": "1.5rem"}),
             ], style={"display": "flex", "alignItems": "center"}),
             # ── Right side ──
@@ -72,7 +75,9 @@ def build_navbar():
         ], fluid=True, style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"}),
         color="#111827",
         dark=True,
-        style={"borderBottom": "1px solid #232d3f", "padding": "0.6rem 0"},
+        sticky="top",
+        style={"borderBottom": "1px solid #232d3f", "padding": "0.6rem 0",
+               "zIndex": 1030},
     )
 
 
@@ -1355,8 +1360,7 @@ def build_main():
                     html.Div("Değişken Özeti (IV önizleme — Değişken Özeti sekmesinden hesaplandıysa gösterilir)",
                              className="form-hint", style={"marginBottom": "0.4rem"}),
                     html.Div(id="pg-var-summary-preview",
-                             style={"maxHeight": "200px", "overflowY": "auto",
-                                    "border": "1px solid #2d3a4f", "borderRadius": "6px"}),
+                             style={"border": "1px solid #2d3a4f", "borderRadius": "6px"}),
                 ], className="mb-3"),
 
                 dbc.Row([
@@ -1966,6 +1970,9 @@ def build_layout():
 
         # ── İzleme container (yeni — bağımsız) ──
         build_izleme_container(),
+
+        # ── Skorlama container ──
+        build_skorlama_container(),
 
         # ── Geliştirme Store'ları ──
         dcc.Store(id="store-key", storage_type="memory"),

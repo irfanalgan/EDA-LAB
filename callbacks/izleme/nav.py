@@ -22,32 +22,35 @@ _SIDEBAR_CLOSED_STYLE = {"maxWidth": "0", "overflow": "hidden", "opacity": "0",
                           "transition": "opacity 0.2s ease-in-out, max-width 0.3s ease-in-out"}
 
 
-# ── Üst seviye Geliştirme / İzleme toggle ────────────────────────────────────
+# ── Üst seviye Geliştirme / İzleme / Skorlama toggle ────────────────────────
+_TABS = ["gelistirme", "izleme", "skorlama"]
+_SHOW = {"display": "block"}
+_HIDE = {"display": "none"}
+_ACT  = "top-nav-link active"
+_PAS  = "top-nav-link"
+
 @app.callback(
-    Output("container-gelistirme", "style"),
-    Output("container-izleme", "style"),
-    Output("btn-nav-gelistirme", "className"),
-    Output("btn-nav-izleme", "className"),
-    Input("btn-nav-gelistirme", "n_clicks"),
-    Input("btn-nav-izleme", "n_clicks"),
+    [Output(f"container-{t}", "style") for t in _TABS]
+    + [Output(f"btn-nav-{t}", "className") for t in _TABS],
+    [Input(f"btn-nav-{t}", "n_clicks") for t in _TABS],
     prevent_initial_call=True,
 )
-def toggle_top_section(n_gel, n_izl):
+def toggle_top_section(*args):
     ctx = dash.callback_context.triggered_id
-    if ctx == "btn-nav-izleme":
-        return (
-            {"display": "none"},
-            {"display": "block"},
-            "top-nav-link",
-            "top-nav-link active",
-        )
-    # default: Geliştirme aktif
-    return (
-        {"display": "block"},
-        {"display": "none"},
-        "top-nav-link active",
-        "top-nav-link",
-    )
+    styles = []
+    classes = []
+    for t in _TABS:
+        if f"btn-nav-{t}" == ctx:
+            styles.append(_SHOW)
+            classes.append(_ACT)
+        else:
+            styles.append(_HIDE)
+            classes.append(_PAS)
+    # Hiçbiri tetiklemediyse default: geliştirme
+    if not any(s == _SHOW for s in styles):
+        styles = [_SHOW, _HIDE, _HIDE]
+        classes = [_ACT, _PAS, _PAS]
+    return tuple(styles + classes)
 
 
 # ── İzleme sidebar toggle ───────────────────────────────────────────────────
