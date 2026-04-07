@@ -61,5 +61,11 @@ VERI_KAYNAKLARI_NOTU.md
 # Log dosyaları
 logs/
 
+# Manuel / PDF çıktıları
+generate_manual_pdf.py
+EDA_Lab_Kullanici_Manueli.pdf
+_arial*.ttf
+eda_lab_v2_blueprint.*
+
 # Claude Code (yerel ayarlar)
 .claude/
