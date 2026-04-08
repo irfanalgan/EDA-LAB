@@ -29,7 +29,7 @@ _A = {"padding": "0.4rem 0.75rem", "fontSize": "0.78rem"}
 # ── Yardimci fonksiyonlar ────────────────────────────────────────────────────
 def _build_alchemy_conn(server, database, driver):
     drv = driver.replace(" ", "+") if driver else "ODBC+Driver+18+for+SQL+Server"
-    return f"mssql+pyodbc://{server}/{database}?trusted_connection=yes&driver={drv}"
+    return f"mssql+pyodbc://{server}/{database}?trusted_connection=yes&driver={drv}&TrustServerCertificate=yes"
 
 
 def _score_chunk(df, model, scaler, model_vars, tab, opt_dict):

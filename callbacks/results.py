@@ -1484,6 +1484,11 @@ def save_opt_pickle(_, key, profile_name, active_tab):
     if not opt_dict:
         return dbc.Alert("OPT verisi bulunamadı.", color="warning", style=_A)
 
+    # Sadece modelde kullanılan değişkenlerin optb nesnelerini kaydet
+    model_vars = results.get("model_vars", [])
+    if model_vars:
+        opt_dict = {k: v for k, v in opt_dict.items() if k in model_vars}
+
     from utils.config import get_profiles_root
     algo = results.get("algo", "model")
     profile_dir = get_profiles_root() / "gelistirme" / profile_name

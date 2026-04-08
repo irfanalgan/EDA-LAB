@@ -364,7 +364,7 @@ def push_to_sql(n_clicks, key, server, database, driver, table_name):
         from sqlalchemy import create_engine
         drv = driver.replace(" ", "+") if driver else "ODBC+Driver+18+for+SQL+Server"
         conn_str = (f"mssql+pyodbc://{server}/{database}"
-                    f"?trusted_connection=yes&driver={drv}")
+                    f"?trusted_connection=yes&driver={drv}&TrustServerCertificate=yes")
         engine = create_engine(conn_str)
         with engine.connect() as conn:
             result_df.to_sql(
