@@ -1,4 +1,4 @@
-"""Acuity — Yönetici Sunum Slaytı (Neden Kullanmalıyız?)"""
+"""Calibris — Yönetici Sunum Slaytı (Neden Kullanmalıyız?)"""
 
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -92,7 +92,7 @@ _dark_bg(s)
 
 _accent_line(s, Inches(4.5), Inches(1.8), Inches(4.3))
 _tb(s, Inches(2), Inches(2.2), Inches(9.3), Inches(1),
-    "Acuity", sz=44, color=WHITE, bold=True, align=PP_ALIGN.CENTER)
+    "Calibris", sz=44, color=WHITE, bold=True, align=PP_ALIGN.CENTER)
 _tb(s, Inches(2), Inches(3.3), Inches(9.3), Inches(0.7),
     "Kredi Riski Modellemede Uçtan Uca Analiz Platformu",
     sz=20, color=ACCENT_LT, align=PP_ALIGN.CENTER)
@@ -136,13 +136,13 @@ for i, (icon, title, desc) in enumerate(problems):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  SLAYT 3 — ACUITY NE SUNUYOR?
+#  SLAYT 3 — CALIBRIS NE SUNUYOR?
 # ═════════════════════════════════════════════════════════════════════════════
 s = prs.slides.add_slide(prs.slide_layouts[6])
 _dark_bg(s)
 
 _tb(s, Inches(0.8), Inches(0.5), Inches(10), Inches(0.7),
-    "Acuity Ne Sunuyor?", sz=32, color=WHITE, bold=True)
+    "Calibris Ne Sunuyor?", sz=32, color=WHITE, bold=True)
 _accent_line(s, Inches(0.8), Inches(1.15), Inches(3))
 _tb(s, Inches(0.8), Inches(1.5), Inches(11), Inches(0.5),
     "Veri keşfinden model izlemeye kadar tüm süreci tek platformda birleştirir.",
@@ -284,6 +284,6 @@ _tb(s, Inches(2), Inches(6.3), Inches(9.3), Inches(0.5),
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-out = "outputs/Acuity_Sunum.pptx"
+out = "outputs/Calibris_Sunum.pptx"
 prs.save(out)
 print(f"Sunum olusturuldu: {out}")

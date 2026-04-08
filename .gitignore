@@ -63,7 +63,7 @@ logs/
 
 # Manuel / PDF çıktıları
 generate_manual_pdf.py
-Acuity_Kullanici_Manueli.pdf
+Calibris_Kullanici_Manueli.pdf
 _arial*.ttf
 eda_lab_v2_blueprint.*
 

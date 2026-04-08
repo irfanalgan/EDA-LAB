@@ -1,4 +1,4 @@
-# Acuity — Teknik Bakim Manueli
+# Calibris — Teknik Bakim Manueli
 
 > Bu dokuman, sistemde bir sorun oldugunda veya degisiklik yapilmasi gerektiginde
 > hizlica mudahale edebilmeniz icin hazirlanmistir.

@@ -32,7 +32,7 @@ def build_navbar():
             # ── Brand + Top-level nav links ──
             html.Div([
                 html.Div([
-                    html.Span("ACUITY", className="navbar-brand-title"),
+                    html.Span("CALIBRIS", className="navbar-brand-title"),
                 ], style={"display": "flex", "alignItems": "center"}),
                 html.Div([
                     html.Button("Geliştirme", id="btn-nav-gelistirme", n_clicks=0,
@@ -120,7 +120,7 @@ def _faq_item(q: str, bullets: list[str], level: str = "warning") -> "html.Div":
 def _build_help_tab() -> "html.Div":
     return html.Div([
         html.Div([
-            html.Span("Acuity", style={"fontWeight": "700", "color": "#4F8EF7"}),
+            html.Span("Calibris", style={"fontWeight": "700", "color": "#4F8EF7"}),
             html.Span("  ·  Yardım & Referans", style={"color": "#7e8fa4"}),
         ], style={"fontSize": "0.9rem", "marginBottom": "1.5rem",
                   "borderBottom": "1px solid #2d3a4f", "paddingBottom": "0.75rem"}),
@@ -1740,11 +1740,11 @@ def build_main():
 def _build_slideshow_modal():
     """Veri yüklenirken gösterilen eğitim slayt gösterisi modalı."""
     slides = [
-        # Slide 0 — Acuity nedir?
+        # Slide 0 — Calibris nedir?
         html.Div([
-            html.H4("Acuity Nedir?", className="slide-title"),
+            html.H4("Calibris Nedir?", className="slide-title"),
             html.P(
-                "Acuity, veri bilimciler ve analistler için tasarlanmış "
+                "Calibris, veri bilimciler ve analistler için tasarlanmış "
                 "interaktif bir model yaşam döngüsü platformudur. "
                 "Verilerinizi yükleyin, otomatik profilleme ile hızlıca tanıyın, "
                 "model kurun, izleyin ve büyük veri setlerini toplu olarak skorlayın.",
