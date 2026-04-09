@@ -704,9 +704,9 @@ def render_deep_dive_content(col, psi_split, dtype_override, active_data_tab, dd
             dcc.Graph(figure=fig_psi, config={"displayModeBar": False}),
             html.Div([
                 html.Span("PSI Eşikleri: ", style={"color": "#7e8fa4", "fontSize": "0.73rem"}),
-                html.Span("< 0.10 Stabil  · ", style={"color": "#10b981", "fontSize": "0.73rem"}),
-                html.Span("0.10–0.25 Hafif Kayma  · ", style={"color": "#f59e0b", "fontSize": "0.73rem"}),
-                html.Span("> 0.25 Kritik Kayma", style={"color": "#ef4444", "fontSize": "0.73rem"}),
+                html.Span("≤ 0.10 Stabil  · ", style={"color": "#10b981", "fontSize": "0.73rem"}),
+                html.Span("0.10–0.20 Hafif Kayma  · ", style={"color": "#f59e0b", "fontSize": "0.73rem"}),
+                html.Span("> 0.20 Kritik Kayma", style={"color": "#ef4444", "fontSize": "0.73rem"}),
             ], style={"marginTop": "0.5rem"}),
         ], className="mb-4")
 

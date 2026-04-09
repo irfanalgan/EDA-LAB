@@ -134,9 +134,9 @@ def calc_psi(base: np.ndarray, comp: np.ndarray,
 
 
 def psi_label(psi_val: float) -> str:
-    if psi_val < 0.10:
+    if psi_val <= 0.10:
         return "Stabil"
-    if psi_val < 0.25:
+    if psi_val <= 0.20:
         return "Hafif Kayma"
     return "Kritik Kayma"
 

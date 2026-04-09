@@ -117,6 +117,9 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
     # ── Öneri mantığı ────────────────────────────────────────────────────────
+    # Tut ✅ : PSI ≤ 0.10, IV ≥ 0.10, Korr ≤ 0.70, Eksik ≤ 60%
+    # İncele ⚠️: PSI 0.10–0.20, IV 0.08–0.10, Korr 0.70–0.80, Eksik 60–70%
+    # Çıkar ❌ : PSI > 0.20, IV < 0.08, Korr > 0.80, Eksik > 70%
     def _recommend_with_reason(row):
         iv_val    = row["IV"]
         eksik_val = row["Eksik %"]
@@ -124,37 +127,39 @@ def compute_var_summary_table(config, key, seg_col, seg_val):
         corr_val  = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
 
         cik_reasons = []
-        if iv_val < 0.02:
-            cik_reasons.append(f"IV={iv_val:.4f}<0.02")
-        if eksik_val > 60.0:
-            cik_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
-        if psi_val is not None and psi_val > 0.25:
-            cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
+        if iv_val < 0.08:
+            cik_reasons.append(f"IV={iv_val:.4f}<0.08")
+        if eksik_val > 70.0:
+            cik_reasons.append(f"Eksik={eksik_val:.1f}%>70%")
+        if psi_val is not None and psi_val > 0.20:
+            cik_reasons.append(f"PSI={psi_val:.4f}>0.20")
+        if corr_val is not None and abs(corr_val) > 0.80:
+            cik_reasons.append(f"|Korr|={abs(corr_val):.4f}>0.80")
 
         if cik_reasons:
-            return "3 ❌ Çıkar", "; ".join(cik_reasons)
+            return "3 ❌", "; ".join(cik_reasons)
 
         inc_reasons = []
         if iv_val < 0.10:
             inc_reasons.append(f"IV={iv_val:.4f}<0.10")
-        if eksik_val > 20.0:
-            inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
+        if eksik_val > 60.0:
+            inc_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
         if psi_val is not None and psi_val > 0.10:
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
-        if corr_val is not None and abs(corr_val) >= 0.80:
-            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}≥0.80")
+        if corr_val is not None and abs(corr_val) > 0.70:
+            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}>0.70")
 
         if inc_reasons:
-            return "2 ⚠️ İncele", "; ".join(inc_reasons)
+            return "2 ⚠️", "; ".join(inc_reasons)
 
-        return "1 ✅ Tut", "—"
+        return "1 ✅", "—"
 
     summary[["Öneri", "Sebep"]] = summary.apply(
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
 
     # Sıralama: Tut > İncele > Çıkar
-    _oneri_order = {"1 ✅ Tut": 0, "2 ⚠️ İncele": 1, "3 ❌ Çıkar": 2}
+    _oneri_order = {"1 ✅": 0, "2 ⚠️": 1, "3 ❌": 2}
     summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
     summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
     summary = summary.reset_index(drop=True)
@@ -232,38 +237,40 @@ def compute_var_summary_raw(config, key, seg_col, seg_val):
         log.debug("Raw target korelasyonu hesaplanamadı: %s", e)
     summary["Korr (Target)"] = summary["Değişken"].map(lambda v: corr_map.get(v, "—"))
 
-    # ── Öneri mantığı (aynı) ──────────────────────────────────────────────
+    # ── Öneri mantığı (aynı eşikler) ────────────────────────────────────────
     def _recommend_with_reason(row):
         iv_val = row["IV"]
         eksik_val = row["Eksik %"]
         psi_val = row["PSI Değeri"] if isinstance(row["PSI Değeri"], (int, float)) else None
         corr_val = row["Korr (Target)"] if isinstance(row["Korr (Target)"], (int, float)) else None
         cik_reasons = []
-        if iv_val < 0.02:
-            cik_reasons.append(f"IV={iv_val:.4f}<0.02")
-        if eksik_val > 60.0:
-            cik_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
-        if psi_val is not None and psi_val > 0.25:
-            cik_reasons.append(f"PSI={psi_val:.4f}>0.25")
+        if iv_val < 0.08:
+            cik_reasons.append(f"IV={iv_val:.4f}<0.08")
+        if eksik_val > 70.0:
+            cik_reasons.append(f"Eksik={eksik_val:.1f}%>70%")
+        if psi_val is not None and psi_val > 0.20:
+            cik_reasons.append(f"PSI={psi_val:.4f}>0.20")
+        if corr_val is not None and abs(corr_val) > 0.80:
+            cik_reasons.append(f"|Korr|={abs(corr_val):.4f}>0.80")
         if cik_reasons:
-            return "3 ❌ Çıkar", "; ".join(cik_reasons)
+            return "3 ❌", "; ".join(cik_reasons)
         inc_reasons = []
         if iv_val < 0.10:
             inc_reasons.append(f"IV={iv_val:.4f}<0.10")
-        if eksik_val > 20.0:
-            inc_reasons.append(f"Eksik={eksik_val:.1f}%>20%")
+        if eksik_val > 60.0:
+            inc_reasons.append(f"Eksik={eksik_val:.1f}%>60%")
         if psi_val is not None and psi_val > 0.10:
             inc_reasons.append(f"PSI={psi_val:.4f}>0.10")
-        if corr_val is not None and abs(corr_val) >= 0.80:
-            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}>=0.80")
+        if corr_val is not None and abs(corr_val) > 0.70:
+            inc_reasons.append(f"|Korr|={abs(corr_val):.4f}>0.70")
         if inc_reasons:
-            return "2 ⚠️ İncele", "; ".join(inc_reasons)
-        return "1 ✅ Tut", "—"
+            return "2 ⚠️", "; ".join(inc_reasons)
+        return "1 ✅", "—"
 
     summary[["Öneri", "Sebep"]] = summary.apply(
         lambda r: pd.Series(_recommend_with_reason(r)), axis=1
     )
-    _oneri_order = {"1 ✅ Tut": 0, "2 ⚠️ İncele": 1, "3 ❌ Çıkar": 2}
+    _oneri_order = {"1 ✅": 0, "2 ⚠️": 1, "3 ❌": 2}
     summary["_sort"] = summary["Öneri"].map(_oneri_order).fillna(3)
     summary = summary.sort_values(["_sort", "IV"], ascending=[True, False]).drop(columns="_sort")
     summary = summary.reset_index(drop=True)
@@ -371,11 +378,11 @@ def _compute_filtered_set(summary, filters, corr_matrix, use_woe):
 def _render_var_summary(summary, use_woe, selected_vars=None):
     """Cache'den veya taze hesaplamadan gelen summary DataFrame'ini HTML'e çevirir."""
     style_conditions = [
-        {"if": {"filter_query": '{Öneri} = "1 ✅ Tut"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
-        {"if": {"filter_query": '{Öneri} = "2 ⚠️ İncele"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
-        {"if": {"filter_query": '{Öneri} = "3 ❌ Çıkar"',  "column_id": "Öneri"}, "color": "#ef4444", "fontWeight": "700"},
-        {"if": {"filter_query": '{Öneri} = "2 ⚠️ İncele"', "column_id": "Sebep"}, "color": "#f59e0b"},
-        {"if": {"filter_query": '{Öneri} = "3 ❌ Çıkar"',  "column_id": "Sebep"}, "color": "#ef4444"},
+        {"if": {"filter_query": '{Öneri} = "1 ✅"',    "column_id": "Öneri"}, "color": "#10b981", "fontWeight": "700"},
+        {"if": {"filter_query": '{Öneri} = "2 ⚠️"', "column_id": "Öneri"}, "color": "#f59e0b", "fontWeight": "600"},
+        {"if": {"filter_query": '{Öneri} = "3 ❌"',  "column_id": "Öneri"}, "color": "#ef4444", "fontWeight": "700"},
+        {"if": {"filter_query": '{Öneri} = "2 ⚠️"', "column_id": "Sebep"}, "color": "#f59e0b"},
+        {"if": {"filter_query": '{Öneri} = "3 ❌"',  "column_id": "Sebep"}, "color": "#ef4444"},
         {"if": {"filter_query": '{PSI Durumu} = "Kritik Kayma"',  "column_id": "PSI Durumu"}, "color": "#ef4444"},
         {"if": {"filter_query": '{PSI Durumu} = "Hafif Kayma"',   "column_id": "PSI Durumu"}, "color": "#f59e0b"},
         {"if": {"filter_query": '{PSI Durumu} = "Stabil"',        "column_id": "PSI Durumu"}, "color": "#10b981"},
@@ -387,9 +394,9 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
         {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"},
     ]
 
-    n_cik = (summary["Öneri"] == "3 ❌ Çıkar").sum()
-    n_inc = (summary["Öneri"] == "2 ⚠️ İncele").sum()
-    n_tut = (summary["Öneri"] == "1 ✅ Tut").sum()
+    n_cik = (summary["Öneri"] == "3 ❌").sum()
+    n_inc = (summary["Öneri"] == "2 ⚠️").sum()
+    n_tut = (summary["Öneri"] == "1 ✅").sum()
 
     tsv = summary.to_csv(sep="\t", index=False)
 
@@ -438,17 +445,17 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
             ], className="metric-card"), width=3),
         ], className="mb-4"),
         dbc.Tooltip(
-            "Tüm kriterler tatmin edici:\nIV ≥ 0.10, Eksik ≤ 20%, PSI ≤ 0.10, |Korr| < 0.80",
+            "Tüm kriterler tatmin edici:\nIV ≥ 0.10 · Eksik ≤ 60% · PSI ≤ 0.10 · |Korr| ≤ 0.70",
             target="card-tut", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
         dbc.Tooltip(
-            "En az bir zayıf sinyal var:\nIV 0.02–0.10 · Eksik 20–60%\nPSI 0.10–0.25 · |Korr| ≥ 0.80",
+            "En az bir zayıf sinyal var:\nIV 0.08–0.10 · Eksik 60–70%\nPSI 0.10–0.20 · |Korr| 0.70–0.80",
             target="card-incele", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
         dbc.Tooltip(
-            "Kritik sorun tespit edildi:\nIV < 0.02 · Eksik > 60% · PSI > 0.25",
+            "Kritik sorun tespit edildi:\nIV < 0.08 · Eksik > 70% · PSI > 0.20 · |Korr| > 0.80",
             target="card-cikar", placement="top",
             style={"whiteSpace": "pre-line", "fontSize": "0.78rem"},
         ),
@@ -469,13 +476,14 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
             selected_rows=selected_rows,
             sort_action="native",
             filter_action="native",
-            page_size=25,
+            page_action="none",
+            fixed_rows={"headers": True},
             tooltip_header={
                 "Değişken":    {"value": "Değişkenin adı", "type": "markdown"},
                 "Öneri":       {"value": "IV, Eksik%, PSI ve Korelasyona göre otomatik öneri:\n"
-                                         "- **✅ Tut** — Tüm kriterler tatmin edici\n"
-                                         "- **⚠️ İncele** — En az bir zayıf sinyal var\n"
-                                         "- **❌ Çıkar** — Kritik sorun tespit edildi", "type": "markdown"},
+                                         "- **✅** Tut — Tüm kriterler tatmin edici\n"
+                                         "- **⚠️** İncele — En az bir zayıf sinyal var\n"
+                                         "- **❌** Çıkar — Kritik sorun tespit edildi", "type": "markdown"},
                 "Sebep":       {"value": "Önerinin gerekçesi — hangi kural(lar) tetiklendi", "type": "markdown"},
                 "IV":          {"value": "**Information Value** — binary target ile doğrusal olmayan ilişki gücü\n\n"
                                          "| Aralık | Güç |\n|---|---|\n"
@@ -495,9 +503,9 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
                                           "- Yüksek |r| → güçlü doğrusal ilişki", "type": "markdown"},
                 "PSI Değeri":   {"value": "**Population Stability Index** — veri dağılımının zaman içinde kayması\n\n"
                                           "| PSI | Durum |\n|---|---|\n"
-                                          "| < 0.10 | Stabil |\n"
-                                          "| 0.10–0.25 | Hafif Kayma |\n"
-                                          "| > 0.25 | Kritik Kayma |", "type": "markdown"},
+                                          "| ≤ 0.10 | Stabil |\n"
+                                          "| 0.10–0.20 | Hafif Kayma |\n"
+                                          "| > 0.20 | Kritik Kayma |", "type": "markdown"},
                 "PSI Durumu":   {"value": "PSI değerine göre stabilite etiketi", "type": "markdown"},
                 "Eksik %":     {"value": "Değişkendeki boş (null/NaN) değerlerin yüzdesi\n\n"
                                          "- **> 60%** → Çıkar\n- **20–60%** → İncele", "type": "markdown"},
@@ -506,7 +514,7 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
             },
             tooltip_delay=0,
             tooltip_duration=None,
-            style_table={"overflowX": "auto"},
+            style_table={"overflowX": "auto", "maxHeight": "680px", "overflowY": "auto"},
             style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
                           "fontWeight": "600", "fontSize": "0.72rem",
                           "border": "1px solid #2d3a4f", "textTransform": "uppercase",
@@ -523,6 +531,11 @@ def _render_var_summary(summary, use_woe, selected_vars=None):
                           "padding: 2px 6px; font-size: 0.75rem;"},
                  {"selector": ".dash-filter input::placeholder",
                   "rule": "color: #4a5568 !important;"}],
+            style_cell_conditional=[
+                {"if": {"column_id": "Öneri"},   "width": "70px", "minWidth": "70px", "maxWidth": "70px", "textAlign": "center"},
+                {"if": {"column_id": "Değişken"}, "width": "180px", "minWidth": "140px"},
+                {"if": {"column_id": "Sebep"},   "width": "200px", "minWidth": "140px"},
+            ],
             style_data_conditional=style_conditions,
         ),
     ])

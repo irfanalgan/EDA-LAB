@@ -1534,3 +1534,18 @@ input[id^="vs-filter-"][type="number"] {
     height: 30px !important;
     padding: 0.2rem 0.4rem !important;
 }
+
+/* ── P > 0.05 kaldır butonu ──────────────────────────────────────────────── */
+.btn-pv-drop {
+    background: transparent;
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    font-size: 0.72rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.btn-pv-drop:hover {
+    background: rgba(239, 68, 68, 0.12);
+}

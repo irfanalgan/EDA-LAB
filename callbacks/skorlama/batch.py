@@ -207,6 +207,11 @@ def upload_batch_opt(contents, filename, key):
         return dbc.Alert("OPT pickle dict formatinda olmali.", color="danger", style=_A)
 
     if key:
+        bundle = _BATCH_STORE.get(key + "_bundle")
+        if bundle:
+            model_vars = bundle.get("model_vars", [])
+            if model_vars:
+                opt_dict = {k: v for k, v in opt_dict.items() if k in model_vars}
         _BATCH_STORE[key + "_opt"] = opt_dict
     return dbc.Alert(f"OPT yuklendi — {len(opt_dict)} degisken", color="info", style=_A)
 

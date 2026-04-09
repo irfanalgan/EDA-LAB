@@ -584,7 +584,6 @@ def update_preview(config, expert_excluded, thresholds, key):
             f"İlk 50 satır gösteriliyor  ·  Toplam aktif kayıt: {len(df_active):,}",
             style={"fontSize": "0.75rem", "color": "#7e8fa4", "marginTop": "0.5rem"},
         ),
-        threshold_panel,
         expert_panel,
         _build_screen_report(key, df_active, config, expert_excluded,
                              thresholds=current_thresholds, seg_val=seg_val),

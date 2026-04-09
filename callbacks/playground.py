@@ -447,6 +447,58 @@ def pg_remove_all(_):
     return []
 
 
+# ── Playground: Katsayı tablosu checkbox → Dropdown deselect ─────────────────
+@app.callback(
+    Output("pg-var-dropdown", "value", allow_duplicate=True),
+    Input({"type": "pg-coef-table", "index": ALL}, "selected_rows"),
+    State({"type": "pg-coef-table", "index": ALL}, "data"),
+    State({"type": "pg-coef-table", "index": ALL}, "id"),
+    State("pg-var-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def update_vars_from_coef_table(all_sel_rows, all_data, all_ids, current_vars):
+    triggered = dash.ctx.triggered_id
+    if not triggered or not current_vars:
+        return dash.no_update
+
+    # Hangi tablo tetiklendi?
+    sel_rows = data = None
+    for sr, d, tid in zip(all_sel_rows, all_data, all_ids):
+        if tid == triggered:
+            sel_rows, data = sr, d
+            break
+    if sel_rows is None or data is None:
+        return dash.no_update
+
+    # Seçilmemiş satırların _orig_var değerleri → çıkarılacak değişkenler
+    all_indices = set(range(len(data)))
+    unchecked = all_indices - set(sel_rows)
+    if not unchecked:
+        return dash.no_update  # hepsi seçili, değişiklik yok
+
+    remove_vars = {data[i]["_orig_var"] for i in unchecked
+                   if "_orig_var" in data[i] and data[i]["_orig_var"] != "__const__"}
+    if not remove_vars:
+        return dash.no_update
+
+    new_vars = [v for v in current_vars if v not in remove_vars]
+    return new_vars
+
+
+# ── Playground: P > 0.05 kaldır butonu ───────────────────────────────────────
+@app.callback(
+    Output({"type": "pg-coef-table", "index": MATCH}, "selected_rows"),
+    Input({"type": "btn-pg-drop-pv", "index": MATCH}, "n_clicks"),
+    State({"type": "pg-coef-table", "index": MATCH}, "data"),
+    prevent_initial_call=True,
+)
+def drop_high_pvalue(_, data):
+    if not data:
+        return dash.no_update
+    return [i for i, row in enumerate(data)
+            if row.get("P-Value", 0) <= 0.05]
+
+
 # ── Playground: Model dropdown'ı (sabit — binary classification) ──────────────
 @app.callback(
     Output("pg-model-type", "options"),
@@ -784,45 +836,58 @@ def _run_model_pipeline(model_vars, key, config, model_type,
         # ── Önem tablosu verisini oluştur ─────────────────────────────────────
         if not is_tree:
             has_pvalues = _use_sm_logit and hasattr(mdl, "pvalues")
+            coef_rows = []
             if has_pvalues:
                 const_coef = float(mdl.params.get("const", 0.0))
                 const_pv   = float(mdl.pvalues.get("const", np.nan))
-                coef_rows = [{"Değişken": "const",
-                              "Katsayı": round(const_coef, 4),
-                              "P-Value": round(const_pv, 4)}]
-            else:
-                coef_rows = []
+                coef_rows.append({"Değişken": "const",
+                                  "_orig_var": "__const__",
+                                  "Katsayı": round(const_coef, 4),
+                                  "P-Value": round(const_pv, 4)})
             # pvalues index'i const + x1,x2... olabilir (numpy input)
             # sıralı eşleştir: pvalues[1:] ↔ X.columns
             _pv_vals = list(mdl.pvalues.values)[1:] if has_pvalues else []
             for i, (c, v) in enumerate(zip(X.columns, mdl.coef_[0])):
+                orig = c
+                for mv in model_vars:
+                    if c == mv or c.startswith(mv + "_"):
+                        orig = mv
+                        break
                 row = {"Değişken": disp_names.get(c, c),
+                       "_orig_var": orig,
                        "Katsayı":  round(float(v), 4)}
                 if has_pvalues and i < len(_pv_vals):
                     row["P-Value"] = round(float(_pv_vals[i]), 4)
                 coef_rows.append(row)
-            imp_records = coef_rows
             # const üstte, geri kalan abs sıralı
-            imp_df = pd.DataFrame(coef_rows)
-            if has_pvalues and len(imp_df) > 1:
-                const_part = imp_df.iloc[:1]
-                var_part   = imp_df.iloc[1:].sort_values("Katsayı", key=abs, ascending=False)
-                imp_df = pd.concat([const_part, var_part], ignore_index=True)
-            else:
-                imp_df = imp_df.sort_values("Katsayı", key=abs, ascending=False)
-            imp_records = imp_df.to_dict("records")
+            const_part = [r for r in coef_rows if r["_orig_var"] == "__const__"]
+            var_part = sorted([r for r in coef_rows if r["_orig_var"] != "__const__"],
+                              key=lambda r: abs(r["Katsayı"]), reverse=True)
+            coef_rows = const_part + var_part
+            # downstream için temiz (const dahil, _orig_var hariç)
+            imp_records = [{k: v for k, v in r.items() if k != "_orig_var"} for r in coef_rows]
+            var_rows_for_table = coef_rows  # _orig_var dahil — DataTable'da kullanılacak
             importance_type = "coef"
         else:
             raw_imp = mdl.feature_importances_
             total   = raw_imp.sum() or 1.0
-            imp_rows = [
-                {"Değişken": disp_names.get(c, c),
-                 "Önem (%)": round(float(v / total * 100), 2),
-                 "Önem (ham)": round(float(v), 4)}
-                for c, v in zip(X.columns, raw_imp)
-            ]
-            imp_df = pd.DataFrame(imp_rows).sort_values("Önem (%)", ascending=False)
-            imp_records = imp_df.to_dict("records")
+            coef_rows = []
+            for c, v in zip(X.columns, raw_imp):
+                orig = c
+                for mv in model_vars:
+                    if c == mv or c.startswith(mv + "_"):
+                        orig = mv
+                        break
+                coef_rows.append({
+                    "Değişken": disp_names.get(c, c),
+                    "_orig_var": orig,
+                    "Önem (%)": round(float(v / total * 100), 2),
+                    "Önem (ham)": round(float(v), 4),
+                })
+            coef_rows.sort(key=lambda r: r["Önem (%)"], reverse=True)
+            imp_records = [{k: v for k, v in r.items() if k != "_orig_var"} for r in coef_rows]
+            var_rows_for_table = coef_rows
+            has_pvalues = False
             importance_type = "feature_importance"
 
         # ── SHAP Beeswarm → base64 PNG ────────────────────────────────────────
@@ -945,8 +1010,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 html.Div(f"{title} Gini", style={"color": "#8892a4", "fontSize": "0.72rem"}),
             ], className="metric-card"), width=3))
 
-        # Katsayı / importance tablosu (tüm değişkenler)
-        all_imp = imp_records
+        # Katsayı / importance tablosu (tüm değişkenler — checkbox'lu)
+        _label_key = "woe" if label == "WoE" else "raw"
         _tbl_style_mini = dict(
             style_table={"overflowX": "auto"},
             style_header={"backgroundColor": "#161d2e", "color": "#a8b2c2",
@@ -959,8 +1024,29 @@ def _run_model_pipeline(model_vars, key, config, model_type,
                 {"if": {"row_index": "odd"}, "backgroundColor": "#1a2035"}
             ],
         )
-        mini_cols = [{"name": k, "id": k} for k in all_imp[0].keys()] if all_imp else []
+        mini_cols = [{"name": k, "id": k}
+                     for k in var_rows_for_table[0].keys()
+                     if k != "_orig_var"] if var_rows_for_table else []
         mini_tbl_title = "Katsayı Tablosu (özet)" if importance_type == "coef" else "Feature Importance (özet)"
+
+        # selected_rows: const hariç tüm satırlar (const tiksiz görünür)
+        _sel_rows = [i for i, r in enumerate(var_rows_for_table)
+                     if r.get("_orig_var") != "__const__"]
+
+        # P > 0.05 kaldır butonu (sadece LR + p-value varsa)
+        _pv_btn_el = html.Div()
+        if importance_type == "coef" and has_pvalues:
+            _n_high_pv = sum(1 for r in var_rows_for_table
+                             if r.get("P-Value", 0) > 0.05
+                             and r.get("_orig_var") != "__const__")
+            if _n_high_pv > 0:
+                _pv_btn_el = html.Div(
+                    html.Button(
+                        f"P > 0.05 kaldır ({_n_high_pv})",
+                        id={"type": "btn-pg-drop-pv", "index": _label_key},
+                        className="btn-pv-drop",
+                        n_clicks=0),
+                    style={"marginBottom": "0.4rem"})
 
         compact_html = html.Div([
             html.Div(f"{split_info}   ·   {thr_label}",
@@ -969,7 +1055,15 @@ def _run_model_pipeline(model_vars, key, config, model_type,
             dbc.Row(gini_cards, className="g-2 mb-3"),
             html.P(mini_tbl_title, className="section-title",
                    style={"marginBottom": "0.4rem"}),
-            dash_table.DataTable(data=all_imp, columns=mini_cols, **_tbl_style_mini),
+            _pv_btn_el,
+            dash_table.DataTable(
+                id={"type": "pg-coef-table", "index": _label_key},
+                data=var_rows_for_table,
+                columns=mini_cols,
+                row_selectable="multi",
+                selected_rows=_sel_rows,
+                **_tbl_style_mini,
+            ),
             html.Div([
                 html.Span("ℹ ", style={"color": "#4F8EF7"}),
                 html.Span("Detaylı sonuçlar için "),
@@ -1181,7 +1275,7 @@ def _run_model_pipeline(model_vars, key, config, model_type,
         },
         "_models": {"raw": raw_mdl, "woe": woe_mdl if woe_feat_cols else None},
         "_scalers": {"raw": raw_scaler, "woe": woe_scaler if woe_feat_cols else None},
-        "_opt_dict": _opt_dict,
+        "_opt_dict": {k: v for k, v in _opt_dict.items() if k in model_vars},
         "_split_masks": {
             "train": train_mask.tolist(),
             "test": test_mask.tolist(),
