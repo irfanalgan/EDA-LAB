@@ -1396,6 +1396,7 @@ def apply_null_strategies_to_store(_, strategy_values, strategy_ids):
 @app.callback(
     Output("pg-model-output", "children", allow_duplicate=True),
     Output("store-model-signal", "data", allow_duplicate=True),
+    Output("store-loaded-model-index", "data", allow_duplicate=True),
     Input("btn-pg-build", "n_clicks"),
     State("store-pg-model-vars",       "data"),
     State("chk-use-woe",               "value"),
@@ -1450,7 +1451,7 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
     _no = dash.no_update
     if not model_vars or not key or not config:
         return html.Div("Model listesi boş veya konfigürasyon eksik.",
-                        className="alert-info-custom"), _no
+                        className="alert-info-custom"), _no, _no
 
     algo = model_type or "lr"
     is_lr = algo == "lr"
@@ -1506,13 +1507,14 @@ def build_pg_model(_, model_vars, use_woe, test_size_pct, default_null_strategy,
             if df_active[c].isna().any():
                 col_strategies[c] = _default
 
-    return _run_model_pipeline(
+    result = _run_model_pipeline(
         model_vars, key, config, model_type,
         threshold_method, threshold_val,
         pending_note, col_strategies=col_strategies,
         target_sel=target_sel,
         custom_params=custom_params,
     )
+    return result[0], result[1], None
 
 
 # ── Model Parametreleri: accordion göster/gizle ─────────────────────────────

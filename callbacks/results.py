@@ -1439,10 +1439,12 @@ def save_model_pickle(_, key, profile_name, active_tab):
     }
 
     from utils.config import get_profiles_root
+    from datetime import datetime as _dt
     suffix = "_woe" if tab_key == "woe" else "_raw"
     profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
-    pkl_path = profile_dir / f"{algo}_model{suffix}.pkl"
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    pkl_path = profile_dir / f"{algo}_model{suffix}_{ts}.pkl"
     with open(pkl_path, "wb") as f:
         pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -1490,10 +1492,12 @@ def save_opt_pickle(_, key, profile_name, active_tab):
         opt_dict = {k: v for k, v in opt_dict.items() if k in model_vars}
 
     from utils.config import get_profiles_root
+    from datetime import datetime as _dt
     algo = results.get("algo", "model")
     profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
-    pkl_path = profile_dir / f"{algo}_opt_binning.pkl"
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    pkl_path = profile_dir / f"{algo}_opt_binning_{ts}.pkl"
     with open(pkl_path, "wb") as f:
         pickle.dump(opt_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -2632,6 +2636,11 @@ def export_results_excel(_, filename, active_tab, key, profile_name):
     profile_dir = get_profiles_root() / "gelistirme" / profile_name
     profile_dir.mkdir(parents=True, exist_ok=True)
     xl_path = profile_dir / f"{fname}.xlsx"
+    if xl_path.exists():
+        n = 2
+        while (profile_dir / f"{fname}_{n}.xlsx").exists():
+            n += 1
+        xl_path = profile_dir / f"{fname}_{n}.xlsx"
     wb.save(xl_path)
     return dbc.Alert(f"✓ Excel kaydedildi → {xl_path.name}",
                      color="success", style=_A)
