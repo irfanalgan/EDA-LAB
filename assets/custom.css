@@ -450,6 +450,16 @@ select.form-select {
 .dark-dd[class*="__menu-list"]::-webkit-scrollbar-thumb,
 .dark-dd[class*="-MenuList"]::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
 
+/* ── Uzun açılır liste — pg-var-dropdown (dd-tall) ─────────────────────── */
+.dd-tall [class*="__menu-list"],
+.dd-tall [class*="-MenuList"],
+.dd-tall .Select-menu-outer,
+.dd-tall .Select-menu { max-height: 400px !important; }
+/* Dash 4.0 kendi bileşeni — scoped + ID-bazlı */
+.dd-tall .dash-dropdown-options,
+#pg-var-dropdown .dash-dropdown-options { max-height: 400px !important; }
+#pg-var-dropdown .dash-dropdown-content { max-height: 480px !important; }
+
 /* ── Option rows ───────────────────────────────────────────────────────── */
 .dark-dd.Select__option,
 .dark-dd.Select-option,

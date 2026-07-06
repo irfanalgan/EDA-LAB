@@ -580,7 +580,8 @@ def show_model_panel(profile_name):
 # ── Yardımcı: Model entry oluştur ────────────────────────────────────────────
 def _build_model_entry(profile_name, model_vars, model_type, test_size,
                        c_val, thr_method, thr_val, pg_target,
-                       split_method, split_date, key, filters=None):
+                       split_method, split_date, key, filters=None,
+                       algo_params=None):
     """Kayıt için model_entry dict oluştur."""
     from datetime import datetime
     algo_labels = {"lr": "LR", "lgbm": "LGBM", "xgb": "XGB", "rf": "RF"}
@@ -609,6 +610,7 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
             "pg_target": pg_target,
             "split_method": split_method,
             "split_date": split_date,
+            "algo_params": algo_params or {},
         },
     }
     if filters:
@@ -648,6 +650,27 @@ def _build_model_entry(profile_name, model_vars, model_type, test_size,
     State("vs-filter-missing-val", "value"),
     State("vs-filter-test-mono", "value"),
     State("vs-filter-oot-mono", "value"),
+    # LGBM parametreleri
+    State("pg-lgbm-n-estimators",      "value"),
+    State("pg-lgbm-learning-rate",     "value"),
+    State("pg-lgbm-num-leaves",        "value"),
+    State("pg-lgbm-max-depth",         "value"),
+    State("pg-lgbm-min-child-samples", "value"),
+    State("pg-lgbm-reg-alpha",         "value"),
+    State("pg-lgbm-reg-lambda",        "value"),
+    State("pg-lgbm-subsample",         "value"),
+    State("pg-lgbm-colsample-bytree",  "value"),
+    State("pg-lgbm-scale-pos-weight",  "value"),
+    # XGBoost parametreleri
+    State("pg-xgb-n-estimators",       "value"),
+    State("pg-xgb-learning-rate",      "value"),
+    State("pg-xgb-max-depth",          "value"),
+    State("pg-xgb-min-child-weight",   "value"),
+    State("pg-xgb-subsample",          "value"),
+    State("pg-xgb-colsample-bytree",   "value"),
+    State("pg-xgb-reg-alpha",          "value"),
+    State("pg-xgb-reg-lambda",         "value"),
+    State("pg-xgb-scale-pos-weight",   "value"),
     prevent_initial_call=True,
 )
 def save_model_cb(_, profile_name, model_vars, model_type, test_size,
@@ -655,8 +678,28 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
                   split_date, key, loaded_idx,
                   f_iv_op, f_iv_val, f_ct_op, f_ct_val,
                   f_cv_op, f_cv_val, f_psi_op, f_psi_val,
-                  f_miss_op, f_miss_val, f_test_mono, f_oot_mono):
+                  f_miss_op, f_miss_val, f_test_mono, f_oot_mono,
+                  lgbm_n, lgbm_lr, lgbm_leaves, lgbm_depth, lgbm_mcs,
+                  lgbm_ra, lgbm_rl, lgbm_sub, lgbm_col, lgbm_spw,
+                  xgb_n, xgb_lr, xgb_depth, xgb_mcw, xgb_sub,
+                  xgb_col, xgb_ra, xgb_rl, xgb_spw):
     c_val = 1.0
+    algo_params = {
+        "lgbm": {
+            "n_estimators": lgbm_n, "learning_rate": lgbm_lr,
+            "num_leaves": lgbm_leaves, "max_depth": lgbm_depth,
+            "min_child_samples": lgbm_mcs, "reg_alpha": lgbm_ra,
+            "reg_lambda": lgbm_rl, "subsample": lgbm_sub,
+            "colsample_bytree": lgbm_col, "scale_pos_weight": lgbm_spw,
+        },
+        "xgb": {
+            "n_estimators": xgb_n, "learning_rate": xgb_lr,
+            "max_depth": xgb_depth, "min_child_weight": xgb_mcw,
+            "subsample": xgb_sub, "colsample_bytree": xgb_col,
+            "reg_alpha": xgb_ra, "reg_lambda": xgb_rl,
+            "scale_pos_weight": xgb_spw,
+        },
+    }
     filters = {
         "iv_op": f_iv_op, "iv_val": f_iv_val,
         "corr_target_op": f_ct_op, "corr_target_val": f_ct_val,
@@ -698,7 +741,8 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     # Yeni model → direkt kaydet
     entry = _build_model_entry(profile_name, model_vars, model_type, test_size,
                                c_val, thr_method, thr_val, pg_target,
-                               split_method, split_date, key, filters=filters)
+                               split_method, split_date, key, filters=filters,
+                               algo_params=algo_params)
     try:
         _save_model_to_profile(profile_name, entry)
         new_opts = _list_saved_models(profile_name)
@@ -749,6 +793,27 @@ def save_model_cb(_, profile_name, model_vars, model_type, test_size,
     State("vs-filter-missing-val", "value"),
     State("vs-filter-test-mono", "value"),
     State("vs-filter-oot-mono", "value"),
+    # LGBM parametreleri
+    State("pg-lgbm-n-estimators",      "value"),
+    State("pg-lgbm-learning-rate",     "value"),
+    State("pg-lgbm-num-leaves",        "value"),
+    State("pg-lgbm-max-depth",         "value"),
+    State("pg-lgbm-min-child-samples", "value"),
+    State("pg-lgbm-reg-alpha",         "value"),
+    State("pg-lgbm-reg-lambda",        "value"),
+    State("pg-lgbm-subsample",         "value"),
+    State("pg-lgbm-colsample-bytree",  "value"),
+    State("pg-lgbm-scale-pos-weight",  "value"),
+    # XGBoost parametreleri
+    State("pg-xgb-n-estimators",       "value"),
+    State("pg-xgb-learning-rate",      "value"),
+    State("pg-xgb-max-depth",          "value"),
+    State("pg-xgb-min-child-weight",   "value"),
+    State("pg-xgb-subsample",          "value"),
+    State("pg-xgb-colsample-bytree",   "value"),
+    State("pg-xgb-reg-alpha",          "value"),
+    State("pg-xgb-reg-lambda",         "value"),
+    State("pg-xgb-scale-pos-weight",   "value"),
     prevent_initial_call=True,
 )
 def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
@@ -756,8 +821,28 @@ def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
                        split_method, split_date, key, loaded_idx,
                        f_iv_op, f_iv_val, f_ct_op, f_ct_val,
                        f_cv_op, f_cv_val, f_psi_op, f_psi_val,
-                       f_miss_op, f_miss_val, f_test_mono, f_oot_mono):
+                       f_miss_op, f_miss_val, f_test_mono, f_oot_mono,
+                       lgbm_n, lgbm_lr, lgbm_leaves, lgbm_depth, lgbm_mcs,
+                       lgbm_ra, lgbm_rl, lgbm_sub, lgbm_col, lgbm_spw,
+                       xgb_n, xgb_lr, xgb_depth, xgb_mcw, xgb_sub,
+                       xgb_col, xgb_ra, xgb_rl, xgb_spw):
     c_val = 1.0
+    algo_params = {
+        "lgbm": {
+            "n_estimators": lgbm_n, "learning_rate": lgbm_lr,
+            "num_leaves": lgbm_leaves, "max_depth": lgbm_depth,
+            "min_child_samples": lgbm_mcs, "reg_alpha": lgbm_ra,
+            "reg_lambda": lgbm_rl, "subsample": lgbm_sub,
+            "colsample_bytree": lgbm_col, "scale_pos_weight": lgbm_spw,
+        },
+        "xgb": {
+            "n_estimators": xgb_n, "learning_rate": xgb_lr,
+            "max_depth": xgb_depth, "min_child_weight": xgb_mcw,
+            "subsample": xgb_sub, "colsample_bytree": xgb_col,
+            "reg_alpha": xgb_ra, "reg_lambda": xgb_rl,
+            "scale_pos_weight": xgb_spw,
+        },
+    }
     filters = {
         "iv_op": f_iv_op, "iv_val": f_iv_val,
         "corr_target_op": f_ct_op, "corr_target_val": f_ct_val,
@@ -772,7 +857,8 @@ def overwrite_model_cb(_, profile_name, model_vars, model_type, test_size,
 
     entry = _build_model_entry(profile_name, model_vars, model_type, test_size,
                                c_val, thr_method, thr_val, pg_target,
-                               split_method, split_date, key, filters=filters)
+                               split_method, split_date, key, filters=filters,
+                               algo_params=algo_params)
     try:
         _save_model_to_profile(profile_name, entry, overwrite_index=loaded_idx)
         new_opts = _list_saved_models(profile_name)
@@ -829,6 +915,27 @@ def cancel_overwrite(_):
     Output("vs-filter-missing-val", "value", allow_duplicate=True),
     Output("vs-filter-test-mono", "value", allow_duplicate=True),
     Output("vs-filter-oot-mono", "value", allow_duplicate=True),
+    # LGBM parametre output'ları
+    Output("pg-lgbm-n-estimators",      "value", allow_duplicate=True),
+    Output("pg-lgbm-learning-rate",     "value", allow_duplicate=True),
+    Output("pg-lgbm-num-leaves",        "value", allow_duplicate=True),
+    Output("pg-lgbm-max-depth",         "value", allow_duplicate=True),
+    Output("pg-lgbm-min-child-samples", "value", allow_duplicate=True),
+    Output("pg-lgbm-reg-alpha",         "value", allow_duplicate=True),
+    Output("pg-lgbm-reg-lambda",        "value", allow_duplicate=True),
+    Output("pg-lgbm-subsample",         "value", allow_duplicate=True),
+    Output("pg-lgbm-colsample-bytree",  "value", allow_duplicate=True),
+    Output("pg-lgbm-scale-pos-weight",  "value", allow_duplicate=True),
+    # XGBoost parametre output'ları
+    Output("pg-xgb-n-estimators",       "value", allow_duplicate=True),
+    Output("pg-xgb-learning-rate",      "value", allow_duplicate=True),
+    Output("pg-xgb-max-depth",          "value", allow_duplicate=True),
+    Output("pg-xgb-min-child-weight",   "value", allow_duplicate=True),
+    Output("pg-xgb-subsample",          "value", allow_duplicate=True),
+    Output("pg-xgb-colsample-bytree",   "value", allow_duplicate=True),
+    Output("pg-xgb-reg-alpha",          "value", allow_duplicate=True),
+    Output("pg-xgb-reg-lambda",         "value", allow_duplicate=True),
+    Output("pg-xgb-scale-pos-weight",   "value", allow_duplicate=True),
     Input("btn-model-load", "n_clicks"),
     State("store-profile-loaded", "data"),
     State("dd-saved-models", "value"),
@@ -836,7 +943,7 @@ def cancel_overwrite(_):
 )
 def load_model_cb(_, profile_name, model_index):
     no = dash.no_update
-    _N = 24  # 12 eski + 12 filtre
+    _N = 43  # 12 eski + 12 filtre + 19 algo params
     if not profile_name or model_index is None:
         return (no,) * _N
 
@@ -852,6 +959,9 @@ def load_model_cb(_, profile_name, model_index):
     f = models[model_index].get("filters", {})
 
     mvars = p.get("model_vars", [])
+    ap = p.get("algo_params", {})
+    lg = ap.get("lgbm", {})
+    xg = ap.get("xgb", {})
     return (
         mvars,                             # pg-var-dropdown
         mvars,                             # store-pg-model-vars
@@ -879,6 +989,27 @@ def load_model_cb(_, profile_name, model_index):
         f.get("missing_val", no),
         f.get("test_mono", no),
         f.get("oot_mono", no),
+        # LGBM parametreleri
+        lg.get("n_estimators", no),
+        lg.get("learning_rate", no),
+        lg.get("num_leaves", no),
+        lg.get("max_depth", no),
+        lg.get("min_child_samples", no),
+        lg.get("reg_alpha", no),
+        lg.get("reg_lambda", no),
+        lg.get("subsample", no),
+        lg.get("colsample_bytree", no),
+        lg.get("scale_pos_weight", no),
+        # XGBoost parametreleri
+        xg.get("n_estimators", no),
+        xg.get("learning_rate", no),
+        xg.get("max_depth", no),
+        xg.get("min_child_weight", no),
+        xg.get("subsample", no),
+        xg.get("colsample_bytree", no),
+        xg.get("reg_alpha", no),
+        xg.get("reg_lambda", no),
+        xg.get("scale_pos_weight", no),
     )
 
 

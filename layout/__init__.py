@@ -1377,8 +1377,9 @@ def build_main():
                             multi=True,
                             searchable=True,
                             placeholder="Değişken ara ve seç…",
-                            className="dark-dd",
+                            className="dark-dd dd-tall",
                             style={"minHeight": "42px"},
+                            maxHeight=420,
                         ),
                     ], width=10),
                     dbc.Col([

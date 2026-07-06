@@ -18,13 +18,7 @@ from sklearn.metrics import (roc_auc_score, roc_curve, confusion_matrix,
 from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
 import xgboost as xgb
-import base64
-import io
-import shap
 import threading
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -890,58 +884,8 @@ def _run_model_pipeline(model_vars, key, config, model_type,
             has_pvalues = False
             importance_type = "feature_importance"
 
-        # ── SHAP Beeswarm → base64 PNG ────────────────────────────────────────
+        # SHAP Beeswarm kaldırıldı — sadece Feature Importance (özet) tablosu gösteriliyor
         shap_img_b64 = None
-        if is_tree:
-            try:
-                _X_shap_df = X_te if has_test and len(X_te) > 0 else (X_oot if has_oot and X_oot is not None else X_tr)
-                _shap_n    = len(_X_shap_df)
-                _X_shap    = _X_shap_df.values
-                explainer = shap.TreeExplainer(mdl)
-                shap_vals = explainer.shap_values(_X_shap)
-                if isinstance(shap_vals, list):
-                    shap_arr = shap_vals[1] if len(shap_vals) == 2 else shap_vals[0]
-                else:
-                    shap_arr = shap_vals
-
-                feat_names_shap = [disp_names.get(c, c) for c in X.columns]
-                top_n = min(20, shap_arr.shape[1])
-
-                _BG = "#0e1117"
-                _FG = "#c8cdd8"
-
-                plt.close("all")
-                shap.summary_plot(
-                    shap_arr, _X_shap,
-                    feature_names=feat_names_shap,
-                    max_display=top_n, show=False,
-                    plot_size=(9, max(4, top_n * 0.38)),
-                )
-                fig_mpl = plt.gcf()
-                fig_mpl.patch.set_facecolor(_BG)
-                ax_mpl  = fig_mpl.axes[0]
-                ax_mpl.set_facecolor(_BG)
-                ax_mpl.tick_params(colors=_FG, labelsize=9)
-                ax_mpl.xaxis.label.set_color(_FG)
-                ax_mpl.spines["bottom"].set_color("#2d3a4f")
-                ax_mpl.spines["top"].set_visible(False)
-                ax_mpl.spines["right"].set_visible(False)
-                ax_mpl.spines["left"].set_visible(False)
-                ax_mpl.axvline(0, color="#4a5568", linewidth=0.8, zorder=0)
-                for cax in fig_mpl.axes[1:]:
-                    cax.set_facecolor(_BG)
-                    cax.tick_params(colors=_FG, labelsize=8)
-                    cax.yaxis.label.set_color(_FG)
-
-                buf = io.BytesIO()
-                fig_mpl.savefig(buf, format="png", bbox_inches="tight",
-                                facecolor=_BG, dpi=130)
-                plt.close("all")
-                buf.seek(0)
-                shap_img_b64 = base64.b64encode(buf.read()).decode()
-            except Exception as e:
-                log.warning("SHAP grafiği oluşturulamadı: %s", e)
-                shap_img_b64 = None
 
         # ── Sonuçları serialize et (Sonuç sekmesi için) ───────────────────────
         def _m_dict(m):
@@ -1817,10 +1761,13 @@ def optuna_progress_tick(_, key):
     State("pg-model-type",             "value"),
     prevent_initial_call=True,
 )
-def accept_optuna_params(_, result, model_type):
+def accept_optuna_params(n_clicks, result, model_type):
     _nu = dash.no_update
     lgbm_defaults = [_nu] * 10
     xgb_defaults  = [_nu] * 9
+
+    if not n_clicks:  # buton dinamik eklenirken gelen fantom tetikleme
+        return *lgbm_defaults, *xgb_defaults
 
     if not result or not result.get("best_params"):
         return *lgbm_defaults, *xgb_defaults

@@ -12,6 +12,7 @@ from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 from app_instance import app
 from server_state import _SERVER_STORE, get_df as _get_df
@@ -27,6 +28,18 @@ _ADVELIM_THREAD: threading.Thread | None = None
 
 
 # ── Yardımcılar ──────────────────────────────────────────────────────────────
+
+def _coerce_numeric_raw(X):
+    """Ham matrisi ağaç modelin fit edebileceği sayısala çevir; kolon=değişken 1-1 korunur."""
+    out = {}
+    for c in X.columns:
+        s = X[c]
+        if pd.api.types.is_numeric_dtype(s):
+            out[c] = pd.to_numeric(s, errors="coerce")
+        else:  # object/kategorik → ordinal kod (NaN → NaN)
+            out[c] = s.astype("category").cat.codes.replace(-1, np.nan)
+    return pd.DataFrame(out, index=X.index)
+
 
 _METHOD_LABELS = {
     "gini": "Tekli Gini",
@@ -287,6 +300,8 @@ def start_advelim(n_clicks, active_vars, key, config, vs_tab,
             style={"color": "#f59e0b", "fontSize": "0.75rem"})
 
     X = train[cols].reset_index(drop=True)
+    if not use_woe:
+        X = _coerce_numeric_raw(X)
     y = raw_train[target].reset_index(drop=True)
 
     # Uyarı: çok fazla değişken
